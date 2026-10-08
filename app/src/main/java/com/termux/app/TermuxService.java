@@ -169,6 +169,7 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
         actionReleaseWakeLock(false);
         if (!mWantsToStop)
             killAllTermuxExecutionCommands();
+        JawnDot.hide(this);
         runStopForeground();
     }
 
@@ -194,6 +195,7 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
     private void runStartForeground() {
         setupNotificationChannel();
         startForeground(TermuxConstants.TERMUX_APP_NOTIFICATION_ID, buildNotification());
+        JawnDot.show(this);
     }
 
     /** Make service leave foreground mode. */
@@ -204,6 +206,7 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
     /** Request to stop service. */
     private void requestStopService() {
         Logger.logDebug(LOG_TAG, "Requesting to stop service");
+        JawnDot.hide(this);
         runStopForeground();
         stopSelf();
     }
