@@ -15,10 +15,13 @@ Purpose: host and supervise jawnos (the Perl app) on Android; see ../PLAN.md.
 
     JAVA_HOME=<jdk-11 dir> ANDROID_SDK_ROOT=<android-sdk dir> \
     TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=0 \
-      ./gradlew -p . :app:assembleDebug --no-daemon
+      ./gradlew -p . :app:assembleDebug --no-daemon --max-workers=4
 
 TERMUX_SPLIT_APKS_FOR_DEBUG_BUILDS=0 makes Gradle emit one universal APK
 instead of per-ABI split APKs; release builds default to a single APK.
+
+Cap Gradle at 4 workers (--max-workers=4): this laptop is shared with other
+work and a full-width build has crashed it (2026-10-10).
 
 ## Deltas round 2 (branding + dot + autostart + dashboard)
 
@@ -99,3 +102,16 @@ instead of per-ABI split APKs; release builds default to a single APK.
     BOOT_COMPLETED allows the FGS start), so after a reboot jawn's listener
     finds the daemon already running. Fully hands-free: boot -> daemon + jawn
     -> perl listener dials the bridge.
+
+## Deltas round 8 (the Stop button takes the tree down)
+
+16. JawnLauncher.stopJawn(): runs scripts/manager_killer.pl master through
+    login as a background task first, then sends ACTION_STOP_SERVICE 8 s
+    later. ACTION_STOP_SERVICE alone only SIGKILLs the terminal sessions --
+    the master's Ctrl+C handler never runs, so President.pl, the workers, the
+    BLE client and ollama all survived, the web UI stayed up after Stop, and
+    the master left over kept ~/.process_watch answering so the next Start
+    stood down (the phone ran hot for an hour, 2026-10-10). The killer task
+    is not killed by the service stop, so its sweeps always finish. Needs the
+    jawnos tree on the device to carry the matching manager_killer.pl (jawnos
+    commit 895847c: the "master" argument and the ollama service handling).

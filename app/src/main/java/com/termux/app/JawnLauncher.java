@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 
 import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_SERVICE;
@@ -72,9 +74,33 @@ public class JawnLauncher {
     }
 
     public static void stopJawn(Context context) {
-        Intent intent = new Intent(context, TermuxService.class);
-        intent.setAction(TERMUX_SERVICE.ACTION_STOP_SERVICE);
-        context.startService(intent);
+        // Take the tree down before stopping the service: ACTION_STOP_SERVICE
+        // only SIGKILLs the terminal sessions, which the master's Ctrl+C
+        // handler never sees, so President.pl, the workers, the BLE client and
+        // ollama all survived -- and a master left behind keeps
+        // ~/.process_watch answering, so the next Start stands down (2026-10-10:
+        // after Stop the web UI was still reachable and the phone ran hot).
+        // The killer rides the foreground service as a background task, which
+        // the service stop below does not kill, so its sweeps always finish.
+        final String dir = getJawnDirPath(context);
+        Intent killer = new Intent(context, TermuxService.class);
+        killer.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
+        killer.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
+        killer.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && perl ./scripts/manager_killer.pl master" });
+        killer.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
+        killer.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, true);
+        killer.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn-killer");
+        context.startForegroundService(killer);
+        // then put the service (and the dot) away; the killer has had its few
+        // seconds by now and finishes even after the service stops
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                Intent stop = new Intent(context, TermuxService.class);
+                stop.setAction(TERMUX_SERVICE.ACTION_STOP_SERVICE);
+                context.startService(stop);
+            }
+        }, 8000);
     }
 
     /** Read working_port from the jawn config.json, defaulting to 3000. */
