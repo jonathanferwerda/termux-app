@@ -15,7 +15,7 @@ import android.view.WindowManager;
 import com.termux.shared.logger.Logger;
 
 /**
- * The JawnOS status dot. A 12 dp overlay circle, bottom-left. Besides being a status
+ * The JawnOS status dot. A 12 dp overlay circle, top-left (out of the way of the keyboard). Besides being a status
  * light, the window keeps the whole app (and therefore every process of its UID,
  * including the jawn Perl workers) out of the restricted background cpuset that
  * Samsung phones apply to apps that are not visible. It works even with the screen
@@ -54,9 +54,9 @@ public class JawnDot {
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                         PixelFormat.TRANSLUCENT);
-                    lp.gravity = Gravity.BOTTOM | Gravity.START;
-                    lp.x = (int) (16 * density);
-                    lp.y = (int) (48 * density);
+                    lp.gravity = Gravity.TOP | Gravity.START;
+                    lp.x = (int) (2 * density);
+                    lp.y = (int) (2 * density);
                     Intent tap = new Intent(context, JawnDashboardActivity.class);
                     tap.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     final PendingIntent pi = PendingIntent.getActivity(context, 0, tap,

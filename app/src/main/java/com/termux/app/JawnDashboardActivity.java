@@ -86,6 +86,11 @@ public class JawnDashboardActivity extends Activity {
                 openOverlaySettings();
             }
         });
+        add(ll, "Grant device permissions", new Runnable() {
+            public void run() {
+                grantDevicePermissions();
+            }
+        });
         add(ll, "Save settings", new Runnable() {
             public void run() {
                 saveSettings();
@@ -120,6 +125,18 @@ public class JawnDashboardActivity extends Activity {
     private void openUi() {
         int port = JawnLauncher.getJawnPort(this);
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://127.0.0.1:" + port + "/manager")));
+    }
+
+    /** Launch the JawnOS API app's grant-all screen (it owns the device permissions). */
+    private void grantDevicePermissions() {
+        try {
+            Intent i = new Intent();
+            i.setClassName("com.termux.api", "com.termux.api.JawnGrantAllActivity");
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Throwable t) {
+            toast("JawnOS API app is not installed");
+        }
     }
 
     private void openOverlaySettings() {
