@@ -82,3 +82,13 @@ instead of per-ABI split APKs; release builds default to a single APK.
     JawnBleService (com.termux.api). Same shared UID, so the unexported service
     can be started from here; this is also the always-allowed foreground-
     service start path (the dashboard is visible).
+
+## Deltas round 6 (logo1 art)
+
+14. Launcher icons + the dashboard logo now come from ~/Downloads/logo1.png
+    (yellow doodle on black, the inverted variant of the original). The
+    generator (../tools/gen-icons.py) extracts the doodle with an alpha mask
+    from yellowness, so: adaptive background back to black (matches the logo),
+    legacy/round tiles are black with the doodle, and
+    res/drawable-nodpi/jawn_logo.png is the transparent doodle (sits on the
+    dashboard's dark panel without a white box).
