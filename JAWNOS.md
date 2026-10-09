@@ -92,3 +92,10 @@ instead of per-ABI split APKs; release builds default to a single APK.
     legacy/round tiles are black with the doodle, and
     res/drawable-nodpi/jawn_logo.png is the transparent doodle (sits on the
     dashboard's dark panel without a white box).
+
+## Deltas round 7 (hands-free BLE at boot)
+
+15. JawnBootReceiver also starts JawnBleService at boot (same shared UID;
+    BOOT_COMPLETED allows the FGS start), so after a reboot jawn's listener
+    finds the daemon already running. Fully hands-free: boot -> daemon + jawn
+    -> perl listener dials the bridge.
