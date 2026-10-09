@@ -64,3 +64,14 @@ instead of per-ABI split APKs; release builds default to a single APK.
     own; without the shim, jawn's children died with
     "bad interpreter: /usr/bin/perl" (President.pl has a #!/usr/bin/perl
     shebang; the console worked only because the app spawns it via login).
+
+## Deltas round 4 (boot quiet + dashboard logo)
+
+11. JawnLauncher.startJawnBackground(): boot autostart now runs jawn as a
+    background task (EXTRA_BACKGROUND=true) instead of a foreground session,
+    so a reboot no longer opens a console session with jawn's output. The
+    foreground service and dot are unaffected (TermuxService.onCreate and
+    onStartCommand call runStartForeground() in every mode). The dashboard
+    Start button still uses a foreground session.
+12. JawnDashboardActivity: the logo (res/drawable-nodpi/jawn_logo.png, from
+    the same logo.jpg as the launcher icons) is shown centred at the top.

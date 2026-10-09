@@ -5,13 +5,17 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.termux.R;
 
 /** Small control panel: start/stop jawn, open the UI and console, dot permission. */
 public class JawnDashboardActivity extends Activity {
@@ -25,6 +29,15 @@ public class JawnDashboardActivity extends Activity {
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
         ll.setPadding(30, 30, 30, 30);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.jawn_logo);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(150));
+        logoLp.gravity = Gravity.CENTER_HORIZONTAL;
+        logo.setLayoutParams(logoLp);
+        logo.setAdjustViewBounds(true);
+        ll.addView(logo);
 
         TextView title = new TextView(this);
         title.setTextSize(22);
@@ -127,6 +140,10 @@ public class JawnDashboardActivity extends Activity {
             }
         });
         ll.addView(b);
+    }
+
+    private int dp(int v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
     }
 
     private void toast(String s) {

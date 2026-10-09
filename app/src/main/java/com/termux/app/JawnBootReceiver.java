@@ -19,6 +19,6 @@ public class JawnBootReceiver extends BroadcastReceiver {
             Logger.logInfo(LOG_TAG, "Autostart disabled; not starting jawn");
             return;
         }
-        JawnLauncher.startJawn(context);
+        JawnLauncher.startJawnBackground(context);
     }
 }

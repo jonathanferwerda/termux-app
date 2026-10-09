@@ -43,8 +43,19 @@ public class JawnLauncher {
         return prefs(context).getBoolean(KEY_AUTOSTART, true);
     }
 
-    /** Start a foreground terminal session that runs ./jawn in the jawnos directory. */
+    /** Start jawn in the foreground as a terminal session (dashboard button). */
     public static void startJawn(Context context) {
+        startJawn(context, false);
+    }
+
+    /** Start jawn as a background task (boot autostart): the foreground service
+     *  and the dot still run, but no console session is created, so jawn's
+     *  output does not pop up in the console after a reboot. */
+    public static void startJawnBackground(Context context) {
+        startJawn(context, true);
+    }
+
+    private static void startJawn(Context context, boolean background) {
         String dir = getJawnDirPath(context);
         Intent intent = new Intent(context, TermuxService.class);
         intent.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
@@ -55,7 +66,7 @@ public class JawnLauncher {
         intent.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
         intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && exec perl ./jawn" });
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
-        intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, false);
+        intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, background);
         intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn");
         context.startForegroundService(intent);
     }
