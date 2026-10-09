@@ -23,13 +23,16 @@ instead of per-ABI split APKs; release builds default to a single APK.
 ## Deltas round 2 (branding + dot + autostart + dashboard)
 
 3. Branding: manifestPlaceholders TERMUX_APP_NAME = "JawnOS",
-   TERMUX_API_APP_NAME = "JawnOS API". Launcher icon regenerated from
-   jawnos neon/crown.svg into all mipmap densities (legacy + round + adaptive
-   foreground ic_launcher_fg); both mipmap-anydpi-v26 XMLs point at it.
+   TERMUX_API_APP_NAME = "JawnOS API". Launcher icon generated from the
+   GitHub logo (~/Downloads/logo.jpg; crop-detected yellow doodle on white)
+   into all mipmap densities (legacy + round + adaptive foreground
+   ic_launcher_fg); both mipmap-anydpi-v26 XMLs point at it.
 4. New classes in app/src/main/java/com/termux/app/:
    - JawnLauncher  prefs; start/stop jawn via TermuxService
-                   ACTION_SERVICE_EXECUTE (bash -lc 'cd <dir> && exec perl
-                   ./jawn'); reads working_port from config.json.
+                   ACTION_SERVICE_EXECUTE. Executes through $PREFIX/bin/login
+                   rather than bash directly (login exports the termux-exec
+                   LD_PRELOAD shim; see delta 10). Reads working_port from
+                   config.json.
    - JawnDot       12 dp TYPE_APPLICATION_OVERLAY circle, bottom-left, tap opens
                    the dashboard. Shown while TermuxService runs; keeps the app
                    (and the whole UID, incl. jawn workers) out of the restricted
@@ -43,3 +46,21 @@ instead of per-ABI split APKs; release builds default to a single APK.
    runStopForeground().
 7. Tools live in ../tools: apply-jawnos-edits.pl (generates edits 3,5,6 from
    upstream state), gen-icons.sh.
+
+## Deltas round 3 (icons + dashboard theme + login launch)
+
+8. Launcher icon source is now the GitHub logo (~/Downloads/logo.jpg).
+   Tools: ../tools/gen-icons.py (wrapped by gen-icons.sh) crop-detects the
+   doodle and writes every mipmap density. The adaptive icon background in
+   mipmap-anydpi-v26/*.xml is white to match the logo background.
+9. values/styles.xml: new Theme.Termux.JawnDashboard (dark Material,
+   windowBackground #FF1E1E1E); AndroidManifest sets it on
+   JawnDashboardActivity. Reason: Theme.Termux is a *Light* theme with a
+   black windowBackground (made for the terminal), so the dashboard's plain
+   text views rendered black-on-black and only buttons were visible.
+10. JawnLauncher executes $PREFIX/bin/login instead of bash. Termux's login
+    script exports LD_PRELOAD=$PREFIX/lib/libtermux-exec-ld-preload.so, and
+    the RUN_COMMAND path the dashboard uses does not go through login on its
+    own; without the shim, jawn's children died with
+    "bad interpreter: /usr/bin/perl" (President.pl has a #!/usr/bin/perl
+    shebang; the console worked only because the app spawns it via login).

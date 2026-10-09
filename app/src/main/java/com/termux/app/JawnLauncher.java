@@ -48,7 +48,11 @@ public class JawnLauncher {
         String dir = getJawnDirPath(context);
         Intent intent = new Intent(context, TermuxService.class);
         intent.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
-        intent.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/bash"));
+        // Run through Termux's login script rather than bash directly: login is
+        // what exports LD_PRELOAD for termux-exec, so #!/usr/bin/perl-style
+        // shebangs in user scripts resolve. Launching bash directly skips it
+        // and ./President.pl dies with "bad interpreter: /usr/bin/perl".
+        intent.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
         intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && exec perl ./jawn" });
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
         intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, false);

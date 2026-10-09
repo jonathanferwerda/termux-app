@@ -169,6 +169,7 @@
 
         <activity
             android:name=".app.JawnDashboardActivity"
+            android:theme="@style/Theme.Termux.JawnDashboard"
             android:exported="true"
             android:label="@string/application_name" />
 
