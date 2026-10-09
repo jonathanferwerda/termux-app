@@ -75,3 +75,10 @@ instead of per-ABI split APKs; release builds default to a single APK.
     Start button still uses a foreground session.
 12. JawnDashboardActivity: the logo (res/drawable-nodpi/jawn_logo.png, from
     the same logo.jpg as the launcher icons) is shown centred at the top.
+
+## Deltas round 5 (BLE bridge controls)
+
+13. JawnDashboardActivity: "Start BLE bridge" / "Stop BLE bridge" buttons for
+    JawnBleService (com.termux.api). Same shared UID, so the unexported service
+    can be started from here; this is also the always-allowed foreground-
+    service start path (the dashboard is visible).

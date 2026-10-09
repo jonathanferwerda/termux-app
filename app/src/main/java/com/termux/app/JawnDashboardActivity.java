@@ -3,6 +3,7 @@ package com.termux.app;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -89,6 +90,32 @@ public class JawnDashboardActivity extends Activity {
         add(ll, "Grant device permissions", new Runnable() {
             public void run() {
                 grantDevicePermissions();
+            }
+        });
+        add(ll, "Start BLE bridge", new Runnable() {
+            public void run() {
+                try {
+                    Intent i = new Intent();
+                    i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
+                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+                    else startService(i);
+                    toast("Starting BLE bridge");
+                } catch (Throwable t) {
+                    toast("JawnOS API app is not installed");
+                }
+            }
+        });
+        add(ll, "Stop BLE bridge", new Runnable() {
+            public void run() {
+                try {
+                    Intent i = new Intent();
+                    i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
+                    i.setAction("com.termux.api.action.JAWN_BLE_STOP");
+                    startService(i);
+                    toast("Stopping BLE bridge");
+                } catch (Throwable t) {
+                    toast("JawnOS API app is not installed");
+                }
             }
         });
         add(ll, "Save settings", new Runnable() {
