@@ -102,9 +102,16 @@ public class JawnLauncher {
         return portOpen("127.0.0.1", 45999, 400);
     }
 
-    /** Start jawn in the foreground as a terminal session (dashboard button). */
+    /** Start jawn as a background task (dashboard button).
+     *
+     *  A foreground terminal *session* does not actually run until a terminal
+     *  view is attached, so with the app in the background (the normal case --
+     *  dot only) the session sat idle and jawn never came up: the web app did
+     *  not load until the console was opened, which attached a view and let the
+     *  session finally run. The boot path has always used a background task and
+     *  runs headless, so use that here too. */
     public static void startJawn(Context context) {
-        startJawn(context, false);
+        startJawn(context, true);
     }
 
     /** Start jawn as a background task (boot autostart): the foreground service
