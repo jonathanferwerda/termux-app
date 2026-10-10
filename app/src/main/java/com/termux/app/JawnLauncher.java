@@ -27,6 +27,9 @@ public class JawnLauncher {
     public static final String KEY_AUTOSTART = "jawn_autostart";
     public static final String DEFAULT_DIR = "jawnos";
 
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static Runnable pendingStop;
+
     public static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
@@ -58,6 +61,14 @@ public class JawnLauncher {
     }
 
     private static void startJawn(Context context, boolean background) {
+        // A Stop scheduled a service stop to fire once its killer has had its
+        // few seconds. If the user starts again inside that window, cancel it,
+        // or it tears the fresh start down.
+        if (pendingStop != null) {
+            MAIN.removeCallbacks(pendingStop);
+            pendingStop = null;
+        }
+
         String dir = getJawnDirPath(context);
         Intent intent = new Intent(context, TermuxService.class);
         intent.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
@@ -66,7 +77,16 @@ public class JawnLauncher {
         // shebangs in user scripts resolve. Launching bash directly skips it
         // and ./President.pl dies with "bad interpreter: /usr/bin/perl".
         intent.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
-        intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && exec perl ./jawn" });
+        // Wait out a manager_killer still sweeping from a recent Stop before
+        // starting. The killer matches "perl ./jawn" on its targets' command
+        // lines, so a session started while it runs is killed before jawn can
+        // come up (a quick Stop then Start used to leave nothing running). The
+        // program name is built from a variable so this waiting shell does not
+        // itself match the killer's "perl ./jawn" pattern.
+        intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc",
+            "cd " + dir + " && p='./jawn'; n=0; "
+            + "while pgrep -f 'manager_killer[.]pl' >/dev/null 2>&1 && [ $n -lt 30 ]; "
+            + "do sleep 1; n=$((n+1)); done; exec perl \"$p\"" });
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
         intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, background);
         // Do not let the new session drag the Termux console to the front. A
@@ -101,14 +121,16 @@ public class JawnLauncher {
         context.startForegroundService(killer);
         // then put the service (and the dot) away; the killer has had its few
         // seconds by now and finishes even after the service stops
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+        pendingStop = new Runnable() {
             @Override
             public void run() {
+                pendingStop = null;
                 Intent stop = new Intent(context, TermuxService.class);
                 stop.setAction(TERMUX_SERVICE.ACTION_STOP_SERVICE);
                 context.startService(stop);
             }
-        }, 8000);
+        };
+        MAIN.postDelayed(pendingStop, 8000);
     }
 
     /** Read working_port from the jawn config.json, defaulting to 3000. */
