@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -25,6 +26,7 @@ public class JawnLauncher {
     public static final String PREFS_NAME = "jawnos";
     public static final String KEY_DIR = "jawn_dir";
     public static final String KEY_AUTOSTART = "jawn_autostart";
+    public static final String KEY_BLE_WITH_JAWN = "ble_with_jawn";
     public static final String DEFAULT_DIR = "jawnos";
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -46,6 +48,58 @@ public class JawnLauncher {
 
     public static boolean isAutostartEnabled(Context context) {
         return prefs(context).getBoolean(KEY_AUTOSTART, true);
+    }
+
+    public static boolean isBleWithJawn(Context context) {
+        return prefs(context).getBoolean(KEY_BLE_WITH_JAWN, true);
+    }
+
+    /** Start (or nudge) the JawnOS API app's BLE bridge; safe if it already runs. */
+    public static void startBle(Context context) {
+        try {
+            Intent i = new Intent();
+            i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
+            else context.startService(i);
+        } catch (Throwable t) {
+            // JawnOS API app not installed
+        }
+    }
+
+    public static void stopBle(Context context) {
+        try {
+            Intent i = new Intent();
+            i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
+            i.setAction("com.termux.api.action.JAWN_BLE_STOP");
+            context.startService(i);
+        } catch (Throwable t) {
+            // JawnOS API app not installed
+        }
+    }
+
+    /** True if something is listening on the loopback port (used for live status). */
+    public static boolean portOpen(String host, int port, int timeoutMs) {
+        java.net.Socket s = null;
+        try {
+            s = new java.net.Socket();
+            s.connect(new java.net.InetSocketAddress(host, port), timeoutMs);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (s != null) { try { s.close(); } catch (Throwable t) { } }
+        }
+    }
+
+    /** jawn's web server answers on the configured port, and always on the dock 3000. */
+    public static boolean jawnIsUp(Context context) {
+        return portOpen("127.0.0.1", getJawnPort(context), 400)
+            || portOpen("127.0.0.1", 3000, 400);
+    }
+
+    /** The BLE bridge listens on loopback 45999. */
+    public static boolean bleIsUp() {
+        return portOpen("127.0.0.1", 45999, 400);
     }
 
     /** Start jawn in the foreground as a terminal session (dashboard button). */
@@ -98,10 +152,30 @@ public class JawnLauncher {
         intent.putExtra(TERMUX_SERVICE.EXTRA_SESSION_ACTION, String.valueOf(
             TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_DONT_OPEN_ACTIVITY));
         intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn");
+        // Bring the BLE bridge up first so jawn's listener has a daemon to dial
+        // the moment it starts (and take it down again on Stop when tied).
+        if (isBleWithJawn(context)) startBle(context);
         context.startForegroundService(intent);
     }
 
+    /** Stop jawn (and the BLE bridge when it rides along with it). */
     public static void stopJawn(Context context) {
+        if (isBleWithJawn(context)) stopBle(context);
+        stopJawnTree(context);
+    }
+
+    /** Restart the tree without stopping the service: kill what runs, then start
+     *  again. startJawn() cancels the delayed service stop that stopJawnTree
+     *  schedules, and its launch waits out the killer. */
+    public static void restartJawn(final Context context) {
+        stopJawnTree(context);
+        MAIN.postDelayed(new Runnable() {
+            public void run() { startJawn(context); }
+        }, 800);
+    }
+
+    /** Tear down the running tree and stop the service, but leave BLE alone. */
+    private static void stopJawnTree(Context context) {
         // Take the tree down before stopping the service: ACTION_STOP_SERVICE
         // only SIGKILLs the terminal sessions, which the master's Ctrl+C
         // handler never sees, so President.pl, the workers, the BLE client and

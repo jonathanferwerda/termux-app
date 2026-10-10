@@ -19,18 +19,9 @@ public class JawnBootReceiver extends BroadcastReceiver {
             Logger.logInfo(LOG_TAG, "Autostart disabled; not starting jawn");
             return;
         }
-        // Bring the BLE bridge up first, so jawn's listener has a daemon to
-        // dial the moment it starts. Same shared UID, and BOOT_COMPLETED is an
-        // allowed foreground-service-start context.
-        try {
-            Intent ble = new Intent();
-            ble.setClassName("com.termux.api", "com.termux.api.JawnBleService");
-            if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(ble);
-            else context.startService(ble);
-            Logger.logInfo(LOG_TAG, "BLE bridge start requested");
-        } catch (Throwable t) {
-            Logger.logError(LOG_TAG, "Could not start the BLE bridge: " + t);
-        }
+        // startJawnBackground() also brings the BLE bridge up first (when it is
+        // tied to jawn), so jawn's listener has a daemon to dial the moment it
+        // starts. BOOT_COMPLETED is an allowed foreground-service-start context.
         JawnLauncher.startJawnBackground(context);
     }
 }
