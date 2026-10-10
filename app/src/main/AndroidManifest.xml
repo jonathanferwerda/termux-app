@@ -163,6 +163,11 @@
         </receiver>
 
         <activity
+            android:name=".app.JawnLogActivity"
+            android:exported="false"
+            android:label="@string/application_name" />
+
+        <activity
             android:name=".app.JawnDashboardActivity"
             android:theme="@style/Theme.Termux.JawnDashboard"
             android:exported="true"

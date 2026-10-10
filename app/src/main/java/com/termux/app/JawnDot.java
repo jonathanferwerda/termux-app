@@ -1,8 +1,6 @@
 package com.termux.app;
 
-import android.app.PendingIntent;
 import android.content.Context;
-import android.content.Intent;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -19,7 +17,7 @@ import com.termux.shared.logger.Logger;
  * light, the window keeps the whole app (and therefore every process of its UID,
  * including the jawn Perl workers) out of the restricted background cpuset that
  * Samsung phones apply to apps that are not visible. It works even with the screen
- * off. Tapping it opens the dashboard.
+ * off. It is invisible and not clickable; the app opens on its launcher icon.
  */
 public class JawnDot {
 
@@ -35,6 +33,8 @@ public class JawnDot {
     public static void show(final Context context) {
         new Handler(Looper.getMainLooper()).post(new Runnable() {
             public void run() {
+                // Keep jawn's log bounded for as long as the app is running it.
+                JawnLog.scheduleTrims();
                 try {
                     if (view != null) return;
                     if (!Settings.canDrawOverlays(context)) {
@@ -58,24 +58,16 @@ public class JawnDot {
                     WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                         size, size,
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                         PixelFormat.TRANSLUCENT);
                     lp.gravity = Gravity.TOP | Gravity.START;
                     lp.x = (int) (2 * density);
                     lp.y = (int) (2 * density);
-                    Intent tap = new Intent(context, JawnDashboardActivity.class);
-                    tap.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    final PendingIntent pi = PendingIntent.getActivity(context, 0, tap,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                    v.setOnClickListener(new View.OnClickListener() {
-                        public void onClick(View clicked) {
-                            try {
-                                pi.send();
-                            } catch (Throwable t) {
-                                Logger.logError(LOG_TAG, "Failed to open dashboard: " + t);
-                            }
-                        }
-                    });
+                    // Not touchable: an invisible hotspot over other apps would
+                    // be worse than useless now that the launcher icon opens the
+                    // dashboard. FLAG_NOT_TOUCHABLE makes the window fully
+                    // pass-through.
                     wm.addView(v, lp);
                     view = v;
                     Logger.logInfo(LOG_TAG, "Dot shown");
@@ -96,6 +88,7 @@ public class JawnDot {
                 }
                 view = null;
                 wm = null;
+                JawnLog.cancelTrims();
                 Logger.logInfo(LOG_TAG, "Dot hidden");
             }
         });

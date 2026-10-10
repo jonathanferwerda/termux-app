@@ -106,6 +106,9 @@ public class JawnDashboardActivity extends Activity {
 
         header(ll, "Open");
         add(ll, "Open JawnOS UI", new Runnable() { public void run() { openUi(); } });
+        add(ll, "Show jawn log", new Runnable() {
+            public void run() { startActivity(new Intent(self, JawnLogActivity.class)); }
+        });
         add(ll, "Open console", new Runnable() {
             public void run() { startActivity(new Intent(self, TermuxActivity.class)); }
         });
