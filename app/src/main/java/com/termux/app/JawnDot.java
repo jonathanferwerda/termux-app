@@ -49,6 +49,12 @@ public class JawnDot {
                     d.setShape(GradientDrawable.OVAL);
                     d.setColor(GREEN);
                     v.setBackground(d);
+                    // Transparent: the app opens on its launcher dashboard now, so
+                    // the dot is no longer needed as a visible affordance (or as a
+                    // tap target). The window itself is kept -- it is what holds
+                    // the app out of Samsung's restricted background cpuset even
+                    // with the screen off -- so only its visibility changes.
+                    v.setAlpha(0f);
                     WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                         size, size,
                         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
