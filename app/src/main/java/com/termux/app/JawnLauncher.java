@@ -69,6 +69,14 @@ public class JawnLauncher {
         intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && exec perl ./jawn" });
         intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
         intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, background);
+        // Do not let the new session drag the Termux console to the front. A
+        // foreground execution otherwise defaults to
+        // SWITCH_TO_NEW_SESSION_AND_OPEN_ACTIVITY, which calls
+        // startTermuxActivity() and throws the user out of the dashboard and into
+        // the console the moment jawn starts. The session is still created and
+        // selected, so "Open console" still lands on jawn's output.
+        intent.putExtra(TERMUX_SERVICE.EXTRA_SESSION_ACTION, String.valueOf(
+            TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_DONT_OPEN_ACTIVITY));
         intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn");
         context.startForegroundService(intent);
     }
