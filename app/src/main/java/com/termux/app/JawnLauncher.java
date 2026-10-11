@@ -46,6 +46,17 @@ public class JawnLauncher {
         return TermuxConstants.TERMUX_HOME_DIR_PATH + "/" + getJawnDirName(context);
     }
 
+    /** The human version from <jawn dir>/VERSION, or "unknown" if it is absent. */
+    public static String getJawnVersion(Context context) {
+        File version = new File(getJawnDirPath(context), "VERSION");
+        try (BufferedReader reader = new BufferedReader(new FileReader(version))) {
+            String line = reader.readLine();
+            if (line != null && !line.trim().isEmpty()) return line.trim();
+        } catch (Exception ignored) {
+        }
+        return "unknown";
+    }
+
     public static boolean isAutostartEnabled(Context context) {
         return prefs(context).getBoolean(KEY_AUTOSTART, true);
     }

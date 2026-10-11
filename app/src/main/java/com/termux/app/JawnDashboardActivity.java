@@ -187,6 +187,7 @@ public class JawnDashboardActivity extends Activity {
         boolean overlay = Settings.canDrawOverlays(this);
         status.setText("overlay permission: " + (overlay ? "granted" : "missing")
             + "\nport: " + JawnLauncher.getJawnPort(this)
+            + "\nversion: " + JawnLauncher.getJawnVersion(this)
             + "\nfolder: " + JawnLauncher.getJawnDirPath(this));
     }
 
