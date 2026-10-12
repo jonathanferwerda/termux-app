@@ -115,3 +115,20 @@ work and a full-width build has crashed it (2026-10-10).
     is not killed by the service stop, so its sweeps always finish. Needs the
     jawnos tree on the device to carry the matching manager_killer.pl (jawnos
     commit 895847c: the "master" argument and the ollama service handling).
+
+## Deltas round 9 (in-app updater)
+
+17. JawnUpdater: the dashboard's status line reads
+    "app: <installed> (up to date | -> <n> available)" and an "Update app"
+    button installs the newest staged build with one tap. It reads the releases
+    under <jawn dir>/releases - the jawnos-app-<versionCode>-<versionName>.apk
+    files that scripts/app_release.pl drops and the mesh replicates to every
+    device. versionCode is bumped per release so an update is detected.
+    - new: JawnUpdater.java, res/xml/jawn_file_paths.xml
+    - a FileProvider (authority <pkg>.jawnupdates) in AndroidManifest.xml;
+      releaseDir() is built from getFilesDir() (not TermuxConstants' /data/data)
+      so the file matches the <files-path> root, which FileProvider compares by
+      path prefix.
+    - needs the "install unknown apps" grant; the updater opens that screen
+      (ACTION_MANAGE_UNKNOWN_APP_SOURCES) when it is missing, and
+      REQUEST_INSTALL_PACKAGES is already declared.

@@ -125,6 +125,9 @@ public class JawnDashboardActivity extends Activity {
         add(ll, "Grant overlay permission (dot)", new Runnable() { public void run() { openOverlaySettings(); } });
         add(ll, "Grant device permissions", new Runnable() { public void run() { grantDevicePermissions(); } });
 
+        header(ll, "App");
+        add(ll, "Update app", new Runnable() { public void run() { offerUpdate(); } });
+
         add(ll, "Save settings", new Runnable() {
             public void run() { saveSettings(); toast("Saved"); }
         });
@@ -189,6 +192,21 @@ public class JawnDashboardActivity extends Activity {
             + "\nport: " + JawnLauncher.getJawnPort(this)
             + "\nversion: " + JawnLauncher.getJawnVersion(this)
             + "\nfolder: " + JawnLauncher.getJawnDirPath(this));
+        JawnUpdater.Release up = JawnUpdater.updateAvailable(this);
+        status.append("\napp: " + JawnUpdater.installedVersionCode(this)
+            + (up == null ? " (up to date)" : " -> " + up.versionCode + " available"));
+    }
+
+    /** Install the newest staged app APK - one tap. */
+    private void offerUpdate() {
+        JawnUpdater.Release r = JawnUpdater.updateAvailable(self);
+        if (r == null) { toast("app is up to date"); return; }
+        if (!JawnUpdater.canInstall(self)) {
+            JawnUpdater.openInstallSettings(self);
+            toast("Allow installs, then tap Update again");
+            return;
+        }
+        toast(JawnUpdater.install(self, r));
     }
 
     private void saveSettings() {
@@ -252,6 +270,7 @@ public class JawnDashboardActivity extends Activity {
     }
 
     private void toast(String s) {
+        android.util.Log.i("JawnToast", s);
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 }
