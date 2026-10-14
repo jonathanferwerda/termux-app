@@ -11,6 +11,7 @@ import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -58,6 +59,7 @@ public class JawnWebViewActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient());
         nfc = new JawnNfcBridge(this, this::runJs);
         web.addJavascriptInterface(nfc, "JawnNFC");
+        web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -68,7 +70,41 @@ public class JawnWebViewActivity extends Activity {
         String url = JawnLauncher.getUiUrl(this, JawnLauncher.getJawnPort(this));
         try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
         if (houseHost == null) houseHost = "";
-        web.loadUrl(url);
+        loadWhenReady(url);
+    }
+
+    /** Bring jawn up if it is down, then load - the icon should land on the
+     *  manager even right after a reboot or an app install that killed jawn.
+     *  When it cannot be reached, fall back to the dashboard, not a dead page. */
+    private void loadWhenReady(final String url) {
+        new Thread(() -> {
+            boolean up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
+            if (!up) {
+                JawnLauncher.startJawn(JawnWebViewActivity.this);
+                for (int i = 0; i < 40 && !up; i++) {
+                    try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+                    up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
+                }
+            }
+            final boolean ready = up;
+            runOnUiThread(() -> { if (ready) web.loadUrl(url); else openDashboard(true); });
+        }).start();
+    }
+
+    /** The administration panel (the dashboard): what to show when the view
+     *  cannot load, and where the start menu's admin gear goes. */
+    private void openDashboard(boolean andFinish) {
+        startActivity(new android.content.Intent(this, JawnDashboardActivity.class));
+        if (andFinish) finish();
+    }
+
+    /** window.JawnAdmin - the web start menu's admin gear calls open(), the
+     *  Android counterpart of the desktop view's `jawnos` message handler. */
+    public class AdminBridge {
+        @android.webkit.JavascriptInterface
+        public void open() {
+            runOnUiThread(() -> openDashboard(false));
+        }
     }
 
     /** Run a script in the page (the NFC bridge posts events through here). */
@@ -114,7 +150,7 @@ public class JawnWebViewActivity extends Activity {
             String url = JawnLauncher.getUiUrl(this, JawnLauncher.getJawnPort(this));
             try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
             if (houseHost == null) houseHost = "";
-            web.loadUrl(url);
+            loadWhenReady(url);
         }
     }
 
@@ -144,6 +180,13 @@ public class JawnWebViewActivity extends Activity {
                 startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Throwable ignored) { }
             return true;
+        }
+
+        @Override
+        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+            // A dead page is no use in its own screen: hand back to the
+            // dashboard, which can start jawn and try again.
+            if (request.isForMainFrame()) openDashboard(true);
         }
 
         @Override
