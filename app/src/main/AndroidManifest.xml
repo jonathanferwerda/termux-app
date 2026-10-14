@@ -187,17 +187,14 @@
         <activity
             android:name=".app.JawnDashboardActivity"
             android:theme="@style/Theme.Termux.JawnDashboard"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:label="@string/application_name">
-            <!-- The app opens here, not in the terminal, so starting or stopping
-                 jawn never drops the user into the console. The console is still
-                 reachable from the dashboard ("Open console"). -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:label="@string/jawn_admin_label">
+            <!-- The administration panel. It is deliberately NOT the launcher:
+                 the app opens on the JawnOS view (the ticketed destination),
+                 and the panel is where a failed load lands and where the web
+                 start menu's admin gear goes - so returning to the app never
+                 drops the view. It stays launchable from inside the app. -->
         </activity>
 
         <activity
@@ -208,13 +205,14 @@
             android:launchMode="singleTask"
             android:theme="@style/Theme.Termux.JawnDashboard" />
 
-        <!-- A second launcher entry, so the full screen web app can sit on the
-             home screen as its own icon, next to the dashboard. -->
+        <!-- The app's launcher: the full screen JawnOS view, so returning to
+             the app lands on the ticketed destination, not the panel. The panel
+             is reached from the view's admin gear, or when the view cannot
+             load. -->
         <activity-alias
             android:name=".JawnUiLauncher"
             android:exported="true"
-            android:icon="@drawable/jawn_logo"
-            android:label="@string/jawn_ui_label"
+            android:label="@string/application_name"
             android:targetActivity=".app.JawnWebViewActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
