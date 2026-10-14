@@ -111,22 +111,46 @@ public class JawnWebViewActivity extends Activity {
         }
     }
 
-    /** Bring jawn up if it is down, then load - the icon should land on the
-     *  manager even right after a reboot or an app install that killed jawn.
-     *  When it cannot be reached, fall back to the dashboard, not a dead page. */
+    /** Land on the manager. When jawn already answers, load straight in - the
+     *  everyday case, where a splash would only flash. When it does not, show
+     *  the logo-with-a-glow splash at once, carrying an Admin Panel button, and
+     *  keep waiting in the background: the moment jawn answers, the view
+     *  replaces the splash. A machine left waiting still has the button, so it
+     *  is never just a dead screen. */
     private void loadWhenReady(final String url) {
+        if (JawnLauncher.jawnIsUp(this)) {
+            web.loadUrl(url);
+            return;
+        }
+        JawnLauncher.startJawn(this);
+        showSplash();
         new Thread(() -> {
-            boolean up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
-            if (!up) {
-                JawnLauncher.startJawn(JawnWebViewActivity.this);
-                for (int i = 0; i < 40 && !up; i++) {
-                    try { Thread.sleep(500); } catch (InterruptedException e) { break; }
-                    up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
-                }
+            splashStatus("Starting JawnOS...");
+            boolean ready = false;
+            for (int i = 0; i < 60 && !ready; i++) {
+                try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+                ready = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
+                if (!ready && i == 4) splashStatus("Still reaching JawnOS... Admin Panel is below.");
             }
-            final boolean ready = up;
-            runOnUiThread(() -> { if (ready) web.loadUrl(url); else openDashboard(true); });
+            if (ready) {
+                final String target = url;
+                runOnUiThread(() -> web.loadUrl(target));
+            }
         }).start();
+    }
+
+    /** The logo-with-a-glow splash (assets/splash.html), shown while jawn is
+     *  being reached; its Admin Panel button is window.JawnAdmin.open(). */
+    private void showSplash() {
+        runOnUiThread(() -> {
+            try { web.loadUrl("file:///android_asset/splash.html"); } catch (Throwable ignored) { }
+        });
+    }
+
+    /** Nudge the splash's status line (a no-op when the splash is not up). */
+    private void splashStatus(String text) {
+        String escaped = text.replace("\\", "\\\\").replace("\"", "\\\"");
+        runJs("window.jawnSplashStatus && window.jawnSplashStatus(\"" + escaped + "\");");
     }
 
     /** The administration panel (the dashboard): what to show when the view
