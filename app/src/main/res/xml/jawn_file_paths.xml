@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="jawnos_home" path="home/" />
+    <!-- the OS camera/video recorder writes a capture here (JawnCamera) -->
+    <cache-path name="captures" path="captures/" />
 </paths>

@@ -27,6 +27,7 @@ public class JawnLauncher {
     public static final String KEY_DIR = "jawn_dir";
     public static final String KEY_AUTOSTART = "jawn_autostart";
     public static final String KEY_BLE_WITH_JAWN = "ble_with_jawn";
+    public static final String KEY_SYSTEM_BARS = "system_bars";
     public static final String DEFAULT_DIR = "jawnos";
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -63,6 +64,13 @@ public class JawnLauncher {
 
     public static boolean isBleWithJawn(Context context) {
         return prefs(context).getBoolean(KEY_BLE_WITH_JAWN, true);
+    }
+
+    /** Whether the full screen view keeps the system bars (the clock/battery
+     *  and notification bar, and the home/back buttons) on screen. Off by
+     *  default - the view fills the screen; the admin panel turns it on. */
+    public static boolean areSystemBarsShown(Context context) {
+        return prefs(context).getBoolean(KEY_SYSTEM_BARS, false);
     }
 
     /** Start (or nudge) the JawnOS API app's BLE bridge; safe if it already runs. */

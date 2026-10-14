@@ -57,6 +57,7 @@ public class JawnDashboardActivity extends Activity {
     private EditText dirEdit;
     private CheckBox autostart;
     private CheckBox bleWithJawn;
+    private CheckBox systemBars;
     private boolean resumed = false;
     private long startRequestedAt = 0;
     private final JawnDashboardActivity self = this;
@@ -142,6 +143,12 @@ public class JawnDashboardActivity extends Activity {
         bleWithJawn.setButtonTintList(ColorStateList.valueOf(ACCENT));
         bleWithJawn.setChecked(JawnLauncher.isBleWithJawn(this));
         settings.addView(bleWithJawn);
+        systemBars = new CheckBox(this);
+        systemBars.setText("Show the status and navigation bars");
+        systemBars.setTextColor(TEXT);
+        systemBars.setButtonTintList(ColorStateList.valueOf(ACCENT));
+        systemBars.setChecked(JawnLauncher.areSystemBarsShown(this));
+        settings.addView(systemBars);
         fullButton(settings, "Save settings", false, () -> { saveSettings(); toast("Saved"); });
 
         // ---- app ----
@@ -363,6 +370,7 @@ public class JawnDashboardActivity extends Activity {
             .putString(JawnLauncher.KEY_DIR, name)
             .putBoolean(JawnLauncher.KEY_AUTOSTART, autostart.isChecked())
             .putBoolean(JawnLauncher.KEY_BLE_WITH_JAWN, bleWithJawn.isChecked())
+            .putBoolean(JawnLauncher.KEY_SYSTEM_BARS, systemBars.isChecked())
             .apply();
     }
 
