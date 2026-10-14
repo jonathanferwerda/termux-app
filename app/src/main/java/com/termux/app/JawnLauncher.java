@@ -243,4 +243,42 @@ public class JawnLauncher {
         }
         return 3000;
     }
+
+    /** The URL the dashboard's Open UI loads: the saved ticket when there is one
+     *  (it logs the browser in and redirects on the fqdn origin the installed
+     *  PWA lives on), else the manager on the configured domain, else loopback.
+     *  Written once per device with: perl scripts/app_ticket.pl <name> --save */
+    public static String getUiUrl(Context context, int port) {
+        try {
+            File tf = new File(getJawnDirPath(context), ".shots/ticket.txt");
+            if (tf.exists()) {
+                StringBuilder sb = new StringBuilder();
+                BufferedReader r = new BufferedReader(new FileReader(tf));
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line);
+                r.close();
+                String s = sb.toString().trim();
+                if (s.startsWith("https://")) return s;
+            }
+        } catch (Throwable ignored) {
+            // fall through to the manager URL
+        }
+        String host = "127.0.0.1";
+        try {
+            File f = new File(getJawnDirPath(context), "config.json");
+            if (f.exists()) {
+                StringBuilder sb = new StringBuilder();
+                BufferedReader r = new BufferedReader(new FileReader(f));
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line);
+                r.close();
+                JSONObject o = new JSONObject(sb.toString());
+                String d = o.optString("domain", "");
+                if (!d.isEmpty()) host = d;
+            }
+        } catch (Throwable ignored) {
+            // loopback
+        }
+        return "https://" + host + ":" + port + "/manager";
+    }
 }

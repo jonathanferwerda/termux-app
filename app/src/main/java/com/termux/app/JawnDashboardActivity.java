@@ -221,7 +221,9 @@ public class JawnDashboardActivity extends Activity {
 
     private void openUi() {
         int port = JawnLauncher.getJawnPort(this);
-        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://127.0.0.1:" + port + "/manager")));
+        // the saved ticket when there is one (the fqdn origin the installed PWA
+        // lives on), else the manager on config.json domain, else loopback
+        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(JawnLauncher.getUiUrl(this, port))));
     }
 
     /** Launch the JawnOS API app's grant-all screen (it owns the device permissions). */

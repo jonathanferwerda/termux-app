@@ -132,3 +132,13 @@ work and a full-width build has crashed it (2026-10-10).
     - needs the "install unknown apps" grant; the updater opens that screen
       (ACTION_MANAGE_UNKNOWN_APP_SOURCES) when it is missing, and
       REQUEST_INSTALL_PACKAGES is already declared.
+
+## Deltas round 10 (the Open UI button signs in)
+
+18. JawnLauncher.getUiUrl() + JawnDashboardActivity.openUi(): "Open JawnOS UI"
+    loads the saved login ticket first (./.shots/ticket.txt, written once per
+    device with `perl scripts/app_ticket.pl <name> --save`), so the tap lands in
+    the installed full-screen PWA already signed in; without a ticket it opens
+    the manager on config.json's `domain`, and only then loopback. The button
+    used to open https://127.0.0.1:<working_port>/manager - a different origin
+    from the fqdn PWA, with no session, so it always showed the login gate.
