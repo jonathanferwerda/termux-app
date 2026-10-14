@@ -101,19 +101,24 @@ public class NotificationUtils {
 
         // The app's own notifications (the service, run-command, crash and plugin
         // ones) must not badge the launcher icon - jawn's own notifications do
-        // that (JawnNotifyReceiver). showBadge cannot be changed once a channel
-        // exists, so a channel that was made badge-able is recreated without a
-        // badge; one already badge-less is left alone.
+        // that (JawnNotifyReceiver). showBadge is fixed once a channel exists, so
+        // a channel that was made badge-able is recreated without a badge; one
+        // already badge-less is left alone.
+        //
+        // The recreate is best effort. Since Android 13 a channel that a
+        // foreground service is using cannot be deleted - deleteNotificationChannel
+        // throws SecurityException, which used to take the whole service down on
+        // every launch - so a failure keeps the existing channel (a badge may
+        // remain) instead of crashing.
         NotificationChannel existing = notificationManager.getNotificationChannel(channelId);
-        if (existing != null && existing.canShowBadge()) {
-            notificationManager.deleteNotificationChannel(channelId);
-            existing = null;
-        }
-
-        if (existing == null) {
+        if (existing != null && !existing.canShowBadge()) return;
+        try {
+            if (existing != null) notificationManager.deleteNotificationChannel(channelId);
             NotificationChannel channel = new NotificationChannel(channelId, channelName, importance);
             channel.setShowBadge(false);
             notificationManager.createNotificationChannel(channel);
+        } catch (Throwable t) {
+            Logger.logWarn(LOG_TAG, "Could not recreate notification channel \"" + channelId + "\" badge-less: " + t.getMessage());
         }
     }
 
