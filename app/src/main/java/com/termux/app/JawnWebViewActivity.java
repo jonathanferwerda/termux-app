@@ -48,6 +48,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnNfcBridge nfc;
     private JawnCamera camera;
     private String houseHost = "";
+    private boolean gateFallback = false;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
     private GeolocationPermissions.Callback pendingGeo;
@@ -121,6 +122,7 @@ public class JawnWebViewActivity extends Activity {
      *  replaces the splash. A machine left waiting still has the button, so it
      *  is never just a dead screen. */
     private void loadWhenReady(final String url) {
+        gateFallback = false;
         if (JawnLauncher.jawnIsUp(this)) {
             web.loadUrl(url);
             return;
@@ -340,6 +342,23 @@ public class JawnWebViewActivity extends Activity {
     }
 
     private class HouseClient extends WebViewClient {
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            // A lapsed session cookie makes the manager answer with the Gate and
+            // the view sits on the login screen though a fresh ticket is on
+            // hand. Spot the Gate and fall back to the ticket once.
+            if (gateFallback || url == null) return;
+            String manager = JawnLauncher.getManagerUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
+            if (!url.startsWith(manager)) return;
+            view.evaluateJavascript("(document.getElementById('welcome_logo')||document.getElementById('admin_panel_button'))?'gate':'ok'", value -> {
+                if (value != null && value.contains("gate")) {
+                    gateFallback = true;
+                    String ticket = JawnLauncher.getUiUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
+                    if (!ticket.equals(url)) view.loadUrl(ticket);
+                }
+            });
+        }
+
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
