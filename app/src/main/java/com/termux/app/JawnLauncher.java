@@ -274,6 +274,13 @@ public class JawnLauncher {
         return "https://" + host + ":" + port + "/manager";
     }
 
+    /** The manager - the ticketed destination - on the house's name. */
+    public static String getManagerUrl(Context context, int port) {
+        String domain = getJawnDomain(context);
+        String host = domain.isEmpty() ? "127.0.0.1" : domain;
+        return "https://" + host + ":" + port + "/manager";
+    }
+
     /** config.json's domain, or "" when it is unset. */
     public static String getJawnDomain(Context context) {
         try {

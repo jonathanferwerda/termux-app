@@ -67,10 +67,29 @@ public class JawnWebViewActivity extends Activity {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        String url = JawnLauncher.getUiUrl(this, JawnLauncher.getJawnPort(this));
+        String url = destination();
         try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
         if (houseHost == null) houseHost = "";
         loadWhenReady(url);
+    }
+
+    /** Straight to the manager when the view already holds a session - the
+     *  splash (and its animation) is skipped and the view is kept; the ticket
+     *  only when it does not, which is where the animation runs. */
+    private String destination() {
+        int port = JawnLauncher.getJawnPort(this);
+        String manager = JawnLauncher.getManagerUrl(this, port);
+        if (hasSession(manager)) return manager;
+        return JawnLauncher.getUiUrl(this, port);
+    }
+
+    private boolean hasSession(String url) {
+        try {
+            String cookie = CookieManager.getInstance().getCookie(url);
+            return cookie != null && cookie.indexOf("president=") >= 0;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Bring jawn up if it is down, then load - the icon should land on the
@@ -147,7 +166,11 @@ public class JawnWebViewActivity extends Activity {
         // forward without recreating it, so reload - a fresh ticket, or a jawn
         // that has since restarted, is picked up instead of the stale page.
         if (web != null) {
-            String url = JawnLauncher.getUiUrl(this, JawnLauncher.getJawnPort(this));
+            if (web == null) return;
+            // Already on the destination: keep the view rather than reloading it.
+            String current = web.getUrl();
+            if (current != null && current.startsWith(JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this)))) return;
+            String url = destination();
             try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
             if (houseHost == null) houseHost = "";
             loadWhenReady(url);

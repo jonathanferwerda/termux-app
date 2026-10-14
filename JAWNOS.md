@@ -160,6 +160,12 @@ work and a full-width build has crashed it (2026-10-10).
     - a re-tap of the home screen icon reloads it (singleTask brings the
       activity forward without recreating it; onNewIntent loads again), so a
       fresh ticket or a restarted jawn is picked up rather than a stale page;
+    - it goes straight to the manager when the view already holds a session
+      (the ticket splash and its animation are skipped and the view is kept),
+      and the ticket only when it does not; a re-tap while on the manager does
+      not reload it. It is the launcher now (versionCode 1014): the dashboard
+      is exported=false/singleTop, reached by the view's admin gear or a failed
+      load, so returning to the app lands on the destination, not the panel;
     - goes immersive full screen, keeps navigation in the house, opens outside
       links in the browser, and proceeds past the house's own TLS cert
       (onReceivedSslError for the house host / loopback);
