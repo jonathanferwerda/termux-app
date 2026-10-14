@@ -153,6 +153,10 @@ work and a full-width build has crashed it (2026-10-10).
     ./server/*.pem only at boot). The view:
     - loads JawnLauncher.getUiUrl (the saved ticket first, then the manager on
       config.json's domain, then loopback), so it signs in the same way;
+    - getUiUrl now rewrites a ticket baked with a loopback host (127.0.0.1) to
+      config.json's domain: the wildcard cert covers the name, not 127.0.0.1,
+      so a loopback ticket took a TLS error whose session never became a secure
+      context - the app landed on the login gate;
     - goes immersive full screen, keeps navigation in the house, opens outside
       links in the browser, and proceeds past the house's own TLS cert
       (onReceivedSslError for the house host / loopback);

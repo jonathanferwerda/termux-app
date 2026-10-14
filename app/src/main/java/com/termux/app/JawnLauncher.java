@@ -247,8 +247,15 @@ public class JawnLauncher {
     /** The URL the dashboard's Open UI loads: the saved ticket when there is one
      *  (it logs the browser in and redirects on the fqdn origin the installed
      *  PWA lives on), else the manager on the configured domain, else loopback.
-     *  Written once per device with: perl scripts/app_ticket.pl <name> --save */
+     *  Written once per device with: perl scripts/app_ticket.pl <name> --save
+     *
+     *  A ticket baked before the device had a domain names 127.0.0.1, which the
+     *  house's wildcard certificate does not cover: the TLS error leaves the
+     *  session outside a secure context and the app lands on the login gate.
+     *  When config.json has a domain, point the ticket's host at it, so the
+     *  wildcard matches (and, per each device's dns, still reaches this house). */
     public static String getUiUrl(Context context, int port) {
+        String domain = getJawnDomain(context);
         try {
             File tf = new File(getJawnDirPath(context), ".shots/ticket.txt");
             if (tf.exists()) {
@@ -258,12 +265,17 @@ public class JawnLauncher {
                 while ((line = r.readLine()) != null) sb.append(line);
                 r.close();
                 String s = sb.toString().trim();
-                if (s.startsWith("https://")) return s;
+                if (s.startsWith("https://")) return withDomain(s, domain);
             }
         } catch (Throwable ignored) {
             // fall through to the manager URL
         }
-        String host = "127.0.0.1";
+        String host = domain.isEmpty() ? "127.0.0.1" : domain;
+        return "https://" + host + ":" + port + "/manager";
+    }
+
+    /** config.json's domain, or "" when it is unset. */
+    public static String getJawnDomain(Context context) {
         try {
             File f = new File(getJawnDirPath(context), "config.json");
             if (f.exists()) {
@@ -274,11 +286,28 @@ public class JawnLauncher {
                 r.close();
                 JSONObject o = new JSONObject(sb.toString());
                 String d = o.optString("domain", "");
-                if (!d.isEmpty()) host = d;
+                if (!d.isEmpty()) return d;
             }
         } catch (Throwable ignored) {
-            // loopback
+            // no domain
         }
-        return "https://" + host + ":" + port + "/manager";
+        return "";
+    }
+
+    /** Swap a URL's host for the house's name, keeping its port, path and query
+     *  exactly (the ?s= token is url-escaped; a string edit leaves it alone). */
+    private static String withDomain(String url, String domain) {
+        if (domain == null || domain.isEmpty()) return url;
+        String prefix = "https://";
+        if (!url.startsWith(prefix)) return url;
+        String rest = url.substring(prefix.length());
+        int slash = rest.indexOf('/');
+        if (slash < 0) return url;
+        String authority = rest.substring(0, slash);
+        String portPart = "";
+        int colon = authority.indexOf(':');
+        if (colon >= 0) portPart = authority.substring(colon);
+        if (authority.equals(domain + portPart)) return url;
+        return prefix + domain + portPart + rest.substring(slash);
     }
 }
