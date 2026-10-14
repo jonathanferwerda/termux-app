@@ -157,6 +157,9 @@ work and a full-width build has crashed it (2026-10-10).
       config.json's domain: the wildcard cert covers the name, not 127.0.0.1,
       so a loopback ticket took a TLS error whose session never became a secure
       context - the app landed on the login gate;
+    - a re-tap of the home screen icon reloads it (singleTask brings the
+      activity forward without recreating it; onNewIntent loads again), so a
+      fresh ticket or a restarted jawn is picked up rather than a stale page;
     - goes immersive full screen, keeps navigation in the house, opens outside
       links in the browser, and proceeds past the house's own TLS cert
       (onReceivedSslError for the house host / loopback);

@@ -104,6 +104,21 @@ public class JawnWebViewActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        // singleTask: a re-tap of the home screen icon brings this activity
+        // forward without recreating it, so reload - a fresh ticket, or a jawn
+        // that has since restarted, is picked up instead of the stale page.
+        if (web != null) {
+            String url = JawnLauncher.getUiUrl(this, JawnLauncher.getJawnPort(this));
+            try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
+            if (houseHost == null) houseHost = "";
+            web.loadUrl(url);
+        }
+    }
+
+    @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
         else super.onBackPressed();
