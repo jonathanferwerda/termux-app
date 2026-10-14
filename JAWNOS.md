@@ -142,3 +142,26 @@ work and a full-width build has crashed it (2026-10-10).
     the manager on config.json's `domain`, and only then loopback. The button
     used to open https://127.0.0.1:<working_port>/manager - a different origin
     from the fqdn PWA, with no session, so it always showed the login gate.
+
+## Deltas round 11 (the full screen view lives in the app)
+
+19. JawnWebViewActivity + JawnNfcBridge: the app grows its own full screen view
+    of the manager, so the home screen icon no longer depends on Chrome, a
+    WebAPK, or the browser's trust of the house certificate. This is the fix for
+    the PWA that silently stopped being a PWA after a certificate rotation
+    (getting-a-new-cert renews by hand every 90 days; the server also reads
+    ./server/*.pem only at boot). The view:
+    - loads JawnLauncher.getUiUrl (the saved ticket first, then the manager on
+      config.json's domain, then loopback), so it signs in the same way;
+    - goes immersive full screen, keeps navigation in the house, opens outside
+      links in the browser, and proceeds past the house's own TLS cert
+      (onReceivedSslError for the house host / loopback);
+    - is the target of a new launcher alias (JawnUiLauncher, label "JawnOS UI",
+      the jawn logo, @string/jawn_ui_label), and of the dashboard's "Open JawnOS
+      UI" button; the old ACTION_VIEW path stays as "Open JawnOS UI in browser".
+    - NFC: Android WebView has no Web NFC ('NDEFReader' is absent), so
+      JawnNfcBridge exposes window.JawnNFC and drives the NfcAdapter (reader
+      mode). The web app presents the same NDEFReader surface over it
+      (public/js/manager/manager.js, jawnNfcAdapter()), so scan and write are
+      unchanged. New permission android.permission.NFC; android.hardware.nfc
+      is required="false". JAWNOS.md deltas/round 11.

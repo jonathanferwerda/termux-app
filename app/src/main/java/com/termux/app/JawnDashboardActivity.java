@@ -105,7 +105,8 @@ public class JawnDashboardActivity extends Activity {
         });
 
         header(ll, "Open");
-        add(ll, "Open JawnOS UI", new Runnable() { public void run() { openUi(); } });
+        add(ll, "Open JawnOS UI", new Runnable() { public void run() { openNativeUi(); } });
+        add(ll, "Open JawnOS UI in browser", new Runnable() { public void run() { openUi(); } });
         add(ll, "Show jawn log", new Runnable() {
             public void run() { startActivity(new Intent(self, JawnLogActivity.class)); }
         });
@@ -219,6 +220,14 @@ public class JawnDashboardActivity extends Activity {
             .apply();
     }
 
+    /** The full screen view in the app's own WebView - the home screen icon's
+     *  target (see JawnWebViewActivity); no Chrome, no WebAPK, no browser trust
+     *  of the house certificate to lose. */
+    private void openNativeUi() {
+        startActivity(new Intent(self, JawnWebViewActivity.class));
+    }
+
+    /** The old path: hand the ticket to the browser (the installed PWA). */
     private void openUi() {
         int port = JawnLauncher.getJawnPort(this);
         // the saved ticket when there is one (the fqdn origin the installed PWA
