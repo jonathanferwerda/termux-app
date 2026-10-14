@@ -166,6 +166,17 @@ work and a full-width build has crashed it (2026-10-10).
       not reload it. It is the launcher now (versionCode 1014): the dashboard
       is exported=false/singleTop, reached by the view's admin gear or a failed
       load, so returning to the app lands on the destination, not the panel;
+
+## Deltas round 12 (the icon badges the program's notifications)
+
+20. JawnNotifyReceiver + NotificationUtils: the app's own notifications (the
+    service, run-command, crash and plugin channels) are made badge-less
+    (showBadge(false); a badge-able channel is recreated, since showBadge cannot
+    change after creation), and jawn's notification_sender now posts through the
+    app - `am broadcast -n com.termux/.app.JawnNotifyReceiver` with title/message/
+    tag - so the badge lands on the app's own launcher icon. termux-notification
+    (the API app, which has no icon to badge) stays only as the fallback when the
+    app is absent. JAWNOS.md deltas/round 12.
     - goes immersive full screen, keeps navigation in the house, opens outside
       links in the browser, and proceeds past the house's own TLS cert
       (onReceivedSslError for the house host / loopback);

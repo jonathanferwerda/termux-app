@@ -96,11 +96,25 @@ public class NotificationUtils {
     public static void setupNotificationChannel(final Context context, final String channelId, final CharSequence channelName, final int importance) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
 
-        NotificationChannel channel = new NotificationChannel(channelId, channelName, importance);
-
         NotificationManager notificationManager = getNotificationManager(context);
-        if (notificationManager != null)
+        if (notificationManager == null) return;
+
+        // The app's own notifications (the service, run-command, crash and plugin
+        // ones) must not badge the launcher icon - jawn's own notifications do
+        // that (JawnNotifyReceiver). showBadge cannot be changed once a channel
+        // exists, so a channel that was made badge-able is recreated without a
+        // badge; one already badge-less is left alone.
+        NotificationChannel existing = notificationManager.getNotificationChannel(channelId);
+        if (existing != null && existing.canShowBadge()) {
+            notificationManager.deleteNotificationChannel(channelId);
+            existing = null;
+        }
+
+        if (existing == null) {
+            NotificationChannel channel = new NotificationChannel(channelId, channelName, importance);
+            channel.setShowBadge(false);
             notificationManager.createNotificationChannel(channel);
+        }
     }
 
     public static Notification.Builder setNotificationDefaults(Notification.Builder builder, final int notificationMode) {

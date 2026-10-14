@@ -179,6 +179,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Posts jawn's notifications from the app, so the badge lands on the
+             app's own launcher icon (jawn's notification_sender broadcasts
+             com.termux.app.JAWN_NOTIFY here). -->
+        <receiver android:name=".app.JawnNotifyReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.termux.app.JAWN_NOTIFY" />
+            </intent-filter>
+        </receiver>
+
         <activity
             android:name=".app.JawnLogActivity"
             android:exported="false"
