@@ -1,15 +1,21 @@
 package com.termux.app;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -19,6 +25,8 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The JawnOS web app, full screen, in the app's own WebView.
@@ -38,6 +46,10 @@ public class JawnWebViewActivity extends Activity {
     private WebView web;
     private JawnNfcBridge nfc;
     private String houseHost = "";
+    private PermissionRequest pendingPermission;
+    private ValueCallback<Uri[]> pendingFile;
+    private static final int REQ_PERMS = 7001;
+    private static final int REQ_FILE = 7002;
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -56,7 +68,7 @@ public class JawnWebViewActivity extends Activity {
 
         web.setBackgroundColor(Color.BLACK);
         web.setWebViewClient(new HouseClient());
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new HouseChrome());
         nfc = new JawnNfcBridge(this, this::runJs);
         web.addJavascriptInterface(nfc, "JawnNFC");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
@@ -192,6 +204,72 @@ public class JawnWebViewActivity extends Activity {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Lets the page use the device's own camera and microphone: the web app
+     *  drives getUserMedia and MediaRecorder directly (jp.js, studio.js), which
+     *  a WebView refuses until the app grants the capture and holds the runtime
+     *  permission. Also backs <input type=file> (onShowFileChooser), so a photo
+     *  or a file picked from the page is the OS picker, not a dead control. */
+    private class HouseChrome extends WebChromeClient {
+        @Override
+        public void onPermissionRequest(final PermissionRequest request) {
+            runOnUiThread(() -> {
+                if (!inHouse(request.getOrigin().toString())) { request.deny(); return; }
+                List<String> need = new ArrayList<>();
+                for (String r : request.getResources()) {
+                    String perm = null;
+                    if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) perm = Manifest.permission.CAMERA;
+                    else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) perm = Manifest.permission.RECORD_AUDIO;
+                    if (perm != null && Build.VERSION.SDK_INT >= 23
+                        && checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+                        need.add(perm);
+                    }
+                }
+                if (!need.isEmpty()) {
+                    pendingPermission = request;
+                    requestPermissions(need.toArray(new String[0]), REQ_PERMS);
+                } else {
+                    request.grant(request.getResources());
+                }
+            });
+        }
+
+        @Override
+        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+            if (pendingFile != null) { pendingFile.onReceiveValue(null); }
+            pendingFile = callback;
+            try {
+                startActivityForResult(params.createIntent(), REQ_FILE);
+                return true;
+            } catch (Throwable t) {
+                pendingFile = null;
+                return false;
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_PERMS || pendingPermission == null) return;
+        boolean granted = true;
+        for (int r : results) { if (r != PackageManager.PERMISSION_GRANTED) granted = false; }
+        if (granted) pendingPermission.grant(pendingPermission.getResources());
+        else pendingPermission.deny();
+        pendingPermission = null;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_FILE) {
+            if (pendingFile != null) {
+                pendingFile.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+                pendingFile = null;
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     private class HouseClient extends WebViewClient {

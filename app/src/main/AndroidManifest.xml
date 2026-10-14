@@ -37,12 +37,20 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- NFC is optional: the app still runs without it, and the native full
          screen view falls back to no NFC (the web side checks window.JawnNFC). -->
     <uses-feature
         android:name="android.hardware.nfc"
         android:required="false" />
+
+    <!-- The view drives the page's getUserMedia/MediaRecorder, so the camera and
+         microphone are optional hardware the OS may not offer. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".app.TermuxApplication"
