@@ -2,6 +2,12 @@ package com.termux.app;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -9,7 +15,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
+import android.view.ViewGroup;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -20,11 +26,33 @@ import android.widget.Toast;
 
 import com.termux.R;
 
-/** Control panel: jawn and the BLE bridge, live status, grouped actions. */
+/**
+ * Control panel: jawn and the BLE bridge, live status, grouped actions.
+ *
+ * Laid out as cards on a dark ground - a header, a live status card, then one
+ * card per group - rather than the flat list of buttons it used to be. Colours
+ * follow the house's manager: near-black ground, a subtle card above it, the
+ * jawn yellow as the accent, and green/amber/red for the live dots.
+ */
 public class JawnDashboardActivity extends Activity {
 
+    private static final int GROUND = 0xFF101010;
+    private static final int CARD = 0xFF1B1B1B;
+    private static final int LINE = 0xFF2C2C2C;
+    private static final int TEXT = 0xFFEDEDED;
+    private static final int DIM = 0xFF8E8E8E;
+    private static final int ACCENT = 0xFFFFCC00;
+    private static final int GREEN = 0xFF34C759;
+    private static final int AMBER = 0xFFFFB020;
+    private static final int RED = 0xFFFF453A;
+    private static final int BUTTON = 0xFF262626;
+    private static final int BUTTON_ON = 0xFF3A3A3A;
+
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private TextView live;
+    private TextView jawnDot;
+    private TextView bleDot;
+    private TextView jawnState;
+    private TextView bleState;
     private TextView status;
     private EditText dirEdit;
     private CheckBox autostart;
@@ -35,110 +63,221 @@ public class JawnDashboardActivity extends Activity {
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        LinearLayout ll = new LinearLayout(this);
-        ll.setOrientation(LinearLayout.VERTICAL);
-        ll.setPadding(30, 30, 30, 30);
+        getWindow().setStatusBarColor(GROUND);
+        getWindow().setNavigationBarColor(GROUND);
 
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.jawn_logo);
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, dp(150));
-        logoLp.gravity = Gravity.CENTER_HORIZONTAL;
-        logo.setLayoutParams(logoLp);
-        logo.setAdjustViewBounds(true);
-        ll.addView(logo);
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(GROUND);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(22), dp(18), dp(30));
+        sv.addView(root);
+        setContentView(sv);
 
-        TextView title = new TextView(this);
-        title.setTextSize(22);
-        title.setText("JawnOS");
-        ll.addView(title);
+        header(root);
 
-        live = new TextView(this);
-        live.setTextSize(16);
-        live.setPadding(0, dp(8), 0, dp(8));
-        ll.addView(live);
-
+        // ---- live status ----
+        LinearLayout statusCard = card(root, "Status");
+        LinearLayout jawnRow = statusLine(statusCard);
+        jawnDot = (TextView) jawnRow.getChildAt(0);
+        jawnState = (TextView) jawnRow.getChildAt(1);
+        LinearLayout bleRow = statusLine(statusCard);
+        bleDot = (TextView) bleRow.getChildAt(0);
+        bleState = (TextView) bleRow.getChildAt(1);
         status = new TextView(this);
-        ll.addView(status);
+        status.setTextColor(DIM);
+        status.setTextSize(13);
+        status.setPadding(dp(2), dp(10), 0, 0);
+        statusCard.addView(status);
 
+        // ---- jawn ----
+        LinearLayout jawn = card(root, "Jawn");
+        buttonRow(jawn, new String[] { "Start", "Restart", "Stop" }, new Runnable[] {
+            () -> { saveSettings(); startRequestedAt = System.currentTimeMillis(); JawnLauncher.startJawn(self); toast("Starting jawn..."); pollNow(); },
+            () -> { saveSettings(); startRequestedAt = System.currentTimeMillis(); JawnLauncher.restartJawn(self); toast("Restarting jawn..."); pollNow(); },
+            () -> { startRequestedAt = 0; JawnLauncher.stopJawn(self); toast("Stopping jawn"); pollNow(); },
+        }, new boolean[] { true, false, false });
+
+        // ---- open ----
+        LinearLayout open = card(root, "Open");
+        fullButton(open, "JawnOS UI", true, () -> openNativeUi());
+        buttonRow(open, new String[] { "In browser", "Log", "Console" }, new Runnable[] {
+            () -> openUi(),
+            () -> startActivity(new Intent(self, JawnLogActivity.class)),
+            () -> startActivity(new Intent(self, TermuxActivity.class)),
+        }, null);
+
+        // ---- bluetooth ----
+        LinearLayout ble = card(root, "Bluetooth");
+        buttonRow(ble, new String[] { "Start bridge", "Stop bridge" }, new Runnable[] {
+            () -> { JawnLauncher.startBle(self); toast("Starting BLE bridge"); pollNow(); },
+            () -> { JawnLauncher.stopBle(self); toast("Stopping BLE bridge"); pollNow(); },
+        }, null);
+
+        // ---- permissions ----
+        LinearLayout perms = card(root, "Permissions");
+        buttonRow(perms, new String[] { "Overlay (dot)", "Device" }, new Runnable[] {
+            () -> openOverlaySettings(),
+            () -> grantDevicePermissions(),
+        }, null);
+
+        // ---- settings ----
+        LinearLayout settings = card(root, "Settings");
         dirEdit = new EditText(this);
         dirEdit.setHint("jawn folder in home (default: jawnos)");
         dirEdit.setText(JawnLauncher.getJawnDirName(this));
-        ll.addView(dirEdit);
-
+        dirEdit.setHintTextColor(DIM);
+        dirEdit.setTextColor(TEXT);
+        dirEdit.setBackgroundTintList(ColorStateList.valueOf(LINE));
+        settings.addView(dirEdit);
         autostart = new CheckBox(this);
         autostart.setText("Start jawn at boot");
+        autostart.setTextColor(TEXT);
+        autostart.setButtonTintList(ColorStateList.valueOf(ACCENT));
         autostart.setChecked(JawnLauncher.isAutostartEnabled(this));
-        ll.addView(autostart);
-
+        settings.addView(autostart);
         bleWithJawn = new CheckBox(this);
         bleWithJawn.setText("Start/stop the BLE bridge with jawn");
+        bleWithJawn.setTextColor(TEXT);
+        bleWithJawn.setButtonTintList(ColorStateList.valueOf(ACCENT));
         bleWithJawn.setChecked(JawnLauncher.isBleWithJawn(this));
-        ll.addView(bleWithJawn);
+        settings.addView(bleWithJawn);
+        fullButton(settings, "Save settings", false, () -> { saveSettings(); toast("Saved"); });
 
-        header(ll, "Jawn");
-        add(ll, "Start jawn", new Runnable() {
-            public void run() {
-                saveSettings();
-                startRequestedAt = System.currentTimeMillis();
-                JawnLauncher.startJawn(self);
-                toast("Starting jawn...");
-                pollNow();
-            }
-        });
-        add(ll, "Stop jawn", new Runnable() {
-            public void run() {
-                startRequestedAt = 0;
-                JawnLauncher.stopJawn(self);
-                toast("Stopping jawn");
-                pollNow();
-            }
-        });
-        add(ll, "Restart jawn", new Runnable() {
-            public void run() {
-                saveSettings();
-                startRequestedAt = System.currentTimeMillis();
-                JawnLauncher.restartJawn(self);
-                toast("Restarting jawn...");
-                pollNow();
-            }
-        });
-
-        header(ll, "Open");
-        add(ll, "Open JawnOS UI", new Runnable() { public void run() { openNativeUi(); } });
-        add(ll, "Open JawnOS UI in browser", new Runnable() { public void run() { openUi(); } });
-        add(ll, "Show jawn log", new Runnable() {
-            public void run() { startActivity(new Intent(self, JawnLogActivity.class)); }
-        });
-        add(ll, "Open console", new Runnable() {
-            public void run() { startActivity(new Intent(self, TermuxActivity.class)); }
-        });
-
-        header(ll, "BLE bridge");
-        add(ll, "Start BLE bridge", new Runnable() {
-            public void run() { JawnLauncher.startBle(self); toast("Starting BLE bridge"); pollNow(); }
-        });
-        add(ll, "Stop BLE bridge", new Runnable() {
-            public void run() { JawnLauncher.stopBle(self); toast("Stopping BLE bridge"); pollNow(); }
-        });
-
-        header(ll, "Permissions");
-        add(ll, "Grant overlay permission (dot)", new Runnable() { public void run() { openOverlaySettings(); } });
-        add(ll, "Grant device permissions", new Runnable() { public void run() { grantDevicePermissions(); } });
-
-        header(ll, "App");
-        add(ll, "Update app", new Runnable() { public void run() { offerUpdate(); } });
-
-        add(ll, "Save settings", new Runnable() {
-            public void run() { saveSettings(); toast("Saved"); }
-        });
-
-        // The panel is taller than a phone screen; scroll it so the lower
-        // groups (BLE bridge, Permissions) stay reachable.
-        ScrollView sv = new ScrollView(this);
-        sv.addView(ll);
-        setContentView(sv);
+        // ---- app ----
+        LinearLayout app = card(root, "App");
+        fullButton(app, "Update app", false, () -> offerUpdate());
     }
+
+    // ---- the look ----
+
+    private void header(LinearLayout root) {
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.jawn_logo);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(64));
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        logo.setLayoutParams(lp);
+        logo.setAdjustViewBounds(true);
+        root.addView(logo);
+
+        TextView title = new TextView(this);
+        title.setText("JawnOS");
+        title.setTextSize(24);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(TEXT);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
+        title.setPadding(0, dp(10), 0, dp(18));
+        root.addView(title);
+    }
+
+    /** A rounded card with an optional small caps title, added to the column. */
+    private LinearLayout card(LinearLayout root, String title) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(CARD);
+        bg.setCornerRadius(dp(18));
+        bg.setStroke(dp(1), LINE);
+        card.setBackground(bg);
+        card.setPadding(dp(14), dp(13), dp(14), dp(14));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(12);
+        card.setLayoutParams(lp);
+        if (title != null) {
+            TextView t = new TextView(this);
+            t.setText(title.toUpperCase());
+            t.setTextColor(DIM);
+            t.setTextSize(11);
+            t.setLetterSpacing(0.12f);
+            t.setTypeface(Typeface.DEFAULT_BOLD);
+            t.setPadding(dp(2), 0, 0, dp(9));
+            card.addView(t);
+        }
+        root.addView(card);
+        return card;
+    }
+
+    /** A coloured dot + label, returning the row so the dot can be recoloured. */
+    private LinearLayout statusLine(LinearLayout card) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView dot = new TextView(this);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(10), dp(10));
+        dlp.rightMargin = dp(10);
+        dot.setLayoutParams(dlp);
+        dot.setBackground(dot(DIM));
+        TextView label = new TextView(this);
+        label.setTextColor(TEXT);
+        label.setTextSize(16);
+        row.addView(dot);
+        row.addView(label);
+        card.addView(row);
+        return row;
+    }
+
+    private GradientDrawable dot(int color) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.OVAL);
+        d.setColor(color);
+        return d;
+    }
+
+    private void fullButton(LinearLayout card, String label, boolean primary, Runnable r) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(6), 0, 0);
+        View b = button(label, primary, r);
+        b.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        row.addView(b);
+        card.addView(row);
+    }
+
+    private void buttonRow(LinearLayout card, String[] labels, Runnable[] actions, boolean[] primary) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(6), 0, 0);
+        for (int i = 0; i < labels.length; i++) {
+            boolean p = primary != null && i < primary.length && primary[i];
+            View b = button(labels[i], p, actions[i]);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i < labels.length - 1) lp.rightMargin = dp(8);
+            b.setLayoutParams(lp);
+            row.addView(b);
+        }
+        card.addView(row);
+    }
+
+    private TextView button(String label, boolean primary, Runnable r) {
+        TextView b = new TextView(this);
+        b.setText(label);
+        b.setTextSize(15);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(12), dp(13), dp(12), dp(13));
+        b.setTextColor(primary ? 0xFF0A0A0A : TEXT);
+        StateListDrawable bg = new StateListDrawable();
+        bg.addState(new int[] { android.R.attr.state_pressed }, rounded(primary ? 0xE6B800 : BUTTON_ON, primary));
+        bg.addState(new int[] {}, rounded(primary ? ACCENT : BUTTON, primary));
+        RippleDrawable rip = new RippleDrawable(ColorStateList.valueOf(primary ? 0x40000000 : 0x33FFFFFF), bg, null);
+        b.setBackground(rip);
+        b.setClickable(true);
+        b.setOnClickListener(v -> r.run());
+        return b;
+    }
+
+    private GradientDrawable rounded(int color, boolean primary) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(13));
+        if (!primary) d.setStroke(dp(1), LINE);
+        return d;
+    }
+
+    // ---- lifecycle and status ----
 
     protected void onResume() {
         super.onResume();
@@ -175,26 +314,33 @@ public class JawnDashboardActivity extends Activity {
 
     private void render(boolean jawnUp, boolean bleUp) {
         String js;
+        int colour;
         if (jawnUp) {
             startRequestedAt = 0;
             js = "running";
+            colour = GREEN;
         } else if (startRequestedAt > 0) {
             long s = (System.currentTimeMillis() - startRequestedAt) / 1000;
-            js = (s < 150) ? ("starting... (" + s + "s)") : "not running";
+            if (s < 150) { js = "starting... (" + s + "s)"; colour = AMBER; }
+            else { js = "not running"; colour = RED; }
         } else {
             js = "not running";
+            colour = RED;
         }
-        live.setText("jawn: " + js + "\nBLE bridge: " + (bleUp ? "running" : "stopped"));
+        jawnState.setText("jawn  —  " + js);
+        jawnDot.setBackground(dot(colour));
+        bleState.setText("BLE bridge  —  " + (bleUp ? "running" : "stopped"));
+        bleDot.setBackground(dot(bleUp ? GREEN : DIM));
     }
 
     private void updateEnvStatus() {
         boolean overlay = Settings.canDrawOverlays(this);
-        status.setText("overlay permission: " + (overlay ? "granted" : "missing")
-            + "\nport: " + JawnLauncher.getJawnPort(this)
-            + "\nversion: " + JawnLauncher.getJawnVersion(this)
-            + "\nfolder: " + JawnLauncher.getJawnDirPath(this));
+        status.setText("overlay " + (overlay ? "granted" : "missing")
+            + "   ·   port " + JawnLauncher.getJawnPort(this)
+            + "   ·   v" + JawnLauncher.getJawnVersion(this));
+        status.append("\n" + JawnLauncher.getJawnDirPath(this));
         JawnUpdater.Release up = JawnUpdater.updateAvailable(this);
-        status.append("\napp: " + JawnUpdater.installedVersionCode(this)
+        status.append("\napp " + JawnUpdater.installedVersionCode(this)
             + (up == null ? " (up to date)" : " -> " + up.versionCode + " available"));
     }
 
@@ -221,17 +367,14 @@ public class JawnDashboardActivity extends Activity {
     }
 
     /** The full screen view in the app's own WebView - the home screen icon's
-     *  target (see JawnWebViewActivity); no Chrome, no WebAPK, no browser trust
-     *  of the house certificate to lose. */
+     *  target (see JawnWebViewActivity). */
     private void openNativeUi() {
         startActivity(new Intent(self, JawnWebViewActivity.class));
     }
 
-    /** The old path: hand the ticket to the browser (the installed PWA). */
+    /** The browser path: hand the ticket to the installed PWA. */
     private void openUi() {
         int port = JawnLauncher.getJawnPort(this);
-        // the saved ticket when there is one (the fqdn origin the installed PWA
-        // lives on), else the manager on config.json domain, else loopback
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(JawnLauncher.getUiUrl(this, port))));
     }
 
@@ -254,26 +397,6 @@ public class JawnDashboardActivity extends Activity {
         } catch (Throwable t) {
             toast("Could not open overlay settings");
         }
-    }
-
-    private void header(LinearLayout ll, String label) {
-        TextView t = new TextView(this);
-        t.setText(label);
-        t.setPadding(0, dp(14), 0, dp(2));
-        t.setTypeface(t.getTypeface(), android.graphics.Typeface.BOLD);
-        ll.addView(t);
-    }
-
-    private void add(LinearLayout ll, String label, final Runnable action) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                action.run();
-            }
-        });
-        ll.addView(b);
     }
 
     private int dp(int v) {
