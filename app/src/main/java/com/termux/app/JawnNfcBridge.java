@@ -27,7 +27,9 @@ import java.util.Arrays;
  * was written against - the web side presents the same NDEFReader surface over
  * this bridge (public/js/manager/manager.js, jawnNfcAdapter()).
  *
- * Reading is continuous while a scan is armed (reader mode); a tag discovered
+ * Reading is continuous while the view is foregrounded (reader mode is armed on
+ * resume, not only when the page calls scan()), so a tag tapped anywhere in the
+ * app reaches the page instead of Android's default tag viewer. A tag discovered
  * while a write is pending is written instead. The tag's NDEF records are
  * marshalled to the same shape Web NFC hands the page: {recordType, mediaType,
  * encoding, data} with data base64 (the JS side turns it back into bytes).
@@ -44,6 +46,7 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     private final NfcAdapter adapter;
 
     private volatile boolean scanning = false;
+    private volatile boolean foreground = false;
     private volatile NdefMessage pendingWrite = null;
 
     public JawnNfcBridge(Activity activity, Poster poster) {
@@ -70,7 +73,10 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     @JavascriptInterface
     public String stopScan() {
         scanning = false;
-        activity.runOnUiThread(this::disableReaderMode);
+        // Reader mode stays on while the view is foregrounded (see onResume):
+        // a tag tapped anywhere in the app should reach the page rather than
+        // Android's default tag viewer - the "magic" a browser's Web NFC gives.
+        if (!foreground) activity.runOnUiThread(this::disableReaderMode);
         return "ok";
     }
 
@@ -89,11 +95,16 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
 
     // ---- lifecycle (called by the activity on the UI thread) ----
 
+    // The view is foregrounded: listen continuously, whether or not the page
+    // has armed a scan. Android's reader mode then delivers every tag to us
+    // instead of the default "new tag collected" screen.
     public void onResume() {
-        if (scanning || pendingWrite != null) enableReaderMode();
+        foreground = true;
+        enableReaderMode();
     }
 
     public void onPause() {
+        foreground = false;
         disableReaderMode();
     }
 
