@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
+import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
@@ -48,8 +49,11 @@ public class JawnWebViewActivity extends Activity {
     private String houseHost = "";
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
+    private GeolocationPermissions.Callback pendingGeo;
+    private String pendingGeoOrigin;
     private static final int REQ_PERMS = 7001;
     private static final int REQ_FILE = 7002;
+    private static final int REQ_GEO = 7003;
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -63,6 +67,9 @@ public class JawnWebViewActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // navigator.geolocation is refused by a WebView unless asked for; the
+        // web app records travel and stamps appointments with it.
+        s.setGeolocationEnabled(true);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
@@ -236,6 +243,26 @@ public class JawnWebViewActivity extends Activity {
         }
 
         @Override
+        public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+            if (!inHouse(origin)) { callback.invoke(origin, false, false); return; }
+            if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                // ask once; the answer is delivered in onRequestPermissionsResult
+                if (pendingGeo == null) {
+                    pendingGeo = callback;
+                    pendingGeoOrigin = origin;
+                    requestPermissions(new String[] {
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION }, REQ_GEO);
+                } else {
+                    callback.invoke(origin, false, false);
+                }
+                return;
+            }
+            callback.invoke(origin, true, false);
+        }
+
+        @Override
         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
             if (pendingFile != null) { pendingFile.onReceiveValue(null); }
             pendingFile = callback;
@@ -252,6 +279,11 @@ public class JawnWebViewActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQ_GEO) {
+            boolean geoOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+            if (pendingGeo != null) { pendingGeo.invoke(pendingGeoOrigin, geoOk, false); pendingGeo = null; pendingGeoOrigin = null; }
+            return;
+        }
         if (requestCode != REQ_PERMS || pendingPermission == null) return;
         boolean granted = true;
         for (int r : results) { if (r != PackageManager.PERMISSION_GRANTED) granted = false; }
