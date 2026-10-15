@@ -8,7 +8,7 @@
   html, body { height: 100%; margin: 0; background: #000; color: #ededed;
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   body { display: flex; flex-direction: column; align-items: center;
-         justify-content: center; gap: 30px; padding: 24px; box-sizing: border-box; }
+         justify-content: center; gap: 22px; padding: 24px; box-sizing: border-box; }
   .logo { height: 34vh; max-height: 330px; animation: glow 2.4s ease-in-out infinite; }
   @keyframes glow {
     0%, 100% { filter: drop-shadow(0 0 22px rgba(255, 204, 0, 0.30)); }
@@ -18,16 +18,24 @@
   button { background: #ffcc00; color: #0a0a0a; border: none; border-radius: 13px;
            padding: 14px 24px; font-size: 16px; font-weight: 700; }
   button:active { background: #e6b800; }
+  button.ghost { background: #262626; color: #ededed; border: 1px solid #2c2c2c; }
 </style>
 </head>
 <body>
   <img class="logo" src="jawn_logo.png" alt="JawnOS">
   <div class="status" id="status">Reaching JawnOS&hellip;</div>
   <button onclick="admin()">Admin Panel</button>
+  <button id="retry" class="ghost" style="display:none;" onclick="retry()">Try again</button>
   <script>
-    // window.JawnAdmin is the app's admin-gear bridge (JawnWebViewActivity).
+    // window.JawnAdmin is the app's bridge (JawnWebViewActivity).
     function admin() {
       if (window.JawnAdmin && window.JawnAdmin.open) { window.JawnAdmin.open(); }
+    }
+    function retry() {
+      if (window.JawnAdmin && window.JawnAdmin.retry) { window.JawnAdmin.retry(); }
+    }
+    if (window.JawnAdmin && window.JawnAdmin.retry) {
+      document.getElementById('retry').style.display = 'inline-block';
     }
     // the app nudges this while it waits for jawn to answer
     window.jawnSplashStatus = function (text) {

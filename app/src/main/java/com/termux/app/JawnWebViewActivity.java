@@ -49,6 +49,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnCamera camera;
     private String houseHost = "";
     private boolean gateFallback = false;
+    private long pausedAt = 0;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
     private GeolocationPermissions.Callback pendingGeo;
@@ -172,6 +173,11 @@ public class JawnWebViewActivity extends Activity {
         public void open() {
             runOnUiThread(() -> openDashboard(false));
         }
+
+        @android.webkit.JavascriptInterface
+        public void retry() {
+            runOnUiThread(() -> { gateFallback = false; loadWhenReady(destination()); });
+        }
     }
 
     /** Run a script in the page (the NFC bridge posts events through here). */
@@ -183,10 +189,23 @@ public class JawnWebViewActivity extends Activity {
         super.onResume();
         immersive();
         if (nfc != null) nfc.onResume();
+        if (web != null) {
+            // Resume the WebView's own timers, then - after a long absence (the
+            // phone slept, so its sockets died) - reload the destination rather
+            // than sit on a frozen timeline, the close-and-reopen the user had to
+            // do by hand.
+            web.onResume();
+            if (pausedAt > 0 && System.currentTimeMillis() - pausedAt > 60000) {
+                loadWhenReady(destination());
+            }
+        }
+        pausedAt = 0;
     }
 
     protected void onPause() {
         if (nfc != null) nfc.onPause();
+        if (web != null) web.onPause();
+        pausedAt = System.currentTimeMillis();
         super.onPause();
     }
 
@@ -345,17 +364,21 @@ public class JawnWebViewActivity extends Activity {
         @Override
         public void onPageFinished(WebView view, String url) {
             // A lapsed session cookie makes the manager answer with the Gate and
-            // the view sits on the login screen though a fresh ticket is on
-            // hand. Spot the Gate and fall back to the ticket once.
-            if (gateFallback || url == null) return;
+            // the view sits on the login screen though a fresh ticket is on hand.
+            // Spot the Gate, fall back to the ticket once - and if the Gate
+            // stands even after that, show the splash, whose Admin Panel and Try
+            // again buttons always work, so the view is never trapped.
+            if (url == null) return;
             String manager = JawnLauncher.getManagerUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
             if (!url.startsWith(manager)) return;
             view.evaluateJavascript("(document.getElementById('welcome_logo')||document.getElementById('admin_panel_button'))?'gate':'ok'", value -> {
-                if (value != null && value.contains("gate")) {
+                if (value == null || !value.contains("gate")) return;
+                if (!gateFallback) {
                     gateFallback = true;
                     String ticket = JawnLauncher.getUiUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
-                    if (!ticket.equals(url)) view.loadUrl(ticket);
+                    if (!ticket.equals(url)) { view.loadUrl(ticket); return; }
                 }
+                showSplash();
             });
         }
 
