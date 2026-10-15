@@ -362,10 +362,29 @@ public class JawnDashboardActivity extends Activity {
             + (up == null ? " (up to date)" : " -> " + up.versionCode + " available"));
     }
 
-    /** Install the newest staged app APK - one tap. */
+    /** Install the newest staged app APK - one tap, with a fresh pull first. */
     private void offerUpdate() {
-        JawnUpdater.Release r = JawnUpdater.updateAvailable(self);
-        if (r == null) { toast("app is up to date"); return; }
+        toast("checking for an update...");
+        new Thread(new Runnable() {
+            public void run() {
+                // Pull the newest build from the mesh now, then poll the local
+                // releases/ dir while it lands, so a stale scan cannot report
+                // "up to date" the moment a newer build sits on a peer.
+                JawnUpdater.sync(self);
+                for (int i = 0; i < 30; i++) {
+                    final JawnUpdater.Release r = JawnUpdater.updateAvailable(self);
+                    if (r != null) {
+                        ui.post(new Runnable() { public void run() { installUpdate(r); } });
+                        return;
+                    }
+                    try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+                }
+                ui.post(new Runnable() { public void run() { toast("app is up to date"); } });
+            }
+        }).start();
+    }
+
+    private void installUpdate(JawnUpdater.Release r) {
         if (!JawnUpdater.canInstall(self)) {
             JawnUpdater.openInstallSettings(self);
             toast("Allow installs, then tap Update again");

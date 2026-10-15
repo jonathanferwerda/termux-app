@@ -11,8 +11,17 @@ import android.provider.Settings;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.net.URL;
+import java.security.cert.X509Certificate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import android.webkit.CookieManager;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Self-update from the staged releases the mesh replicates into
@@ -106,6 +115,41 @@ public class JawnUpdater {
             return "installer opened";
         } catch (Throwable t) {
             return "install failed: " + t;
+        }
+    }
+
+    /** Ask jawn to pull the newest build now (GitHub + peers), so the local
+     *  releases/ dir is fresh before updateAvailable() scans it. Best-effort: a
+     *  failed call just leaves the existing scan in place. */
+    public static void sync(Context context) {
+        int port = JawnLauncher.getJawnPort(context);
+        String manager = JawnLauncher.getManagerUrl(context, port);
+        HttpsURLConnection conn = null;
+        try {
+            conn = (HttpsURLConnection) new URL(manager + "/app_release_sync").openConnection();
+            // the house serves a self-signed wildcard cert; trust it for this
+            // loopback call only
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, new TrustManager[] { new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] chain, String auth) {}
+                public void checkServerTrusted(X509Certificate[] chain, String auth) {}
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            } }, new java.security.SecureRandom());
+            conn.setSSLSocketFactory(sc.getSocketFactory());
+            conn.setHostnameVerifier((host, session) -> true);
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(20000);
+            String cookie = CookieManager.getInstance().getCookie(manager);
+            if (cookie != null && cookie.length() > 0) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            conn.connect();
+            conn.getResponseCode();
+        } catch (Throwable t) {
+            // fall through; updateAvailable() still re-scans locally
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable t) { } }
         }
     }
 }
