@@ -1,0 +1,25 @@
+package com.termux.app;
+
+/**
+ * A tiny shared slot between the phone components: the CallScreeningService puts
+ * the ringing call's number here the moment the phone rings (Android 12+ no
+ * longer hands it to a plain PhoneStateListener), and the WebView bridge reads it
+ * to stamp the call's appointment with the caller's own app.
+ */
+public class JawnPhoneState {
+
+    public static volatile String incomingNumber = "";
+    public static volatile long incomingAt = 0;
+
+    public static void incoming(String number) {
+        incomingNumber = number == null ? "" : number;
+        incomingAt = System.currentTimeMillis();
+    }
+
+    /** The number of the call ringing now, or "" when there is none or it is stale. */
+    public static String freshNumber(long withinMs) {
+        if (incomingNumber == null || incomingNumber.isEmpty()) return "";
+        if (System.currentTimeMillis() - incomingAt > withinMs) return "";
+        return incomingNumber;
+    }
+}

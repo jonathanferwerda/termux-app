@@ -204,3 +204,15 @@ work and a full-width build has crashed it (2026-10-10).
     the incoming number from a plain PhoneStateListener (dialer / call-screening
     role needed), so ring and hangup still fire the event and the number is
     filled from the call log right after.
+
+## Deltas round 14 (call screening = caller id)
+
+22. JawnCallScreeningService + JawnPhoneState: with the Call screening role
+    granted, Android hands each incoming call's number to onScreenCall (which a
+    plain PhoneStateListener no longer gets on Android 12+). The number is left
+    in JawnPhoneState, and the WebView bridge (JawnContactsBridge) reads it - the
+    RINGING state event carries the caller, incomingNumber() exposes it to the
+    phone app, and screeningRole()/requestScreening() read and ask for the role.
+    The service never blocks a call. Manifest: the service declared with
+    BIND_SCREENING_SERVICE, alongside READ_CONTACTS/READ_CALL_LOG/READ_PHONE_STATE
+    (round 13) for the rest of the phone surface.

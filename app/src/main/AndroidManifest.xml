@@ -201,6 +201,21 @@
             </intent-filter>
         </receiver>
 
+
+        <!-- The phone app's caller id: with the Call screening role granted,
+             Android hands each incoming call's number to this service (a plain
+             phone-state listener no longer gets it on Android 12+), and the
+             WebView bridge reads JawnPhoneState to stamp the call's appointment
+             with the caller's own app. It never blocks a call. -->
+        <service
+            android:name=".app.JawnCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
         <activity
             android:name=".app.JawnLogActivity"
             android:exported="false"

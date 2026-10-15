@@ -42,6 +42,7 @@ public class JawnContactsBridge {
     }
 
     public static final int REQ_PERMS = 7004;
+    public static final int REQ_SCREENING = 7005;
 
     private static final String[] PERMS = {
         Manifest.permission.READ_CONTACTS,
@@ -86,6 +87,33 @@ public class JawnContactsBridge {
     public String callLog(int limit) {
         if (!hasPerms()) return "{\"error\":\"no-permission\"}";
         return callLogJson(limit);
+    }
+
+    @JavascriptInterface
+    public String incomingNumber() {
+        return JawnPhoneState.freshNumber(15000);
+    }
+
+    @JavascriptInterface
+    public String screeningRole() {
+        if (Build.VERSION.SDK_INT < 29) return "no";
+        try {
+            android.app.role.RoleManager rm = (android.app.role.RoleManager) activity.getSystemService(android.content.Context.ROLE_SERVICE);
+            return (rm != null && rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)) ? "yes" : "no";
+        } catch (Throwable t) { return "no"; }
+    }
+
+    @JavascriptInterface
+    public void requestScreening() {
+        if (Build.VERSION.SDK_INT < 29) return;
+        activity.runOnUiThread(() -> {
+            try {
+                android.app.role.RoleManager rm = (android.app.role.RoleManager) activity.getSystemService(android.content.Context.ROLE_SERVICE);
+                if (rm == null) return;
+                if (rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)) { emitContacts("screening", "{\"held\":true}"); return; }
+                activity.startActivityForResult(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING), REQ_SCREENING);
+            } catch (Throwable ignored) { }
+        });
     }
 
     // ---- lifecycle (called by the activity on the UI thread) ----
@@ -224,6 +252,10 @@ public class JawnContactsBridge {
         if (state == TelephonyManager.CALL_STATE_RINGING) s = "RINGING";
         else if (state == TelephonyManager.CALL_STATE_OFFHOOK) s = "OFFHOOK";
         else s = "IDLE";
+        if (number == null || number.isEmpty()) {
+            String fresh = JawnPhoneState.freshNumber(15000);
+            if (!fresh.isEmpty()) number = fresh;
+        }
         try {
             JSONObject o = new JSONObject().put("state", s).put("number", number == null ? "" : number);
             poster.post("window.__jawnPhoneEvent && window.__jawnPhoneEvent('state'," + o.toString() + ");");
