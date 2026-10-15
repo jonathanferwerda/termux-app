@@ -291,6 +291,14 @@ public class JawnDashboardActivity extends Activity {
         resumed = true;
         updateEnvStatus();
         pollNow();
+        // An app update (or an Android process restart) can take the Termux
+        // session that runs jawn down with it. Bring it back on open when the
+        // user asked for autostart, so "not running" never waits on a manual
+        // Start after an update.
+        if (!JawnLauncher.jawnIsUp(this) && !JawnLauncher.jawnMasterAlive()
+                && JawnLauncher.isAutostartEnabled(this)) {
+            JawnLauncher.startJawnBackground(this);
+        }
     }
 
     protected void onPause() {
@@ -307,7 +315,8 @@ public class JawnDashboardActivity extends Activity {
                 public void run() {
                     final boolean jawn = JawnLauncher.jawnIsUp(self);
                     final boolean ble = JawnLauncher.bleIsUp();
-                    ui.post(new Runnable() { public void run() { render(jawn, ble); } });
+                    final boolean master = JawnLauncher.jawnMasterAlive();
+                    ui.post(new Runnable() { public void run() { render(jawn, ble, master); } });
                 }
             }).start();
             ui.postDelayed(this, 2000);
@@ -319,13 +328,15 @@ public class JawnDashboardActivity extends Activity {
         if (resumed) poll.run();
     }
 
-    private void render(boolean jawnUp, boolean bleUp) {
+    private void render(boolean jawnUp, boolean bleUp, boolean master) {
         String js;
         int colour;
         if (jawnUp) {
             startRequestedAt = 0;
             js = "running";
             colour = GREEN;
+        } else if (master) {
+            js = "restarting..."; colour = AMBER;
         } else if (startRequestedAt > 0) {
             long s = (System.currentTimeMillis() - startRequestedAt) / 1000;
             if (s < 150) { js = "starting... (" + s + "s)"; colour = AMBER; }

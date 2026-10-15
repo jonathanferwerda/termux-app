@@ -116,6 +116,19 @@ public class JawnLauncher {
             || portOpen("127.0.0.1", 3000, 400);
     }
 
+    /** True if the jawn *master* process is alive, even while the tree is booting.
+     *  The port is down during a restart, so the dashboard can say "restarting"
+     *  rather than "not running" while the new tree comes up. */
+    public static boolean jawnMasterAlive() {
+        try {
+            Process p = new ProcessBuilder("sh", "-c", "pgrep -f 'perl [.]/jawn' >/dev/null").start();
+            p.waitFor();
+            return p.exitValue() == 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** The BLE bridge listens on loopback 45999. */
     public static boolean bleIsUp() {
         return portOpen("127.0.0.1", 45999, 400);
