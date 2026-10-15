@@ -49,7 +49,6 @@ public class JawnWebViewActivity extends Activity {
     private JawnCamera camera;
     private String houseHost = "";
     private boolean gateFallback = false;
-    private long pausedAt = 0;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
     private GeolocationPermissions.Callback pendingGeo;
@@ -190,22 +189,17 @@ public class JawnWebViewActivity extends Activity {
         immersive();
         if (nfc != null) nfc.onResume();
         if (web != null) {
-            // Resume the WebView's own timers, then - after a long absence (the
-            // phone slept, so its sockets died) - reload the destination rather
-            // than sit on a frozen timeline, the close-and-reopen the user had to
-            // do by hand.
+            // Resume the WebView's own timers. The page reconnects its own
+            // sockets when it becomes visible again (websocket.js wakes on
+            // visibilitychange/focus/pageshow/resume), so a full reload here only
+            // lost the open windows and flashed the splash on every wake.
             web.onResume();
-            if (pausedAt > 0 && System.currentTimeMillis() - pausedAt > 60000) {
-                loadWhenReady(destination());
-            }
         }
-        pausedAt = 0;
     }
 
     protected void onPause() {
         if (nfc != null) nfc.onPause();
         if (web != null) web.onPause();
-        pausedAt = System.currentTimeMillis();
         super.onPause();
     }
 
