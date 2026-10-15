@@ -2,7 +2,7 @@
 
 Base: upstream tag v0.118.3, branch jawnos.
 Purpose: host and supervise jawnos (the Perl app) on Android; see ../PLAN.md.
-> **Agents: bump versionCode and publish on every shipping change (see AGENTS.md).**
+> **Agents: bump versionCode and publish on every change to the APK (see AGENTS.md).**
 
 ## Deltas from upstream (keep minimal; list every change here)
 

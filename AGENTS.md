@@ -4,13 +4,14 @@ This repo (`~/jawnos-app/termux-app`, branch `jawnos`, remote `fork`) is the
 Android app that hosts and supervises jawnos on a phone/tablet. `JAWNOS.md`
 lists every fork delta. Read this first.
 
-## Rule 1 — every shipping change gets a version bump AND a publish
+## Rule 1 — every change to the APK is a version change
 
-If you change the app and want a device to take it, you MUST, in the same change:
+Any change that goes into the APK — Java, `res/`, `AndroidManifest.xml`,
+`app/build.gradle` — MUST, in the same change:
 
 1. **Bump `versionCode`** (integer, +1) **and the `versionName` patch** in
    `app/build.gradle`, and
-2. **build, stage and publish** the APK.
+2. **build, stage and publish** it.
 
 Why: the whole update path compares an APK's `versionCode` against the installed
 one — the in-app updater (the dashboard's "Update app"), the peer/GitHub sync
@@ -19,6 +20,9 @@ A rebuild that reuses a `versionCode` reads as **"up to date"** and **no device
 will take it** (this is exactly why a build once sat uninstalled while the app
 kept saying it was current). Never reuse or re-ship a number; always step above
 the last release (1027 / 0.118.28).
+
+A change that never enters the APK — this file, `JAWNOS.md`, `README.md` — is not
+a version change.
 
 ## The one-step way (preferred)
 
