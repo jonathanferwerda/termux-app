@@ -190,3 +190,17 @@ work and a full-width build has crashed it (2026-10-10).
       (public/js/manager/manager.js, jawnNfcAdapter()), so scan and write are
       unchanged. New permission android.permission.NFC; android.hardware.nfc
       is required="false". JAWNOS.md deltas/round 11.
+
+## Deltas round 13 (native contacts + call state)
+
+21. JawnContactsBridge: exposes window.JawnContacts to the manager WebView -
+    read-only contacts (list/search via ContactsContract), the call log
+    (CallLog.Calls), and live call-state events (RINGING/OFFHOOK/IDLE through
+    window.__jawnPhoneEvent). No system role; the three READ_* runtime
+    permissions are asked for when the page calls request() (or granted with
+    `pm grant` on a sideloaded device). Wired in JawnWebViewActivity alongside
+    JawnNFC/JawnCamera, with onResume/onPause lifecycle and an
+    onRequestPermissionsResult branch (REQ_PERMS = 7004). Android 12+ withholds
+    the incoming number from a plain PhoneStateListener (dialer / call-screening
+    role needed), so ring and hangup still fire the event and the number is
+    filled from the call log right after.

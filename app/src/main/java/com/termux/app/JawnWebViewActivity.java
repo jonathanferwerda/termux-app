@@ -47,6 +47,7 @@ public class JawnWebViewActivity extends Activity {
     private WebView web;
     private JawnNfcBridge nfc;
     private JawnCamera camera;
+    private JawnContactsBridge contacts;
     private String houseHost = "";
     private boolean gateFallback = false;
     private PermissionRequest pendingPermission;
@@ -82,6 +83,8 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(nfc, "JawnNFC");
         camera = new JawnCamera(this, this::runJs);
         web.addJavascriptInterface(camera, "JawnCamera");
+        contacts = new JawnContactsBridge(this, this::runJs);
+        web.addJavascriptInterface(contacts, "JawnContacts");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
 
         FrameLayout root = new FrameLayout(this);
@@ -188,6 +191,7 @@ public class JawnWebViewActivity extends Activity {
         super.onResume();
         immersive();
         if (nfc != null) nfc.onResume();
+        if (contacts != null) contacts.onResume();
         if (web != null) {
             // Resume the WebView's own timers. The page reconnects its own
             // sockets when it becomes visible again (websocket.js wakes on
@@ -199,6 +203,7 @@ public class JawnWebViewActivity extends Activity {
 
     protected void onPause() {
         if (nfc != null) nfc.onPause();
+        if (contacts != null) contacts.onPause();
         if (web != null) web.onPause();
         super.onPause();
     }
@@ -328,6 +333,7 @@ public class JawnWebViewActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == JawnContactsBridge.REQ_PERMS) { if (contacts != null) contacts.onPermissionResult(); return; }
         if (requestCode == REQ_GEO) {
             boolean geoOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             if (pendingGeo != null) { pendingGeo.invoke(pendingGeoOrigin, geoOk, false); pendingGeo = null; pendingGeoOrigin = null; }
