@@ -225,3 +225,17 @@ work and a full-width build has crashed it (2026-10-10).
   share() fallback that hands the OS messaging app the file otherwise.
   Registered in JawnWebViewActivity beside the camera and contacts
   bridges. SEND_SMS permission added to the manifest.
+
+## Deltas round O (sms + dialer role eligibility)
+
+- JawnSmsReceiver: the SMS_DELIVERED receiver the default-sms-app role asks
+  for - when JawnOS is the default sms app, delivered texts land here first;
+  they are logged and the newest is held in JawnPhoneState for the webview.
+- JawnComposeSmsActivity / JawnDialerActivity: the role's faces - the
+  system's sms send and dial intents open the house (the number and a
+  pre-filled sms body ride along as jawn_sms_number / jawn_sms_body /
+  jawn_dial_number extras for the web side to read).
+- JawnInCallService + JawnInCallActivity: the default-dialer role's
+  InCallService, with a full-screen answer / decline / hang-up screen; the
+  ringing number still feeds JawnPhoneState so the call appointment keeps
+  stamping itself. RECEIVE_SMS, READ_SMS and CALL_PHONE permissions added.

@@ -16,6 +16,17 @@ public class JawnPhoneState {
         incomingAt = System.currentTimeMillis();
     }
 
+    // ---- the newest delivered text (fed by JawnSmsReceiver) ----
+    public static volatile String incomingSmsSender = "";
+    public static volatile String incomingSmsBody = "";
+    public static volatile long incomingSmsAt = 0;
+
+    public static void incomingSms(String sender, String body) {
+        incomingSmsSender = sender == null ? "" : sender;
+        incomingSmsBody = body == null ? "" : body;
+        incomingSmsAt = System.currentTimeMillis();
+    }
+
     /** The number of the call ringing now, or "" when there is none or it is stale. */
     public static String freshNumber(long withinMs) {
         if (incomingNumber == null || incomingNumber.isEmpty()) return "";
