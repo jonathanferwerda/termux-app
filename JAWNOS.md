@@ -269,3 +269,15 @@ work and a full-width build has crashed it (2026-10-10).
   answer/decline buttons on the house's dark ground.
 - Wired in JawnWebViewActivity beside JawnNFC/JawnCamera/JawnContacts/JawnSms
   ("JawnPhone").
+
+## Deltas round R (the call screen wears a face)
+
+- JawnInCallActivity: the house's mark (JawnOS) sits at the top of the screen and
+  the caller gets a round picture - the person's own image when the house sent
+  one, the app's own logo (drawable-nodpi/jawn_logo.png) when it did not. The
+  picture arrives as a data URI, is decoded and centre-cropped through a circular
+  shader, and is repainted once per caller rather than once per tick.
+- JawnPhoneBridge: the synced blob carries avatars as well now (last-ten digits ->
+  data URI), so the call screen needs no network of its own: the page fetches the
+  whole directory at once (GET /manager/phone/sync) and the activity only decodes
+  what it already has when the phone rings.

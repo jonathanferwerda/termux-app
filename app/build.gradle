@@ -31,8 +31,8 @@ android {
         applicationId "com.termux"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 1036
-        versionName "0.118.37"
+        versionCode 1037
+        versionName "0.118.38"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

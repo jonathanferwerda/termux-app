@@ -18,6 +18,8 @@ import java.util.Iterator;
  *             refuses a listed caller before the phone rings.
  *   names   - the house's numbers by name. The in-call screen names the caller,
  *             and the app's contacts can wear the house's own names.
+ *   avatars - a small round picture per number, as a data URI, for the in-call
+ *             screen; the app's own logo stands in for anyone without one.
  *
  * The blob is kept in SharedPreferences rather than a static: call screening is
  * often started into a process with no WebView up, so the list has to be there
@@ -82,17 +84,26 @@ public class JawnPhoneBridge {
 
     /** The house's name for this number, or "" when it does not know it. */
     public static String nameFor(Context context, String number) {
+        return valueFor(context, "names", number);
+    }
+
+    /** The caller's picture as a data URI, or "" when the house has none. */
+    public static String avatarFor(Context context, String number) {
+        return valueFor(context, "avatars", number);
+    }
+
+    private static String valueFor(Context context, String key, String number) {
         String want = lastTen(number);
         if (want.isEmpty()) return "";
         try {
-            JSONObject names = factsOf(context).optJSONObject("names");
-            if (names == null) return "";
-            Iterator<String> keys = names.keys();
+            JSONObject map = factsOf(context).optJSONObject(key);
+            if (map == null) return "";
+            Iterator<String> keys = map.keys();
             while (keys.hasNext()) {
-                String key = keys.next();
-                if (lastTen(key).equals(want)) {
-                    String name = names.optString(key, "");
-                    return name == null ? "" : name;
+                String k = keys.next();
+                if (lastTen(k).equals(want)) {
+                    String value = map.optString(k, "");
+                    return value == null ? "" : value;
                 }
             }
         } catch (Throwable ignored) { }

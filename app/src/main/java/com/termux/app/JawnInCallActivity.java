@@ -1,36 +1,50 @@
 package com.termux.app;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.BitmapShader;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.telecom.Call;
+import android.util.Base64;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import com.termux.R;
 
 /**
- * The in-call screen: who is calling, and answer / decline / hang up. It is shown
- * by JawnInCallService (the dialer role's InCallService), wakes over the lock
- * screen (FLAG_SHOW_WHEN_LOCKED + TURN_SCREEN_ON), and closes itself once the
- * call is gone. The caller wears the house's own name for the number when the
- * house knows one - JawnPhoneBridge keeps the numbers by name synced from
- * /manager/phone/sync - and the raw number otherwise.
+ * The in-call screen: who is calling, and answer / decline / hang up. It wakes
+ * over the lock screen (FLAG_SHOW_WHEN_LOCKED + TURN_SCREEN_ON) and closes itself
+ * once the call is gone.
+ *
+ * The house's own mark sits at the top, and the caller wears a round picture: the
+ * person's own image when the house sent one (JawnPhoneBridge keeps the pictures
+ * synced from /manager/phone/sync), the app's logo when it did not - and the
+ * house's name for the number above the raw number either way.
  */
 public class JawnInCallActivity extends Activity {
 
     private final Handler handler = new Handler();
+    private ImageView avatar;
     private TextView name;
     private TextView number;
     private TextView status;
     private Button answer;
     private Button decline;
+    private String paintedFor = null;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -41,16 +55,29 @@ public class JawnInCallActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(28), dp(28), dp(28), dp(28));
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(28), dp(40), dp(28), dp(28));
         root.setBackgroundColor(Color.parseColor("#0d1117"));
 
         TextView house = new TextView(this);
         house.setText("JawnOS");
         house.setTextColor(Color.parseColor("#4a90d9"));
-        house.setTextSize(14);
+        house.setTextSize(15);
+        house.setLetterSpacing(0.15f);
         house.setGravity(Gravity.CENTER);
-        house.setPadding(0, 0, 0, dp(24));
+
+        // the caller's half: everything below the mark, centred in what is left
+        LinearLayout middle = new LinearLayout(this);
+        middle.setOrientation(LinearLayout.VERTICAL);
+        middle.setGravity(Gravity.CENTER);
+        middle.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        avatar = new ImageView(this);
+        avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(dp(180), dp(180));
+        ap.bottomMargin = dp(20);
+        avatar.setLayoutParams(ap);
 
         name = new TextView(this);
         name.setTextColor(Color.WHITE);
@@ -77,12 +104,14 @@ public class JawnInCallActivity extends Activity {
         decline = pill("Decline", "#b0342e");
         decline.setOnClickListener(v -> JawnInCallService.reject());
 
+        middle.addView(avatar);
+        middle.addView(name);
+        middle.addView(number);
+        middle.addView(status);
+        middle.addView(answer);
+        middle.addView(decline);
         root.addView(house);
-        root.addView(name);
-        root.addView(number);
-        root.addView(status);
-        root.addView(answer);
-        root.addView(decline);
+        root.addView(middle);
         setContentView(root);
         handler.post(tick);
     }
@@ -108,6 +137,48 @@ public class JawnInCallActivity extends Activity {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics());
     }
 
+    /** Repaint the round picture once per caller, not once per tick. */
+    private void paintAvatar(String digits) {
+        if (paintedFor != null && paintedFor.equals(digits)) return;
+        paintedFor = digits;
+        Bitmap source = null;
+        String data = JawnPhoneBridge.avatarFor(this, digits);
+        if (data != null && data.startsWith("data:image")) source = decodeData(data);
+        if (source == null) source = BitmapFactory.decodeResource(getResources(), R.drawable.jawn_logo);
+        avatar.setImageBitmap(circle(source));
+    }
+
+    private Bitmap decodeData(String data) {
+        try {
+            int comma = data.indexOf(',');
+            if (comma < 0) return null;
+            byte[] bytes = Base64.decode(data.substring(comma + 1), Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (Throwable t) { return null; }
+    }
+
+    /** Centre-cropped to a square, then drawn through a circular shader. */
+    private Bitmap circle(Bitmap source) {
+        if (source == null) return null;
+        try {
+            int size = Math.min(source.getWidth(), source.getHeight());
+            if (size <= 0) return source;
+            Bitmap square = Bitmap.createBitmap(source,
+                    (source.getWidth() - size) / 2, (source.getHeight() - size) / 2, size, size);
+            Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(out);
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            BitmapShader shader = new BitmapShader(square, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Matrix matrix = new Matrix();
+            float scale = (float) size / (float) square.getWidth();
+            matrix.setScale(scale, scale);
+            shader.setLocalMatrix(matrix);
+            paint.setShader(shader);
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint);
+            return out;
+        } catch (Throwable t) { return source; }
+    }
+
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
@@ -122,6 +193,7 @@ public class JawnInCallActivity extends Activity {
                 name.setVisibility(View.GONE);
             }
             number.setText(digits);
+            paintAvatar(digits);
             if (s == Call.STATE_RINGING) {
                 status.setText("ringing");
                 answer.setVisibility(View.VISIBLE);
