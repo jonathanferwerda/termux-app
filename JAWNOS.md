@@ -216,3 +216,12 @@ work and a full-width build has crashed it (2026-10-10).
     The service never blocks a call. Manifest: the service declared with
     BIND_SCREENING_SERVICE, alongside READ_CONTACTS/READ_CALL_LOG/READ_PHONE_STATE
     (round 13) for the rest of the phone surface.
+
+## Deltas round N (native sms + mms bridge)
+
+- JawnSms.java: window.JawnSms - SMS via SmsManager (multipart, sent
+  broadcast answers via window.__jawnSmsResult), MMS via the klinkerapps
+  android-smsmms library when JawnOS is the default sms app, and a
+  share() fallback that hands the OS messaging app the file otherwise.
+  Registered in JawnWebViewActivity beside the camera and contacts
+  bridges. SEND_SMS permission added to the manifest.

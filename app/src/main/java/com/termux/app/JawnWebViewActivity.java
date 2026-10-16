@@ -85,6 +85,7 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(camera, "JawnCamera");
         contacts = new JawnContactsBridge(this, this::runJs);
         web.addJavascriptInterface(contacts, "JawnContacts");
+        web.addJavascriptInterface(new JawnSms(this, this::runJs), "JawnSms");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
 
         FrameLayout root = new FrameLayout(this);
