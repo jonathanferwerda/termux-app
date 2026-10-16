@@ -213,7 +213,8 @@ work and a full-width build has crashed it (2026-10-10).
     in JawnPhoneState, and the WebView bridge (JawnContactsBridge) reads it - the
     RINGING state event carries the caller, incomingNumber() exposes it to the
     phone app, and screeningRole()/requestScreening() read and ask for the role.
-    The service never blocks a call. Manifest: the service declared with
+    The service used to never block a call; round Q gives it the desk's
+    blacklist to refuse. Manifest: the service declared with
     BIND_SCREENING_SERVICE, alongside READ_CONTACTS/READ_CALL_LOG/READ_PHONE_STATE
     (round 13) for the rest of the phone surface.
 
@@ -246,3 +247,25 @@ work and a full-width build has crashed it (2026-10-10).
   jawn_sms_number / jawn_sms_body / jawn_dial_number along; on page finish
   they are handed once to window.__jawnLaunchExtras (the chat opens on the
   number with the body prefilled; the phone pad fills).
+
+## Deltas round Q (the desk's blacklist, and a named call)
+
+- JawnPhoneBridge.java: window.JawnPhone - the house's phone facts, handed to the
+  native side because a call arrives when no page is open. The page
+  (public/js/manager/manager.js, jawnPhoneSync) fetches GET /manager/phone/sync
+  and calls setFacts({blocked:[…], names:{…}}); the blob lives in
+  SharedPreferences ("jawn_phone") rather than a static, because call screening
+  often starts into a process with no WebView up. takeBlockedCalls() hands the
+  refused calls back once, for the page to file as cancelled ones. Numbers are
+  compared on their last ten digits (JawnPhoneBridge.lastTen), the way the house
+  matches them.
+- JawnCallScreeningService: no longer always-allows. A number on the desk's
+  blacklist (the Box Office list, seen from the phone) is disallowed and rejected
+  before the phone can ring - setDisallowCall/setRejectCall, skipCallLog false so
+  the house still files what was ignored, skipNotification true; any other call
+  is allowed through unchanged.
+- JawnInCallActivity: the lock-screen wake names the caller from the same synced
+  numbers (JawnPhoneBridge.nameFor) above the raw number, with rounded
+  answer/decline buttons on the house's dark ground.
+- Wired in JawnWebViewActivity beside JawnNFC/JawnCamera/JawnContacts/JawnSms
+  ("JawnPhone").
