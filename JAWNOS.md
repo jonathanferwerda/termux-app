@@ -239,3 +239,10 @@ work and a full-width build has crashed it (2026-10-10).
   InCallService, with a full-screen answer / decline / hang-up screen; the
   ringing number still feeds JawnPhoneState so the call appointment keeps
   stamping itself. RECEIVE_SMS, READ_SMS and CALL_PHONE permissions added.
+
+## Deltas round P (launch extras into the page)
+
+- JawnWebViewActivity.injectLaunchExtras: the sms send and dial faces pass
+  jawn_sms_number / jawn_sms_body / jawn_dial_number along; on page finish
+  they are handed once to window.__jawnLaunchExtras (the chat opens on the
+  number with the body prefilled; the phone pad fills).

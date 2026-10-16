@@ -364,6 +364,9 @@ public class JawnWebViewActivity extends Activity {
     private class HouseClient extends WebViewClient {
         @Override
         public void onPageFinished(WebView view, String url) {
+            // the sms send and dial intents ride in as extras; hand them to the
+            // page once (the chat opens on the number, the phone pad fills)
+            injectLaunchExtras(view);
             // A lapsed session cookie makes the manager answer with the Gate and
             // the view sits on the login screen though a fresh ticket is on hand.
             // Spot the Gate, fall back to the ticket once - and if the Gate
@@ -381,6 +384,34 @@ public class JawnWebViewActivity extends Activity {
                 }
                 showSplash();
             });
+        }
+
+        // ---- the system's sms send and dial intents -------------------------
+        // JawnComposeSmsActivity and JawnDialerActivity open this activity with
+        // jawn_sms_number / jawn_sms_body / jawn_dial_number extras; the page
+        // reads them once, through window.__jawnLaunchExtras, so a share-to-sms
+        // opens the number's conversation and a dial intent fills the Phone pad.
+        private void injectLaunchExtras(WebView view) {
+            Intent in = getIntent();
+            if (in == null) return;
+            String smsNumber = in.getStringExtra("jawn_sms_number");
+            String smsBody = in.getStringExtra("jawn_sms_body");
+            String dialNumber = in.getStringExtra("jawn_dial_number");
+            if (smsNumber == null && smsBody == null && dialNumber == null) return;
+            in.removeExtra("jawn_sms_number");
+            in.removeExtra("jawn_sms_body");
+            in.removeExtra("jawn_dial_number");
+            try {
+                org.json.JSONObject j = new org.json.JSONObject();
+                j.put("sms_number", smsNumber == null ? "" : smsNumber);
+                j.put("sms_body", smsBody == null ? "" : smsBody);
+                j.put("dial_number", dialNumber == null ? "" : dialNumber);
+                String json = j.toString();
+                String script = "window.__jawnLaunchExtras && window.__jawnLaunchExtras(" + json + ");";
+                view.evaluateJavascript(script, null);
+            } catch (Throwable t) {
+                android.util.Log.e("JawnWebView", "extras: " + t);
+            }
         }
 
         @Override
