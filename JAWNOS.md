@@ -328,3 +328,17 @@ work and a full-width build has crashed it (2026-10-10).
   native half a way to run a snippet, so a call that just ended is filed at once
   when a page is up.
 - JawnPhoneBridge: recordCall/takeCalls, beside the blocked-call queue.
+
+## Deltas round U (the barcode scanner)
+
+- JawnScan (new): window.JawnScan beside JawnNFC/JawnCamera/JawnContacts/JawnSms.
+  One method scan() hands the read to Google Play services' "code scanner"
+  (GmsBarcodeScanning.getClient on the activity, FORMAT_ALL_FORMATS +
+  enableAutoZoom), so the phone draws the on-device scan sheet with no camera
+  permission of ours, and reports the raw value over window.jawnScanResult(code)
+  via JSONObject.quote, the way the other bridges report. A failure or a cancel
+  reports an empty string, and the web side (public/js/manager/market.js) falls
+  back to its BarcodeDetector camera or a typed code.
+- app/build.gradle: implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
+  (the bridge and the sheet live in Play services/ML Kit; the app only asks).
+- Wired in JawnWebViewActivity beside the other bridges ("JawnScan").

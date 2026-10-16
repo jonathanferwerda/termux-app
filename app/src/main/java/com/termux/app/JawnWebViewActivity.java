@@ -86,6 +86,7 @@ public class JawnWebViewActivity extends Activity {
         contacts = new JawnContactsBridge(this, this::runJs);
         web.addJavascriptInterface(contacts, "JawnContacts");
         web.addJavascriptInterface(new JawnSms(this, this::runJs), "JawnSms");
+        web.addJavascriptInterface(new JawnScan(this, this::runJs), "JawnScan");
         web.addJavascriptInterface(new JawnPhoneBridge(this), "JawnPhone");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
         // a nudge for the page when something happens with no page's finger in
