@@ -281,3 +281,28 @@ work and a full-width build has crashed it (2026-10-10).
   data URI), so the call screen needs no network of its own: the page fetches the
   whole directory at once (GET /manager/phone/sync) and the activity only decodes
   what it already has when the phone rings.
+
+## Deltas round S (the phone and sms roles)
+
+- The roles were not offered because the components the role manager asks for
+  were not there. Checked on the device with `cmd package query-activities`:
+  a bare ACTION_DIAL (no data) matched only Samsung's dialer - our filter carried
+  the tel scheme, and a filter with data never matches an intent without it - and
+  `SENDTO -d mms:` matched only Samsung, and no SMS_DELIVER receiver existed at
+  all. So now:
+  - JawnDialerActivity answers a bare ACTION_DIAL as well as DIAL+tel (and
+    ACTION_CALL), and JawnInCallService is exported with the DEFAULT category, so
+    the system can find and bind it.
+  - JawnComposeSmsActivity declares all four schemes (sms, smsto, mms, mmsto) on
+    SENDTO and VIEW.
+  - JawnSmsDeliverReceiver (new, android.provider.Telephony.SMS_DELIVER, guarded
+    by BROADCAST_SMS): with the sms role, delivered texts come here alone - the
+    framework stops filing them - so it writes the message into the system's
+    message store (which is what the house's own termux poll reads), joins
+    multi-part pdus per sender, leaves it in JawnPhoneState, and appends it to
+    jawn's log so a text is never lost to a failed write.
+  - The klinkerapps mms machinery is declared at last: its transaction service,
+    its PushReceiver on WAP_PUSH_DELIVER (application/vnd.wap.mms-message) and
+    its status receivers, so an incoming mms can be downloaded and a send can
+    ride a transaction. RECEIVE_MMS added.
+  - JawnLog.append: one line, shared by both receivers.

@@ -66,6 +66,15 @@ public class JawnLog {
     }
 
     /** Last {@code bytes} bytes of the log, for the viewer. */
+    /** Append one line, creating the log if it is not there yet. */
+    public static void append(String line) {
+        try {
+            java.io.FileOutputStream out = new java.io.FileOutputStream(file(), true);
+            out.write((line + "\n").getBytes("UTF-8"));
+            out.close();
+        } catch (Throwable ignored) {}
+    }
+
     public static String tail(int bytes) {
         File f = file();
         if (!f.exists()) return "(no log yet)";

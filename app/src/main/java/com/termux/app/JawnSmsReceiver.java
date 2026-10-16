@@ -7,11 +7,12 @@ import android.os.Bundle;
 import android.telephony.SmsMessage;
 
 /**
- * The house's inbox: when JawnOS is the default sms app, every delivered text
- * lands here first. The web side still reads the message store its own way
- * (the phone's termux poll), so this receiver's job is to log the arrival and
- * hold the newest one where the webview can ask - nothing is lost by being the
- * default app.
+ * The delivery reports for the texts JawnOS sends itself: the sent broadcast
+ * SmsManager fires comes back here (see JawnSms), where the newest report is
+ * logged and left in JawnPhoneState. An incoming text is a different broadcast
+ * entirely - android.provider.Telephony.SMS_DELIVER, handled by
+ * JawnSmsDeliverReceiver (which is what files it, now that JawnOS is the
+ * default sms app).
  */
 public class JawnSmsReceiver extends BroadcastReceiver {
 

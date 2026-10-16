@@ -39,6 +39,7 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_MMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -237,14 +238,64 @@
             android:name=".app.JawnComposeSmsActivity"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SENDTO" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="sms" />
                 <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
             </intent-filter>
         </activity>
+
+        <!-- The delivered text itself. With the sms role Android hands it to the
+             default app alone, so JawnSmsDeliverReceiver writes it into the
+             message store (its own row, the way every sms app files its own),
+             leaves it in JawnPhoneState, and logs it. -->
+        <receiver
+            android:name=".app.JawnSmsDeliverReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_DELIVER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The mms machinery (klinkerapps android-smsmms): an incoming mms is a
+             wap push the library's own receiver downloads, and its transaction
+             service is what a send rides. Mms only moves while JawnOS is the
+             default sms app. -->
+        <receiver
+            android:name="com.android.mms.transaction.PushReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.android.mms.transaction.TransactionService"
+            android:exported="false" />
+        <receiver
+            android:name="com.klinker.android.send_message.MmsReceivedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.klinker.android.send_message.REFRESH" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.klinker.android.send_message.MmsSentReceiver" android:exported="false" />
+        <receiver android:name="com.klinker.android.send_message.SentReceiver" android:exported="false" />
+        <receiver android:name="com.klinker.android.send_message.DeliveredReceiver" android:exported="false" />
 
         <!-- The dialer role's face: dial intents open the house's Phone app,
              and while JawnOS is the default phone app every call is bound to
@@ -255,6 +306,16 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CALL" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="tel" />
             </intent-filter>
@@ -268,13 +329,14 @@
 
         <service
             android:name=".app.JawnInCallService"
-            android:exported="false"
+            android:exported="true"
             android:permission="android.permission.BIND_INCALL_SERVICE">
             <meta-data
                 android:name="android.telecom.IN_CALL_SERVICE_UI"
                 android:value="true" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
 
