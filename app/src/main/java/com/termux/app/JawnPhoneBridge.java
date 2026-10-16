@@ -31,6 +31,7 @@ public class JawnPhoneBridge {
     private static final String PREFS = "jawn_phone";
     private static final String FACTS = "facts";
     private static final String CALLS = "blocked_calls";
+    private static final String CALLS_LOG = "calls";
 
     private final Context context;
 
@@ -64,6 +65,10 @@ public class JawnPhoneBridge {
 
     private SharedPreferences prefs() {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static SharedPreferences prefsOf(Context context) {
+        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     // ---- the native half's side (no page needed) ----
@@ -108,6 +113,40 @@ public class JawnPhoneBridge {
             }
         } catch (Throwable ignored) { }
         return "";
+    }
+
+    /**
+     * The finished calls, handed over and cleared in one step: one record per
+     * call, written by JawnInCallService when the call ends - whether or not a
+     * page was up, which is the whole point of keeping them here.
+     */
+    @JavascriptInterface
+    public String takeCalls() {
+        try {
+            String calls = prefs().getString(CALLS_LOG, "[]");
+            prefs().edit().putString(CALLS_LOG, "[]").apply();
+            return calls == null || calls.isEmpty() ? "[]" : calls;
+        } catch (Throwable t) { return "[]"; }
+    }
+
+    /** Remember a finished call, for the page to file when it is next up. */
+    public static void recordCall(Context context, String number, String direction,
+                                  long started, long ended, boolean answered) {
+        String want = lastTen(number);
+        if (want.isEmpty()) return;
+        try {
+            SharedPreferences p = prefsOf(context);
+            String raw = p.getString(CALLS_LOG, "[]");
+            JSONArray list = new JSONArray(raw == null || raw.isEmpty() ? "[]" : raw);
+            JSONObject call = new JSONObject();
+            call.put("number", want);
+            call.put("direction", direction == null ? "incoming" : direction);
+            call.put("started", started);
+            call.put("ended", ended);
+            call.put("answered", answered);
+            list.put(call);
+            p.edit().putString(CALLS_LOG, list.toString()).apply();
+        } catch (Throwable ignored) { }
     }
 
     /** Remember a refused call, so the page can file it once it is open again. */

@@ -11,6 +11,10 @@ public class JawnPhoneState {
     public static volatile String incomingNumber = "";
     public static volatile long incomingAt = 0;
 
+    /** Set by the WebView while a page is up: a way to run a snippet in it. */
+    public interface Poster { void post(String script); }
+    public static volatile Poster poster;
+
     public static void incoming(String number) {
         incomingNumber = number == null ? "" : number;
         incomingAt = System.currentTimeMillis();

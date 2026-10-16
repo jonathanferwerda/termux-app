@@ -88,6 +88,9 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnSms(this, this::runJs), "JawnSms");
         web.addJavascriptInterface(new JawnPhoneBridge(this), "JawnPhone");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
+        // a nudge for the page when something happens with no page's finger in
+        // it - a call that just ended is filed from the service's own record
+        JawnPhoneState.poster = this::runJs;
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -259,6 +262,12 @@ public class JawnWebViewActivity extends Activity {
     }
 
     /** The house, on any of its names, keeps navigation in the app. */
+    @Override
+    protected void onDestroy() {
+        JawnPhoneState.poster = null;
+        super.onDestroy();
+    }
+
     private boolean inHouse(String url) {
         try {
             String host = new URI(url).getHost();

@@ -306,3 +306,25 @@ work and a full-width build has crashed it (2026-10-10).
     its status receivers, so an incoming mms can be downloaded and a send can
     ride a transaction. RECEIVE_MMS added.
   - JawnLog.append: one line, shared by both receivers.
+
+## Deltas round T (the sms role at last, and a call that files itself)
+
+- The sms role was still refused after round S, and the system said why in one
+  line: "com.termux not qualified for android.app.role.SMS due to missing
+  RequiredComponent ... RESPOND_VIA_MESSAGE (smsto) SEND_RESPOND_VIA_MESSAGE".
+  JawnRespondViaMessageService answers that: a service on
+  android.intent.action.RESPOND_VIA_MESSAGE for the smsto scheme, guarded by
+  SEND_RESPOND_VIA_MESSAGE (the permission is signature|privileged, so what
+  matters is the component declaring it - exactly how Google Messages does it).
+  It is also a real face: the call screen's quick reply sends the text through
+  SmsManager and logs it. With it in place the role is granted.
+- JawnInCallService keeps its own record of every call now - number, direction,
+  when it started, whether it ever reached STATE_ACTIVE (somebody answered), when
+  it ended - and leaves it in the app's store (JawnPhoneBridge.recordCall) as the
+  call ends, logging it too. The appointment used to be written by the page's
+  state listener alone, so a call taken with the app in the background wrote
+  nothing at all; the house files it from this record whichever way it arrives.
+- JawnPhoneState.poster + a JawnWebViewActivity onDestroy: the page lends the
+  native half a way to run a snippet, so a call that just ended is filed at once
+  when a page is up.
+- JawnPhoneBridge: recordCall/takeCalls, beside the blocked-call queue.

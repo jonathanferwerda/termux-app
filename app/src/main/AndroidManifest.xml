@@ -40,6 +40,7 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_MMS" />
+    <uses-permission android:name="android.permission.SEND_RESPOND_VIA_MESSAGE" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -269,6 +270,26 @@
                 <action android:name="android.provider.Telephony.SMS_DELIVER" />
             </intent-filter>
         </receiver>
+
+        <!-- The sms role's quick reply. Android will not grant the role without
+             it: the system log names it outright - "not qualified for
+             android.app.role.SMS due to missing RequiredComponent
+             RESPOND_VIA_MESSAGE (smsto) SEND_RESPOND_VIA_MESSAGE" - which is what
+             kept JawnOS out of the sms app list while everything else was in
+             place. A reply sent from the call screen's shade lands here. -->
+        <service
+            android:name=".app.JawnRespondViaMessageService"
+            android:exported="true"
+            android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="sms" />
+                <data android:scheme="smsto" />
+                <data android:scheme="mms" />
+                <data android:scheme="mmsto" />
+            </intent-filter>
+        </service>
 
         <!-- The mms machinery (klinkerapps android-smsmms): an incoming mms is a
              wap push the library's own receiver downloads, and its transaction
