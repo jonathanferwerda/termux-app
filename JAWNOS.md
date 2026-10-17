@@ -342,3 +342,13 @@ work and a full-width build has crashed it (2026-10-10).
 - app/build.gradle: implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
   (the bridge and the sheet live in Play services/ML Kit; the app only asks).
 - Wired in JawnWebViewActivity beside the other bridges ("JawnScan").
+
+## Deltas round V (the scan sheet comes down on Done/Cancel)
+
+- JawnScan: close(), plus a com.termux.app.SCAN_STOP broadcast receiver registered
+  while a scan is open. Google's sheet runs in our task, one activity above ML
+  Kit's invisible delegate, so re-fronting the delegate with CLEAR_TOP |
+  SINGLE_TOP finishes the sheet. The WebView is paused behind it, so the receiver
+  is the channel that works; the manager fires the broadcast
+  (`am broadcast -a com.termux.app.SCAN_STOP -p com.termux`) when the run is Done
+  or Cancelled, and the page's marketPhoneScanStop() also calls close().
