@@ -31,7 +31,7 @@ public class JawnWakeReceiver extends BroadcastReceiver {
             if (v instanceof Integer) uid = (Integer) v;
         } catch (Throwable ignored) {
         }
-        if (uid != 2000 && uid != Process.myUid()) {
+        if (uid != -1 && uid != 2000 && uid != Process.myUid()) {
             JawnLog.append("wake: refused uid " + uid);
             return;
         }
