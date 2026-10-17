@@ -352,3 +352,23 @@ work and a full-width build has crashed it (2026-10-10).
   is the channel that works; the manager fires the broadcast
   (`am broadcast -a com.termux.app.SCAN_STOP -p com.termux`) when the run is Done
   or Cancelled, and the page's marketPhoneScanStop() also calls close().
+
+## Deltas round W (self-heal and a wake trigger)
+
+- TermuxService: the JawnOS host is sticky while jawn is meant to be up. A
+  system kill now restarts the service with a null intent, which starts jawn
+  again (JawnLauncher.shouldKeepRunning); an explicit Stop clears the
+  preference, so it stays stopped. This is the fix for the app disappearing
+  overnight on 2026-10-17 (the log stopped at 02:55 and resumed at 09:18 only
+  because the dashboard was opened; TermuxService had returned
+  START_NOT_STICKY, so Android had nothing to restart).
+- JawnLauncher: KEY_RUNNING (the user's intent), shouldKeepRunning(),
+  setKeepRunning(), and selfTest() - a one-line check of jawn, the master and
+  the BLE bridge that starts whatever is down when keep-alive is on. Start,
+  Restart and the boot receiver set it; Stop clears it.
+- JawnDashboardActivity: runs selfTest() on resume and offers a "Self test"
+  button beside Start/Restart/Stop. Reopening after Stop no longer restarts
+  jawn (Stop is now a real stop); press Start or Self test to bring it back.
+- JawnWakeReceiver (new, exported): `com.termux.app.JAWN_WAKE` starts jawn from
+  outside the app; only the shell UID (adb) and the app itself are accepted.
+  `scripts/phone_wake.pl` in the jawnos tree sends it over adb.

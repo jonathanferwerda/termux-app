@@ -198,6 +198,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Wake the host from outside the app (adb or an on-phone
+             automation). JawnWakeReceiver accepts only the shell UID and its
+             own; jawn is then started if it is down. -->
+        <receiver android:name=".app.JawnWakeReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.termux.app.JAWN_WAKE" />
+            </intent-filter>
+        </receiver>
+
         <!-- Posts jawn's notifications from the app, so the badge lands on the
              app's own launcher icon (jawn's notification_sender broadcasts
              com.termux.app.JAWN_NOTIFY here). -->

@@ -27,6 +27,7 @@ public class JawnLauncher {
     public static final String KEY_DIR = "jawn_dir";
     public static final String KEY_AUTOSTART = "jawn_autostart";
     public static final String KEY_BLE_WITH_JAWN = "ble_with_jawn";
+    public static final String KEY_RUNNING = "jawn_running";
     public static final String KEY_SYSTEM_BARS = "system_bars";
     public static final String DEFAULT_DIR = "jawnos";
 
@@ -64,6 +65,40 @@ public class JawnLauncher {
 
     public static boolean isBleWithJawn(Context context) {
         return prefs(context).getBoolean(KEY_BLE_WITH_JAWN, true);
+    }
+
+    /** Whether the user wants jawn kept running. A fresh install follows the
+     *  boot setting; Stop clears it, Start and the boot receiver set it. */
+    public static boolean shouldKeepRunning(Context context) {
+        return prefs(context).getBoolean(KEY_RUNNING, isAutostartEnabled(context));
+    }
+
+    public static void setKeepRunning(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_RUNNING, on).apply();
+    }
+
+    /** Check the pieces jawn needs and bring back anything that is down when the
+     *  user asked it to keep running. Returns the report the dashboard shows. */
+    public static String selfTest(Context context) {
+        boolean jawn = jawnIsUp(context);
+        boolean master = jawnMasterAlive();
+        boolean ble = bleIsUp();
+        boolean want = shouldKeepRunning(context);
+        StringBuilder r = new StringBuilder();
+        r.append("jawn ").append(jawn ? "up" : "down")
+         .append(", master ").append(master ? "alive" : "gone")
+         .append(", BLE ").append(ble ? "up" : "down")
+         .append(", keep-alive ").append(want ? "on" : "off");
+        if (want && !jawn && !master) {
+            startJawnBackground(context);
+            r.append(" - starting jawn");
+        }
+        if (want && isBleWithJawn(context) && !ble) {
+            startBle(context);
+            r.append(" - starting BLE");
+        }
+        JawnLog.append("self test: " + r);
+        return r.toString();
     }
 
     /** Whether the full screen view keeps the system bars (the clock/battery
@@ -154,6 +189,7 @@ public class JawnLauncher {
     }
 
     private static void startJawn(Context context, boolean background) {
+        setKeepRunning(context, true);
         // A Stop scheduled a service stop to fire once its killer has had its
         // few seconds. If the user starts again inside that window, cancel it,
         // or it tears the fresh start down.
@@ -199,6 +235,7 @@ public class JawnLauncher {
 
     /** Stop jawn (and the BLE bridge when it rides along with it). */
     public static void stopJawn(Context context) {
+        setKeepRunning(context, false);
         if (isBleWithJawn(context)) stopBle(context);
         stopJawnTree(context);
     }

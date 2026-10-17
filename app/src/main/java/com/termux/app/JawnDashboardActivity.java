@@ -93,11 +93,12 @@ public class JawnDashboardActivity extends Activity {
 
         // ---- jawn ----
         LinearLayout jawn = card(root, "Jawn");
-        buttonRow(jawn, new String[] { "Start", "Restart", "Stop" }, new Runnable[] {
+        buttonRow(jawn, new String[] { "Start", "Restart", "Stop", "Self test" }, new Runnable[] {
             () -> { saveSettings(); startRequestedAt = System.currentTimeMillis(); JawnLauncher.startJawn(self); toast("Starting jawn..."); pollNow(); },
             () -> { saveSettings(); startRequestedAt = System.currentTimeMillis(); JawnLauncher.restartJawn(self); toast("Restarting jawn..."); pollNow(); },
             () -> { startRequestedAt = 0; JawnLauncher.stopJawn(self); toast("Stopping jawn"); pollNow(); },
-        }, new boolean[] { true, false, false });
+            () -> { saveSettings(); toast(JawnLauncher.selfTest(self)); pollNow(); },
+        }, new boolean[] { true, false, false, false });
 
         // ---- open ----
         LinearLayout open = card(root, "Open");
@@ -291,14 +292,11 @@ public class JawnDashboardActivity extends Activity {
         resumed = true;
         updateEnvStatus();
         pollNow();
-        // An app update (or an Android process restart) can take the Termux
-        // session that runs jawn down with it. Bring it back on open when the
-        // user asked for autostart, so "not running" never waits on a manual
-        // Start after an update.
-        if (!JawnLauncher.jawnIsUp(this) && !JawnLauncher.jawnMasterAlive()
-                && JawnLauncher.isAutostartEnabled(this)) {
-            JawnLauncher.startJawnBackground(this);
-        }
+        // An app update, an OS kill, or a process restart can take the Termux
+        // session that runs jawn down with it. Self-test on open and bring it
+        // back when the user wants it running, so "not running" never waits on
+        // a manual Start.
+        JawnLauncher.selfTest(this);
     }
 
     protected void onPause() {

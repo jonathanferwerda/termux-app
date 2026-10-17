@@ -129,6 +129,18 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
         // Run again in case service is already started and onCreate() is not called
         runStartForeground();
 
+        // A system restart hands us a null intent. If jawn is meant to be up,
+        // start it again; otherwise let the service go.
+        if (intent == null) {
+            if (JawnLauncher.shouldKeepRunning(this)) {
+                Logger.logInfo(LOG_TAG, "service restarted by the system; starting jawn");
+                JawnLauncher.startJawnBackground(this);
+                return Service.START_STICKY;
+            }
+            stopSelf();
+            return Service.START_NOT_STICKY;
+        }
+
         String action = intent.getAction();
 
         if (action != null) {
@@ -155,9 +167,11 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
             }
         }
 
-        // If this service really do get killed, there is no point restarting it automatically - let the user do on next
-        // start of {@link Term):
-        return Service.START_NOT_STICKY;
+        // The JawnOS fork keeps the host sticky while the user wants jawn up:
+        // a kill by the OS restarts the service (null intent above), which
+        // starts jawn again instead of waiting for the app to be opened. An
+        // explicit Stop clears the preference, so it stays stopped.
+        return JawnLauncher.shouldKeepRunning(this) ? Service.START_STICKY : Service.START_NOT_STICKY;
     }
 
     @Override
