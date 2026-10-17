@@ -28,25 +28,33 @@ import javax.net.ssl.X509TrustManager;
  * &lt;jawn dir&gt;/releases.
  *
  * jawn (on this device, or on any peer via the app-release pull) drops the
- * newest jawnos-app-&lt;versionCode&gt;-&lt;versionName&gt;.apk there. This compares that
- * versionCode against the installed app and, when it is newer, hands the file
- * to the system installer - the same one-tap prompt a sideload gives.
+ * newest jawnos-app-&lt;versionCode&gt;-&lt;versionName&gt;.apk and
+ * jawnos-api-&lt;versionCode&gt;-&lt;versionName&gt;.apk there. This compares each
+ * product's versionCode against the installed package and, when it is newer,
+ * hands the file to the system installer - the same one-tap prompt a sideload
+ * gives. Both APKs share this app's signature and FileProvider.
  */
 public class JawnUpdater {
+
+    public static final String PRODUCT_APP = "app";
+    public static final String PRODUCT_API = "api";
 
     public static class Release {
         public final File file;
         public final int versionCode;
         public final String versionName;
-        Release(File file, int versionCode, String versionName) {
+        public final String product;
+        Release(File file, int versionCode, String versionName, String product) {
             this.file = file;
             this.versionCode = versionCode;
             this.versionName = versionName;
+            this.product = product;
         }
     }
 
-    private static final Pattern APP_APK = Pattern.compile("^jawnos-app-(\\d+)-(.+)\\.apk$");
+    private static final Pattern APK = Pattern.compile("^jawnos-(app|api)-(\\d+)-(.+)\\.apk$");
     private static final String AUTHORITY_SUFFIX = ".jawnupdates";
+    private static final String API_PACKAGE = "com.termux.api";
 
     public static File releasesDir(Context context) {
         // Build from getFilesDir() rather than TermuxConstants' /data/data path.
@@ -57,24 +65,46 @@ public class JawnUpdater {
             "home/" + JawnLauncher.getJawnDirName(context) + "/releases");
     }
 
-    /** The newest staged JawnOS app APK, or null if none is present. */
-    public static Release newestRelease(Context context) {
+    public static String packageForProduct(String product) {
+        return PRODUCT_API.equals(product) ? API_PACKAGE : null;
+    }
+
+    public static String labelForProduct(String product) {
+        return PRODUCT_API.equals(product) ? "api" : "app";
+    }
+
+    /** The newest staged APK of one product, or null if none is present. */
+    public static Release newestRelease(Context context, String product) {
         File[] files = releasesDir(context).listFiles();
         if (files == null) return null;
         Release best = null;
         for (File f : files) {
-            Matcher m = APP_APK.matcher(f.getName());
+            Matcher m = APK.matcher(f.getName());
             if (!m.matches()) continue;
+            if (!m.group(1).equals(product)) continue;
             int vc;
-            try { vc = Integer.parseInt(m.group(1)); } catch (NumberFormatException e) { continue; }
-            if (best == null || vc > best.versionCode) best = new Release(f, vc, m.group(2));
+            try { vc = Integer.parseInt(m.group(2)); } catch (NumberFormatException e) { continue; }
+            if (best == null || vc > best.versionCode) best = new Release(f, vc, m.group(3), product);
         }
         return best;
     }
 
+    /** The newest staged app APK (kept for the old call sites). */
+    public static Release newestRelease(Context context) {
+        return newestRelease(context, PRODUCT_APP);
+    }
+
+    /** The installed versionCode of this app (product "app"). */
     public static int installedVersionCode(Context context) {
+        return installedVersionCode(context, PRODUCT_APP);
+    }
+
+    /** The installed versionCode of a product, or -1 when it is not installed. */
+    public static int installedVersionCode(Context context, String product) {
+        String pkg = packageForProduct(product);
+        if (pkg == null) pkg = context.getPackageName();
         try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            PackageInfo info = context.getPackageManager().getPackageInfo(pkg, 0);
             return info.versionCode;
         } catch (PackageManager.NameNotFoundException e) {
             return -1;
@@ -83,8 +113,14 @@ public class JawnUpdater {
 
     /** A staged build newer than the installed app, or null. */
     public static Release updateAvailable(Context context) {
-        Release r = newestRelease(context);
-        if (r != null && r.versionCode > installedVersionCode(context)) return r;
+        return updateAvailable(context, PRODUCT_APP);
+    }
+
+    /** A staged build newer than the installed package of a product, or null. */
+    public static Release updateAvailable(Context context, String product) {
+        Release r = newestRelease(context, product);
+        int installed = installedVersionCode(context, product);
+        if (r != null && r.versionCode > installed) return r;
         return null;
     }
 
@@ -118,7 +154,7 @@ public class JawnUpdater {
         }
     }
 
-    /** Ask jawn to pull the newest build now (GitHub + peers), so the local
+    /** Ask jawn to pull the newest builds now (GitHub + peers), so the local
      *  releases/ dir is fresh before updateAvailable() scans it. Best-effort: a
      *  failed call just leaves the existing scan in place. */
     public static void sync(Context context) {
