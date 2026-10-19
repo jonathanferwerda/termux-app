@@ -372,3 +372,11 @@ work and a full-width build has crashed it (2026-10-10).
 - JawnWakeReceiver (new, exported): `com.termux.app.JAWN_WAKE` starts jawn from
   outside the app; only the shell UID (adb) and the app itself are accepted.
   `scripts/phone_wake.pl` in the jawnos tree sends it over adb.
+
+## Deltas round 12 (native fingerprint)
+
+- JawnBiometric: `window.JawnBiometric.confirm(title)` uses the platform
+  `BiometricPrompt` (API 28+) and answers through
+  `window.jawnBiometricResult(true|false|'unavailable')`. Registered on the
+  WebView in JawnWebViewActivity. The padlock unlock page prefers it and falls
+  back to WebAuthn or the tap when the phone has no fingerprint.
