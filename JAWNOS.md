@@ -380,3 +380,23 @@ work and a full-width build has crashed it (2026-10-10).
   `window.jawnBiometricResult(true|false|'unavailable')`. Registered on the
   WebView in JawnWebViewActivity. The padlock unlock page prefers it and falls
   back to WebAuthn or the tap when the phone has no fingerprint.
+
+## Deltas round 13 (biometric unlock key)
+
+- JawnBiometricKey (new): `window.JawnBiometricKey` creates a non-exportable
+  EC P-256 key in Android Keystore with `setUserAuthenticationRequired(true)`
+  and `setInvalidatedByBiometricEnrollment(true)`. `enroll(title)` returns its
+  SPKI public key; `sign(msgBase64,title)` signs only after the platform
+  BiometricPrompt releases the key, and `hasKey()` says whether one exists.
+  Results arrive through `window.jawnosBiometricKeyResult(...)`. Registered on
+  the WebView in JawnWebViewActivity beside JawnBiometric.
+- AndroidManifest: `USE_BIOMETRIC` permission and an optional
+  `android.hardware.fingerprint` feature. The old `JawnBiometric.confirm`
+  prompt needed the permission too.
+- The JawnOS house verifies the key's ECDSA signature (`subs::ecdsa_verify`)
+  and lets it unlock the phone's own locked screen. Enrollment is bound to the
+  device's existing pairing key: the page signs the new key with the Ed25519
+  key it was paired with, so a page that merely knows a UUID cannot register a
+  key. `Security -> Padlock -> Enroll this phone's fingerprint` sets it up, and
+  the locked screen offers `Use this phone's fingerprint`, which enrolls on the
+  spot if no key exists.

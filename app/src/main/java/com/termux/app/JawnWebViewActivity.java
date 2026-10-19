@@ -90,6 +90,7 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnPhoneBridge(this), "JawnPhone");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
         web.addJavascriptInterface(new JawnBiometric(this, this::runJs), "JawnBiometric");
+        web.addJavascriptInterface(new JawnBiometricKey(this, this::runJs), "JawnBiometricKey");
         // a nudge for the page when something happens with no page's finger in
         // it - a call that just ended is filed from the service's own record
         JawnPhoneState.poster = this::runJs;
