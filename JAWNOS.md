@@ -398,5 +398,5 @@ work and a full-width build has crashed it (2026-10-10).
   device's existing pairing key: the page signs the new key with the Ed25519
   key it was paired with, so a page that merely knows a UUID cannot register a
   key. `Security -> Padlock -> Enroll this phone's fingerprint` sets it up, and
-  the locked screen offers `Use this phone's fingerprint`, which enrolls on the
-  spot if no key exists.
+  the locked screen offers `Use this phone's fingerprint` once a key is enrolled.
+  Enrollment is refused while the screen is locked, so set it up before locking.
