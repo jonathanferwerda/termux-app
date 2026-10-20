@@ -88,11 +88,21 @@ public class JawnTailnetController {
         String name = nodeName(context);
         String key = prefs().getString("auth_key", "");
         try {
-            String prefsJson = "{\"ControlURL\":\"" + CONTROL_URL
+            String masked = "{\"ControlURL\":\"" + CONTROL_URL
                     + "\",\"Hostname\":\"" + json(name)
-                    + "\",\"WantRunning\":true,\"LoggedOut\":false}";
-            call(application, "PATCH", "prefs", prefsJson);
-            String startJson = "{\"UpdatePrefs\":" + prefsJson
+                    + "\",\"LoggedOut\":false}";
+            String full = call(application, "PATCH", "prefs", masked);
+            JSONObject prefsObject;
+            try {
+                prefsObject = new JSONObject(full == null || full.isEmpty() ? masked : full);
+            } catch (Exception e) {
+                prefsObject = new JSONObject(masked);
+            }
+            // WantRunning belongs in start's UpdatePrefs, not the masked PATCH:
+            // setting it in editPrefs starts a control client the start call
+            // then tears down, and a slow register can be cancelled mid-flight.
+            prefsObject.put("WantRunning", true);
+            String startJson = "{\"UpdatePrefs\":" + prefsObject.toString()
                     + (key == null || key.isEmpty() ? "" : ",\"AuthKey\":\"" + json(key) + "\"")
                     + "}";
             call(application, "POST", "start", startJson);
