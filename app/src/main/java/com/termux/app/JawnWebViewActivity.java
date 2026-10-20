@@ -51,6 +51,8 @@ public class JawnWebViewActivity extends Activity {
     public static final String EXTRA_URL = "com.termux.app.EXTRA_URL";
     private String houseHost = "";
     private boolean gateFallback = false;
+    // one-time move of the paired device id into loopback
+    private boolean migrateThenLoopback = false;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
     private GeolocationPermissions.Callback pendingGeo;
@@ -95,6 +97,9 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnVpnBridge(this), "JawnVPN");
         web.addJavascriptInterface(new JawnBiometric(this, this::runJs), "JawnBiometric");
         web.addJavascriptInterface(new JawnBiometricKey(this, this::runJs), "JawnBiometricKey");
+        // the paired-device id survives an origin change (the view moving to
+        // 127.0.0.1) because universal.js mirrors it here
+        web.addJavascriptInterface(new JawnAppStorage(this), "JawnAppStorage");
         // a nudge for the page when something happens with no page's finger in
         // it - a call that just ended is filed from the service's own record
         JawnPhoneState.poster = this::runJs;
@@ -123,9 +128,35 @@ public class JawnWebViewActivity extends Activity {
      *  only when it does not, which is where the animation runs. */
     private String destination() {
         int port = JawnLauncher.getJawnPort(this);
+        if (JawnLauncher.getJawnLoopback(this) && JawnLauncher.getStoredDeviceUuid(this).isEmpty()) {
+            // Loopback has no localStorage from the domain origin. Open the
+            // domain form once so onPageFinished can copy the paired-device id
+            // into JawnAppStorage, then move to loopback for good.
+            migrateThenLoopback = true;
+            return JawnLauncher.getDomainUiUrl(this, port);
+        }
         String manager = JawnLauncher.getManagerUrl(this, port);
         if (hasSession(manager)) return manager;
         return JawnLauncher.getUiUrl(this, port);
+    }
+
+    /** The session cookie is scoped to the origin. When the view opens at
+     *  loopback, copy the domain's cookie there so an existing session survives
+     *  the move; the ticket also mints a fresh one. */
+    private void copySessionToLoopback(String url) {
+        try {
+            if (!JawnLauncher.getJawnLoopback(this) || url == null || !url.startsWith("https://127.0.0.1")) return;
+            String domain = JawnLauncher.getJawnDomain(this);
+            if (domain.isEmpty()) return;
+            int port = JawnLauncher.getJawnPort(this);
+            CookieManager cm = CookieManager.getInstance();
+            String cookie = cm.getCookie("https://" + domain + ":" + port);
+            if (cookie != null && !cookie.isEmpty()) {
+                cm.setCookie("https://127.0.0.1:" + port, cookie);
+            }
+        } catch (Throwable ignored) {
+            // a cookie we cannot copy only means the ticket has to mint one
+        }
     }
 
     private boolean hasSession(String url) {
@@ -145,6 +176,7 @@ public class JawnWebViewActivity extends Activity {
      *  is never just a dead screen. */
     private void loadWhenReady(final String url) {
         gateFallback = false;
+        copySessionToLoopback(url);
         if (JawnLauncher.jawnIsUp(this)) {
             web.loadUrl(url);
             return;
@@ -391,6 +423,19 @@ public class JawnWebViewActivity extends Activity {
             // the sms send and dial intents ride in as extras; hand them to the
             // page once (the chat opens on the number, the phone pad fills)
             injectLaunchExtras(view);
+            if (migrateThenLoopback) {
+                migrateThenLoopback = false;
+                view.evaluateJavascript(
+                    "(function(){try{var u=localStorage.getItem('device_uuid')||window.jawnLockedDevice||'';" +
+                    "if(u&&window.JawnAppStorage)window.JawnAppStorage.set('device_uuid',u);}catch(e){}})();",
+                    value -> {
+                        String loop = JawnLauncher.getUiUrl(JawnWebViewActivity.this,
+                                JawnLauncher.getJawnPort(JawnWebViewActivity.this));
+                        copySessionToLoopback(loop);
+                        view.loadUrl(loop);
+                    });
+                return;
+            }
             // A lapsed session cookie makes the manager answer with the Gate and
             // the view sits on the login screen though a fresh ticket is on hand.
             // Spot the Gate, fall back to the ticket once - and if the Gate
@@ -450,9 +495,21 @@ public class JawnWebViewActivity extends Activity {
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-            // A dead page is no use in its own screen: hand back to the
+            // A dead page is no use in its own screen. If the domain form could
+            // not be reached for the one-time id move, go to loopback anyway
+            // (the ticket may still mint a session); otherwise hand back to the
             // dashboard, which can start jawn and try again.
-            if (request.isForMainFrame()) openDashboard(true);
+            if (request.isForMainFrame()) {
+                if (migrateThenLoopback) {
+                    migrateThenLoopback = false;
+                    String loop = JawnLauncher.getUiUrl(JawnWebViewActivity.this,
+                            JawnLauncher.getJawnPort(JawnWebViewActivity.this));
+                    copySessionToLoopback(loop);
+                    view.loadUrl(loop);
+                    return;
+                }
+                openDashboard(true);
+            }
         }
 
         @Override

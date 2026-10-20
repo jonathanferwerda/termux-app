@@ -434,3 +434,19 @@ work and a full-width build has crashed it (2026-10-10).
     and the laptop's hosts file answers it with `127.0.0.1`. Keeping that origin
     also keeps the paired-device identity and session cookie intact. The build
     number moved to 1061 only so the staged APK stays above the installed 1059.
+
+## Deltas round 16 (loopback-first view)
+
+24. `loopback_manager: true` in `config.json` makes the app open its own
+    manager at `https://127.0.0.1:<port>` instead of the configured domain.
+    Loopback needs no DNS, no router and no tailnet, so the view answers the
+    moment the device joins any network. The wildcard certificate is still the
+    house's; the WebView already proceeds on a loopback TLS error.
+25. The paired-device id lived only in `localStorage`, which is per origin, so
+    moving to loopback looked like an unpaired browser. `JawnAppStorage`
+    (SharedPreferences `jawn_app_state`) mirrors `device_uuid`; `universal.js`
+    restores it on the new origin. On the first launch after the switch, the
+    app opens the domain form once, copies the id into the bridge (and copies
+    the domain session cookie), then moves to loopback for good.
+26. The ticket is addressed at loopback too (`JawnLauncher.getUiUrl` swaps the
+    host); `/box_office` accepts a loopback caller and mints the session there.

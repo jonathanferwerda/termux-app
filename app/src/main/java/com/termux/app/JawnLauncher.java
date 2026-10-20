@@ -302,18 +302,53 @@ public class JawnLauncher {
         return 3000;
     }
 
-    /** The URL the dashboard's Open UI loads: the saved ticket when there is one
-     *  (it logs the browser in and redirects on the fqdn origin the installed
-     *  PWA lives on), else the manager on the configured domain, else loopback.
-     *  Written once per device with: perl scripts/app_ticket.pl <name> --save
+    /** Whether the view opens this machine's manager at loopback.
      *
-     *  A ticket baked before the device had a domain names 127.0.0.1, which the
-     *  house's wildcard certificate does not cover: the TLS error leaves the
-     *  session outside a secure context and the app lands on the login gate.
-     *  When config.json has a domain, point the ticket's host at it, so the
-     *  wildcard matches (and, per each device's dns, still reaches this house). */
-    public static String getUiUrl(Context context, int port) {
+     *  config.json's "loopback_manager" opts in. The view then needs no DNS and
+     *  no VPN to reach itself on any network, which is what makes a phone or
+     *  tablet answer the moment it joins a new network. universal.js restores
+     *  the paired device id from JawnAppStorage, carrying it across the origin
+     *  change, and the ticket is addressed at loopback too. */
+    public static boolean getJawnLoopback(Context context) {
+        try {
+            File f = new File(getJawnDirPath(context), "config.json");
+            if (f.exists()) {
+                StringBuilder sb = new StringBuilder();
+                BufferedReader r = new BufferedReader(new FileReader(f));
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line);
+                r.close();
+                JSONObject o = new JSONObject(sb.toString());
+                return o.optBoolean("loopback_manager", false);
+            }
+        } catch (Throwable ignored) {
+            // no config, no opt-in
+        }
+        return false;
+    }
+
+    /** The host the view opens: loopback when opted in, else the configured
+     *  domain, else loopback. */
+    public static String managerHost(Context context) {
+        if (getJawnLoopback(context)) return "127.0.0.1";
         String domain = getJawnDomain(context);
+        return domain.isEmpty() ? "127.0.0.1" : domain;
+    }
+
+    /** The URL the dashboard's Open UI loads: the saved ticket when there is
+     *  one (its host is swapped for the one the view opens on), else the manager
+     *  on that host. */
+    public static String getUiUrl(Context context, int port) {
+        return uiUrlForHost(context, managerHost(context), port);
+    }
+
+    /** The domain form, used once to carry the paired device id into loopback. */
+    public static String getDomainUiUrl(Context context, int port) {
+        String domain = getJawnDomain(context);
+        return uiUrlForHost(context, domain.isEmpty() ? "127.0.0.1" : domain, port);
+    }
+
+    private static String uiUrlForHost(Context context, String host, int port) {
         try {
             File tf = new File(getJawnDirPath(context), ".shots/ticket.txt");
             if (tf.exists()) {
@@ -323,20 +358,29 @@ public class JawnLauncher {
                 while ((line = r.readLine()) != null) sb.append(line);
                 r.close();
                 String s = sb.toString().trim();
-                if (s.startsWith("https://")) return withDomain(s, domain);
+                if (s.startsWith("https://")) return withDomain(s, host);
             }
         } catch (Throwable ignored) {
             // fall through to the manager URL
         }
-        String host = domain.isEmpty() ? "127.0.0.1" : domain;
         return "https://" + host + ":" + port + "/manager";
     }
 
-    /** The manager - the ticketed destination - on the house's name. */
+    /** The manager - the ticketed destination - on the host the view opens. */
     public static String getManagerUrl(Context context, int port) {
+        return "https://" + managerHost(context) + ":" + port + "/manager";
+    }
+
+    /** The manager on the configured domain, for the one-time id migration. */
+    public static String getDomainManagerUrl(Context context, int port) {
         String domain = getJawnDomain(context);
-        String host = domain.isEmpty() ? "127.0.0.1" : domain;
-        return "https://" + host + ":" + port + "/manager";
+        return "https://" + (domain.isEmpty() ? "127.0.0.1" : domain) + ":" + port + "/manager";
+    }
+
+    /** The device id mirrored by the app bridge; empty when none was seen. */
+    public static String getStoredDeviceUuid(Context context) {
+        return context.getSharedPreferences("jawn_app_state", Context.MODE_PRIVATE)
+                .getString("device_uuid", "");
     }
 
     /** config.json's domain, or "" when it is unset. */
