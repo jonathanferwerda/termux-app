@@ -459,3 +459,14 @@ work and a full-width build has crashed it (2026-10-10).
     internet" even though IP traffic still works. The app reaches itself at
     127.0.0.1 and peers by their `100.64.x.x` addresses, so the device's own
     resolver stays in charge and the tailnet is only a route.
+
+## Deltas round 18 (a splash that leaves, and the gate it can see)
+
+28. `loadWhenReady` used a port probe to decide whether to show the splash.
+    A busy or just-restarted tree made the probe disagree with the dashboard
+    ("running" while the view sat on the splash forever). The view now loads
+    the page first and only starts the tree when the port really is closed;
+    a dead page reports itself and opens the dashboard.
+29. Gate detection used `welcome_logo` / `admin_panel_button`, which also exist
+    on the manager, so the manager itself looked like the Gate and the view
+    reloaded the splash in a loop. It now reads `document.title === 'gate'`.
