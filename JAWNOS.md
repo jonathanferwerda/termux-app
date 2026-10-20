@@ -450,3 +450,12 @@ work and a full-width build has crashed it (2026-10-10).
     the domain session cookie), then moves to loopback for good.
 26. The ticket is addressed at loopback too (`JawnLauncher.getUiUrl` swaps the
     host); `/box_office` accepts a loopback caller and mints the session there.
+
+## Deltas round 17 (keep the device's DNS)
+
+27. The embedded tailnet no longer takes over DNS (`CorpDNS=false`). A
+    Headscale MagicDNS proxy whose request queue fills (`dns udp query:
+    request queue full`) makes every lookup time out, which reads as "no
+    internet" even though IP traffic still works. The app reaches itself at
+    127.0.0.1 and peers by their `100.64.x.x` addresses, so the device's own
+    resolver stays in charge and the tailnet is only a route.

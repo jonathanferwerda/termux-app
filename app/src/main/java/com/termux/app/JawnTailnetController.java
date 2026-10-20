@@ -93,8 +93,15 @@ public class JawnTailnetController {
             // PATCH takes ipn.MaskedPrefs: a value is only applied when its
             // <Field>Set flag is true, so without these the whole edit is
             // silently ignored.
+            // The house does not take over the device's DNS. Headscale's
+            // MagicDNS proxy is only as good as its upstreams, and a wedged
+            // proxy (its request queue full) makes every name lookup time out
+            // and reads as "no internet". The app reaches itself at 127.0.0.1
+            // and peers by their tailnet addresses, so the device's own
+            // resolver stays in charge.
             String masked = "{\"ControlURL\":\"" + CONTROL_URL + "\",\"ControlURLSet\":true"
-                    + ",\"Hostname\":\"" + json(name) + "\",\"HostnameSet\":true}";
+                    + ",\"Hostname\":\"" + json(name) + "\",\"HostnameSet\":true"
+                    + ",\"CorpDNS\":false,\"CorpDNSSet\":true}";
             String full = call(application, "PATCH", "prefs", masked);
             JSONObject prefsObject;
             try {
@@ -108,6 +115,7 @@ public class JawnTailnetController {
             // "invalid key: unable to validate API key".
             prefsObject.put("ControlURL", CONTROL_URL);
             prefsObject.put("Hostname", name);
+            prefsObject.put("CorpDNS", false);
             // Start only calls cc.Login() when the profile is not logged out;
             // the migrated ipn-android profile starts out LoggedOut=true, so
             // without this the auth key is never presented and the device
