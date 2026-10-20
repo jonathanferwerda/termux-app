@@ -400,3 +400,26 @@ work and a full-width build has crashed it (2026-10-10).
   key. `Security -> Padlock -> Enroll this phone's fingerprint` sets it up, and
   the locked screen offers `Use this phone's fingerprint` once a key is enrolled.
   Enrollment is refused while the screen is locked, so set it up before locking.
+
+## Deltas round 14 (embedded house tailnet)
+
+20. Tailscale client embedded in the JawnOS app as a `VpnService`, so no
+    separately branded app is installed.
+    - `app/libs/libtailscale.aar` (61 MB, gitignored) is built from
+      `tailscale-android` by `tools/build_tailscale_aar.sh` (Go + SDK +
+      NDK 23.1.7779620; the AAR ships the arm64 `libgojni.so`).
+    - New classes in `app/src/main/java/com/termux/app/`:
+      `JawnTailnetService` (VpnService + `libtailscale.IPNService`),
+      `JawnTailnetController` (ControlURL/Hostname/auth-key join),
+      `JawnTailnetAppContext` (interfaces/DNS/prefs), `JawnTailnetBuilder`
+      and `JawnTailnetParcel` (the TUN builder).
+    - AndroidManifest: the service with `BIND_VPN_SERVICE` and the
+      `android.net.VpnService` filter; `POST_NOTIFICATIONS`.
+    - Dashboard: a Tailnet card (Join/connect, Approve device, Stop) with a
+      status line. `JawnWebViewActivity` accepts an `EXTRA_URL` for the
+      Headscale approval page and keeps `thejunderground.com` in the view.
+      `JawnBootReceiver` starts the service after boot when it is enabled.
+    - `minSdkVersion` 24 -> 26 (the AAR's minSdk).
+    - Join defaults to the node name in `config.json` (`phone`, `tablet`),
+      ControlURL `https://thejunderground.com`, and an optional reusable
+      Headscale preauth key; blank means the browser approval path.

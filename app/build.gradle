@@ -2,6 +2,10 @@ plugins {
     id "com.android.application"
 }
 
+repositories {
+    flatDir { dirs 'libs' }
+}
+
 android {
     compileSdkVersion project.properties.compileSdkVersion.toInteger()
     ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
@@ -23,6 +27,7 @@ android {
         implementation "io.noties.markwon:recycler:"
         implementation "com.klinkerapps:android-smsmms:5.2.6"
         implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
+        implementation(name: 'libtailscale', ext: 'aar')
 
         implementation project(":terminal-view")
         implementation project(":termux-shared")
@@ -32,8 +37,8 @@ android {
         applicationId "com.termux"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 1050
-        versionName "0.118.51"
+        versionCode 1052
+        versionName "0.118.53"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

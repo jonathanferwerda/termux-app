@@ -59,6 +59,8 @@ public class JawnDashboardActivity extends Activity {
     private CheckBox bleWithJawn;
     private CheckBox systemBars;
     private boolean resumed = false;
+    private TextView tailnetStatus;
+    private static final int REQ_VPN = 0x4A41;
     private long startRequestedAt = 0;
     private final JawnDashboardActivity self = this;
 
@@ -156,6 +158,75 @@ public class JawnDashboardActivity extends Activity {
         LinearLayout app = card(root, "App");
         fullButton(app, "Update app", false, () -> offerUpdate(JawnUpdater.PRODUCT_APP));
         fullButton(app, "Update API", false, () -> offerUpdate(JawnUpdater.PRODUCT_API));
+
+        // ---- tailnet ----
+        LinearLayout tailnet = card(root, "Tailnet");
+        tailnetStatus = new TextView(this);
+        tailnetStatus.setTextColor(DIM);
+        tailnetStatus.setTextSize(13);
+        tailnetStatus.setPadding(dp(2), 0, 0, dp(6));
+        tailnetStatus.setText(JawnTailnetController.statusText(this));
+        tailnet.addView(tailnetStatus);
+        fullButton(tailnet, "Join / connect", true, () -> joinTailnet());
+        fullButton(tailnet, "Approve device", false, () -> openTailnetLogin());
+        fullButton(tailnet, "Stop tailnet", false, () -> stopTailnet());
+    }
+
+    private void joinTailnet() {
+        android.content.SharedPreferences p = getSharedPreferences(JawnTailnetController.PREFS, MODE_PRIVATE);
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("preauth key (blank = browser approval)");
+        input.setText(p.getString("auth_key", ""));
+        input.setTextSize(12);
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Join the house tailnet")
+            .setMessage("Node name: " + JawnTailnetController.nodeName(this))
+            .setView(input)
+            .setPositiveButton("Connect", (d, w) -> {
+                p.edit().putString("auth_key", input.getText().toString().trim())
+                 .putBoolean("enabled", true).apply();
+                prepareTailnet();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void prepareTailnet() {
+        android.content.Intent prep = android.net.VpnService.prepare(this);
+        if (prep != null) startActivityForResult(prep, REQ_VPN);
+        else startTailnet();
+    }
+
+    private void startTailnet() {
+        tailnetStatus.setText("Starting tailnet...");
+        JawnTailnetController.startService(this);
+        toast("Starting tailnet");
+    }
+
+    private void stopTailnet() {
+        JawnTailnetController.stopService(this);
+        tailnetStatus.setText("Stopping tailnet...");
+        toast("Stopping tailnet");
+    }
+
+    private void openTailnetLogin() {
+        String url = JawnTailnetController.getLoginUrl();
+        if (url == null || url.isEmpty()) {
+            toast("No login link yet - start the tailnet first");
+            return;
+        }
+        android.content.Intent i = new android.content.Intent(this, JawnWebViewActivity.class);
+        i.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+        startActivity(i);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_VPN) {
+            if (resultCode == RESULT_OK) startTailnet();
+            else toast("Tailnet permission was not granted");
+        }
     }
 
     // ---- the look ----
@@ -290,6 +361,7 @@ public class JawnDashboardActivity extends Activity {
 
     protected void onResume() {
         super.onResume();
+        if (tailnetStatus != null) tailnetStatus.setText(JawnTailnetController.statusText(this));
         resumed = true;
         updateEnvStatus();
         pollNow();

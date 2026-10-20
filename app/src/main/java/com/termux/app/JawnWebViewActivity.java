@@ -48,6 +48,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnNfcBridge nfc;
     private JawnCamera camera;
     private JawnContactsBridge contacts;
+    public static final String EXTRA_URL = "com.termux.app.EXTRA_URL";
     private String houseHost = "";
     private boolean gateFallback = false;
     private PermissionRequest pendingPermission;
@@ -101,6 +102,13 @@ public class JawnWebViewActivity extends Activity {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
+        String extraUrl = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_URL);
+        if (extraUrl != null && !extraUrl.isEmpty()) {
+            try { houseHost = new URI(extraUrl).getHost(); } catch (Exception e) { houseHost = ""; }
+            if (houseHost == null) houseHost = "";
+            web.loadUrl(extraUrl);
+            return;
+        }
         String url = destination();
         try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
         if (houseHost == null) houseHost = "";
@@ -430,7 +438,7 @@ public class JawnWebViewActivity extends Activity {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
-            if (inHouse(url)) return false;
+            if (inHouse(url) || url.startsWith("https://thejunderground.com")) return false;
             try {
                 startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Throwable ignored) { }

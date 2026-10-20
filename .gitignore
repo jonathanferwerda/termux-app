@@ -36,3 +36,6 @@ local.properties
 .swp
 ehthumbs.db
 Thumbs.db
+
+# Tailscale Android AAR is a build input, not a source file
+app/libs/*.aar
