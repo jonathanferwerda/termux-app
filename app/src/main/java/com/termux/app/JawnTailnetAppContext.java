@@ -148,19 +148,29 @@ public class JawnTailnetAppContext implements libtailscale.AppContext {
         }
     }
 
+    // There is no MDM on a house device, so no policy value is configured.
+    // libtailscale maps a Java exception whose message is "no such key" to
+    // syspolicy.ErrNoSuchKey, which is how the Go side knows to use its own
+    // default. Returning "" instead reads as "the admin set this to empty":
+    // applySysPolicyLocked then clears Hostname, and GetString overwrites
+    // ControlURL with the default controlplane.tailscale.com.
+    private static RuntimeException noSuchKey() {
+        return new RuntimeException("no such key");
+    }
+
     @Override
     public String getSyspolicyStringValue(String key) {
-        return "";
+        throw noSuchKey();
     }
 
     @Override
     public boolean getSyspolicyBooleanValue(String key) {
-        return false;
+        throw noSuchKey();
     }
 
     @Override
     public String getSyspolicyStringArrayJSONValue(String key) {
-        return "[]";
+        throw noSuchKey();
     }
 
     @Override

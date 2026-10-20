@@ -88,9 +88,11 @@ public class JawnTailnetController {
         String name = nodeName(context);
         String key = prefs().getString("auth_key", "");
         try {
-            String masked = "{\"ControlURL\":\"" + CONTROL_URL
-                    + "\",\"Hostname\":\"" + json(name)
-                    + "\",\"LoggedOut\":false}";
+            // PATCH takes ipn.MaskedPrefs: a value is only applied when its
+            // <Field>Set flag is true, so without these the whole edit is
+            // silently ignored.
+            String masked = "{\"ControlURL\":\"" + CONTROL_URL + "\",\"ControlURLSet\":true"
+                    + ",\"Hostname\":\"" + json(name) + "\",\"HostnameSet\":true}";
             String full = call(application, "PATCH", "prefs", masked);
             JSONObject prefsObject;
             try {
@@ -98,6 +100,17 @@ public class JawnTailnetController {
             } catch (Exception e) {
                 prefsObject = new JSONObject(masked);
             }
+            // ControlURL is only honoured from Start's initial prefs; a PATCH
+            // cannot change it. Without it here the client registers against
+            // controlplane.tailscale.com, which rejects a headscale hskey as
+            // "invalid key: unable to validate API key".
+            prefsObject.put("ControlURL", CONTROL_URL);
+            prefsObject.put("Hostname", name);
+            // Start only calls cc.Login() when the profile is not logged out;
+            // the migrated ipn-android profile starts out LoggedOut=true, so
+            // without this the auth key is never presented and the device
+            // sits at NeedsLogin with no registration attempt at all.
+            prefsObject.put("LoggedOut", false);
             // WantRunning belongs in start's UpdatePrefs, not the masked PATCH:
             // setting it in editPrefs starts a control client the start call
             // then tears down, and a slow register can be cancelled mid-flight.
@@ -106,7 +119,21 @@ public class JawnTailnetController {
                     + (key == null || key.isEmpty() ? "" : ",\"AuthKey\":\"" + json(key) + "\"")
                     + "}";
             call(application, "POST", "start", startJson);
-            call(application, "POST", "login-interactive", null);
+            // A fresh profile has no node key, and start alone leaves it at
+            // NeedsLogin. `tailscale up` calls StartLoginInteractive in exactly
+            // this case (HaveNodeKey false). The auth key travels with that
+            // login, so this is what presents it to the control server; without
+            // a key it is also what returns the browser approval URL.
+            boolean haveNodeKey = false;
+            try {
+                JSONObject status = new JSONObject(call(application, "GET", "status", null));
+                haveNodeKey = status.optBoolean("HaveNodeKey", false);
+            } catch (Exception ignored) {
+                // a status we cannot parse just means we ask to log in
+            }
+            if (!haveNodeKey) {
+                call(application, "POST", "login-interactive", null);
+            }
             Libtailscale.requestVPN(service);
             prefs().edit().putBoolean("enabled", true).putString("status", "starting").apply();
         } catch (Exception e) {
