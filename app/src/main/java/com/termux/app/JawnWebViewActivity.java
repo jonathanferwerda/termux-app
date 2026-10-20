@@ -90,6 +90,9 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnScan(this, this::runJs), "JawnScan");
         web.addJavascriptInterface(new JawnPhoneBridge(this), "JawnPhone");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
+        // the remote_control panel's VPN button: the embedded tailnet client owns
+        // the exit node, so the page reads and sets it through this bridge
+        web.addJavascriptInterface(new JawnVpnBridge(this), "JawnVPN");
         web.addJavascriptInterface(new JawnBiometric(this, this::runJs), "JawnBiometric");
         web.addJavascriptInterface(new JawnBiometricKey(this, this::runJs), "JawnBiometricKey");
         // a nudge for the page when something happens with no page's finger in

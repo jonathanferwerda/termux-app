@@ -8,9 +8,11 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 
 import libtailscale.Application;
 import libtailscale.IPNService;
@@ -168,6 +170,117 @@ public class JawnTailnetController {
 
     public static String getLoginUrl() {
         return loginUrl;
+    }
+
+    /** The tailnet as the remote_control VPN button needs it: the peers, which
+     *  of them offer an exit node, and which one this device is using now. */
+    public static String statusJson(Context context) {
+        try {
+            Application application = ensureApp(context);
+            String raw = call(application, "GET", "status", null);
+            JSONObject status = new JSONObject(raw == null || raw.isEmpty() ? "{}" : raw);
+            JSONObject peers = status.optJSONObject("Peer");
+            JSONArray out = new JSONArray();
+            String exit = "";
+            if (peers != null) {
+                Iterator<String> keys = peers.keys();
+                while (keys.hasNext()) {
+                    JSONObject peer = peers.optJSONObject(keys.next());
+                    if (peer == null) continue;
+                    String ip = firstTailnetAddress(peer.optJSONArray("TailscaleIPs"));
+                    if (ip.isEmpty()) continue;
+                    JSONObject o = new JSONObject();
+                    o.put("ip", ip);
+                    o.put("name", peer.optString("HostName", peer.optString("DNSName", "")));
+                    o.put("online", peer.optBoolean("Online", false));
+                    o.put("exit", peer.optBoolean("ExitNodeOption", false));
+                    out.put(o);
+                    if (peer.optBoolean("ExitNode", false)) exit = ip;
+                }
+            }
+            JSONObject result = new JSONObject();
+            result.put("available", peers != null);
+            result.put("exit", exit);
+            result.put("peers", out);
+            result.put("haveNodeKey", status.optBoolean("HaveNodeKey", false));
+            return result.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "tailnet status failed", e);
+            try {
+                JSONObject result = new JSONObject();
+                result.put("available", false);
+                result.put("exit", "");
+                result.put("peers", new JSONArray());
+                result.put("error", String.valueOf(e.getMessage()));
+                return result.toString();
+            } catch (Exception ignored) {
+                return "{\"available\":false,\"exit\":\"\",\"peers\":[]}";
+            }
+        }
+    }
+
+    /** Choose an exit node ("" clears it) through the embedded client's local
+     *  API. The local network stays direct so the house's own addresses still
+     *  answer while the VPN is on. */
+    public static String setExitNode(Context context, String ip) {
+        String target = ip == null ? "" : ip;
+        try {
+            if (!target.isEmpty() && !target.matches("[0-9a-fA-F:.]+")) {
+                return result(false, target, "not a tailnet address");
+            }
+            Application application = ensureApp(context);
+            if (!target.isEmpty()) {
+                JSONObject status = new JSONObject(statusJson(context));
+                JSONArray peers = status.optJSONArray("peers");
+                boolean offered = false;
+                if (peers != null) {
+                    for (int i = 0; i < peers.length(); i++) {
+                        JSONObject peer = peers.optJSONObject(i);
+                        if (peer != null && target.equals(peer.optString("ip")) && peer.optBoolean("exit")) {
+                            offered = true;
+                            break;
+                        }
+                    }
+                }
+                if (!offered) return result(false, target, "that machine does not offer an exit node");
+            }
+            // Clear the resolved node id as well as the address: an id left
+            // behind wins over an empty ExitNodeIP, so clearing only the
+            // address leaves the device still exiting through the old peer.
+            JSONObject patch = new JSONObject();
+            patch.put("ExitNodeID", "");
+            patch.put("ExitNodeIDSet", true);
+            patch.put("ExitNodeIP", target);
+            patch.put("ExitNodeIPSet", true);
+            patch.put("ExitNodeAllowLANAccess", true);
+            patch.put("ExitNodeAllowLANAccessSet", true);
+            call(application, "PATCH", "prefs", patch.toString());
+            return result(true, target, null);
+        } catch (Exception e) {
+            Log.e(TAG, "setting the exit node failed", e);
+            return result(false, target, String.valueOf(e.getMessage()));
+        }
+    }
+
+    private static String result(boolean ok, String exit, String error) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("ok", ok);
+            o.put("exit", exit == null ? "" : exit);
+            if (error != null) o.put("error", error);
+            return o.toString();
+        } catch (Exception ignored) {
+            return ok ? "{\"ok\":true}" : "{\"ok\":false}";
+        }
+    }
+
+    private static String firstTailnetAddress(JSONArray addresses) {
+        if (addresses == null) return "";
+        for (int i = 0; i < addresses.length(); i++) {
+            String ip = addresses.optString(i, "");
+            if (ip.startsWith("100.")) return ip;
+        }
+        return "";
     }
 
     public static boolean isEnabled(Context context) {
