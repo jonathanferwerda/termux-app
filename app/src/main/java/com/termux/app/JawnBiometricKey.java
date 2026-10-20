@@ -1,6 +1,7 @@
 package com.termux.app;
 
 import android.app.Activity;
+import android.hardware.biometrics.BiometricManager;
 import android.hardware.biometrics.BiometricPrompt;
 import android.os.Build;
 import android.os.CancellationSignal;
@@ -74,7 +75,7 @@ public final class JawnBiometricKey {
                 .setUserAuthenticationRequired(true)
                 .setInvalidatedByBiometricEnrollment(true);
             if (Build.VERSION.SDK_INT >= 30) {
-                spec.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG);
+                spec.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL);
             }
             else {
                 // -1: every use of the key needs a fresh authentication, and the
@@ -92,13 +93,22 @@ public final class JawnBiometricKey {
     private void prompt(String title, Signature sig, Runnable after) {
         if (running != null) { running.cancel(); }
         running = new CancellationSignal();
-        BiometricPrompt prompt = new BiometricPrompt.Builder(activity)
-            .setTitle(title == null || title.isEmpty() ? "Unlock the house" : title)
-            .setNegativeButton("Cancel", activity.getMainExecutor(), (dialog, which) -> {
+        BiometricPrompt.Builder builder = new BiometricPrompt.Builder(activity)
+            .setTitle(title == null || title.isEmpty() ? "Unlock the house" : title);
+        if (Build.VERSION.SDK_INT >= 30) {
+            // A tablet with no fingerprint reader can still protect the key with
+            // its own device credential (PIN/pattern/face where supported). The
+            // key is created with the same two auth types.
+            builder.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG
+                | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        }
+        else {
+            builder.setNegativeButton("Cancel", activity.getMainExecutor(), (dialog, which) -> {
                 running = null;
                 fail("cancelled");
-            })
-            .build();
+            });
+        }
+        BiometricPrompt prompt = builder.build();
         BiometricPrompt.AuthenticationCallback callback = new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
