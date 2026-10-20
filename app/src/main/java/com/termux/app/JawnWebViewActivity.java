@@ -177,25 +177,15 @@ public class JawnWebViewActivity extends Activity {
     private void loadWhenReady(final String url) {
         gateFallback = false;
         copySessionToLoopback(url);
-        if (JawnLauncher.jawnIsUp(this)) {
-            web.loadUrl(url);
-            return;
+        // Load the page first. The port check can disagree with a busy or
+        // just-restarted tree - the dashboard said "running" while this screen
+        // stayed on the splash - and a splash that never leaves is worse than
+        // the page reporting its own error (onReceivedError opens the
+        // dashboard). Only start the tree when the port really is closed.
+        web.loadUrl(url);
+        if (!JawnLauncher.jawnIsUp(this)) {
+            JawnLauncher.startJawn(this);
         }
-        JawnLauncher.startJawn(this);
-        showSplash();
-        new Thread(() -> {
-            splashStatus("Starting JawnOS...");
-            boolean ready = false;
-            for (int i = 0; i < 60 && !ready; i++) {
-                try { Thread.sleep(500); } catch (InterruptedException e) { break; }
-                ready = JawnLauncher.jawnIsUp(JawnWebViewActivity.this);
-                if (!ready && i == 4) splashStatus("Still reaching JawnOS... Admin Panel is below.");
-            }
-            if (ready) {
-                final String target = url;
-                runOnUiThread(() -> web.loadUrl(target));
-            }
-        }).start();
     }
 
     /** The logo-with-a-glow splash (assets/splash.html), shown while jawn is
@@ -444,7 +434,7 @@ public class JawnWebViewActivity extends Activity {
             if (url == null) return;
             String manager = JawnLauncher.getManagerUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
             if (!url.startsWith(manager)) return;
-            view.evaluateJavascript("(document.getElementById('welcome_logo')||document.getElementById('admin_panel_button'))?'gate':'ok'", value -> {
+            view.evaluateJavascript("(document.title||'').trim().toLowerCase()==='gate'?'gate':'ok'", value -> {
                 if (value == null || !value.contains("gate")) return;
                 if (!gateFallback) {
                     gateFallback = true;
