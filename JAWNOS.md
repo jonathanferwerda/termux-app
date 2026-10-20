@@ -423,3 +423,14 @@ work and a full-width build has crashed it (2026-10-10).
     - Join defaults to the node name in `config.json` (`phone`, `tablet`),
       ControlURL `https://thejunderground.com`, and an optional reusable
       Headscale preauth key; blank means the browser approval path.
+
+
+## Deltas round 15 (version-only rebuild)
+
+23. No Java behaviour changed in this build. The tailnet internet fix is on the
+    Headscale server (its DNS proxy had no upstreams, so external lookups timed
+    out), and a machine reaches its own manager through its own configured
+    domain: the router's DNS answers that name with the machine's LAN address,
+    and the laptop's hosts file answers it with `127.0.0.1`. Keeping that origin
+    also keeps the paired-device identity and session cookie intact. The build
+    number moved to 1061 only so the staged APK stays above the installed 1059.
