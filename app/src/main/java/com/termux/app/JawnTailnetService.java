@@ -5,6 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.os.Build;
 import android.system.OsConstants;
@@ -37,6 +41,9 @@ public class JawnTailnetService extends VpnService implements IPNService {
     private final String id = UUID.randomUUID().toString();
     private boolean closed = false;
     private JawnTailnetController controller;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private volatile long lastNetworkAt = 0;
+    private volatile boolean restartPending = false;
 
     @Override
     public void onCreate() {
@@ -45,6 +52,7 @@ public class JawnTailnetService extends VpnService implements IPNService {
         createChannel(LOGIN_CHANNEL, "JawnOS Tailnet login", NotificationManager.IMPORTANCE_DEFAULT);
         controller = new JawnTailnetController(this);
         controller.startWatching();
+        watchNetwork();
     }
 
     @Override
@@ -103,15 +111,84 @@ public class JawnTailnetService extends VpnService implements IPNService {
 
     @Override
     public void onDestroy() {
+        unwatchNetwork();
         close();
         super.onDestroy();
     }
 
     @Override
     public void onRevoke() {
+        unwatchNetwork();
         controller.stop();
         close();
         super.onRevoke();
+    }
+
+    /** The phone can change its default network (Wi-Fi to cellular, a new
+     *  Wi-Fi) while the tunnel is up. The Go client can keep using the old
+     *  route, so a settled change asks the controller to stop and start the
+     *  tunnel. The request excludes VPN transports, which keeps the tunnel
+     *  itself from triggering the watcher. */
+    private void watchNetwork() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build();
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                scheduleRestart();
+            }
+
+            @Override
+            public void onLost(Network network) {
+                scheduleRestart();
+            }
+        };
+        try {
+            cm.registerNetworkCallback(request, networkCallback);
+        } catch (Exception e) {
+            networkCallback = null;
+        }
+    }
+
+    private void unwatchNetwork() {
+        if (networkCallback == null) return;
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (cm != null) {
+            try {
+                cm.unregisterNetworkCallback(networkCallback);
+            } catch (Exception ignored) {
+            }
+        }
+        networkCallback = null;
+    }
+
+    /** Debounce a switch (a Wi-Fi change often arrives as a loss and an
+     *  availability seconds apart), then restart the tunnel once the network
+     *  has been stable for two seconds. */
+    private void scheduleRestart() {
+        lastNetworkAt = System.currentTimeMillis();
+        if (restartPending) return;
+        restartPending = true;
+        new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                if (System.currentTimeMillis() - lastNetworkAt < 2000) continue;
+                break;
+            }
+            restartPending = false;
+            if (JawnTailnetController.isEnabled(JawnTailnetService.this)) {
+                controller.restart();
+            }
+        }, "jawn-tailnet-network").start();
     }
 
     /** Called from the Go notification watcher when Headscale needs approval. */

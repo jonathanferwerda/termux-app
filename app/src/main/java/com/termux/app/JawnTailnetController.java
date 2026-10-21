@@ -163,6 +163,26 @@ public class JawnTailnetController {
         prefs().edit().putBoolean("enabled", false).putString("status", "off").apply();
     }
 
+    /** Re-establish the tunnel after the phone's underlying network changed.
+     *  A Wi-Fi/cellular switch can leave the Go client pinned to the old
+     *  default route, so the transport is stopped and started again while the
+     *  user's enabled choice is kept. Runs on the service's background thread. */
+    public void restart() {
+        if (!isEnabled(context)) return;
+        try {
+            Application application = ensureApp(context);
+            call(application, "PATCH", "prefs", "{\"WantRunning\":false}");
+        } catch (Exception ignored) {
+        }
+        Libtailscale.serviceDisconnect(service);
+        try {
+            Thread.sleep(800);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+        start();
+    }
+
     private static String call(Application application, String method, String endpoint, String body)
             throws Exception {
         String path = "/localapi/v0/" + endpoint;
