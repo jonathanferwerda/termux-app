@@ -63,8 +63,9 @@ public class JawnWebViewActivity extends Activity {
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
+        // Deliberately no FLAG_KEEP_SCREEN_ON: this is a UI, not a kiosk.
+        // Holding the screen awake while it idles was the phone's biggest heat
+        // and battery cost; the system screen timeout now applies normally.
         web = new WebView(this);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -109,6 +110,13 @@ public class JawnWebViewActivity extends Activity {
         root.addView(web, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+
+        // The manager UI is static while it idles; a 120 Hz panel redrawing
+        // it 120 times a second is battery and heat for no visible gain.
+        // Pin this window to 60 Hz - the page still animates smoothly.
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.preferredRefreshRate = 60f;
+        getWindow().setAttributes(lp);
 
         String extraUrl = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_URL);
         if (extraUrl != null && !extraUrl.isEmpty()) {
@@ -238,6 +246,7 @@ public class JawnWebViewActivity extends Activity {
             // sockets when it becomes visible again (websocket.js wakes on
             // visibilitychange/focus/pageshow/resume), so a full reload here only
             // lost the open windows and flashed the splash on every wake.
+            web.resumeTimers();
             web.onResume();
         }
     }
@@ -245,7 +254,12 @@ public class JawnWebViewActivity extends Activity {
     protected void onPause() {
         if (nfc != null) nfc.onPause();
         if (contacts != null) contacts.onPause();
-        if (web != null) web.onPause();
+        if (web != null) {
+            web.onPause();
+            // Stop the page's timers entirely while it is off-screen rather
+            // than letting the WebView keep them warm.
+            web.pauseTimers();
+        }
         super.onPause();
     }
 

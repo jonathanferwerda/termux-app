@@ -484,3 +484,17 @@ work and a full-width build has crashed it (2026-10-10).
 31. `getPlatformDNSConfig` reads the physical network underneath the VPN, not
     `getActiveNetwork` (which is the tunnel while it is up). The base config
     must not name MagicDNS as its own upstream.
+
+## Deltas round 20 (battery: the view sleeps and runs at 60 Hz)
+
+32. No `FLAG_KEEP_SCREEN_ON`. The view is a UI, not a kiosk; holding the screen
+    awake while it idled was the phone's biggest heat and battery cost. The
+    system screen timeout now applies normally (observed: `mHoldScreenWindow`
+    was the JawnOS window, with the panel at 120 Hz and JS otherwise idle).
+33. `preferredRefreshRate = 60f` on the view's window. The panel's default mode
+    is 120 Hz, so an idle manager page was redrawn 120 times a second for no
+    visible gain. The page still animates smoothly at 60.
+34. `web.pauseTimers()` on pause and `resumeTimers()` on resume. The house work
+    runs in Termux, not in the page; the WebView no longer keeps its timers
+    warm while the app is off-screen. The page reconnects its sockets on
+    visibilitychange/resume, as before.
