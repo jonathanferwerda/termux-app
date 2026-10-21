@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.util.Log;
 
@@ -132,8 +133,12 @@ public class JawnTailnetAppContext implements libtailscale.AppContext {
     public String getPlatformDNSConfig() {
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            Network network = cm == null ? null : cm.getActiveNetwork();
-            LinkProperties lp = network == null ? null : cm.getLinkProperties(network);
+            if (cm == null) return "";
+            // While the tunnel is up it is the default network, and its own DNS
+            // is MagicDNS. The base config this feeds back to the tailnet client
+            // must be the physical network's resolver underneath it, or the
+            // client would offer MagicDNS as its own upstream.
+            LinkProperties lp = underlyingLinkProperties(cm);
             if (lp == null) return "";
             StringBuilder servers = new StringBuilder();
             for (InetAddress address : lp.getDnsServers()) {
@@ -146,6 +151,23 @@ public class JawnTailnetAppContext implements libtailscale.AppContext {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    /** The non-VPN network that carries the tunnel, with its real resolver. */
+    private static LinkProperties underlyingLinkProperties(ConnectivityManager cm) {
+        Network[] networks = cm.getAllNetworks();
+        if (networks != null) {
+            for (Network network : networks) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps == null) continue;
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
+                LinkProperties lp = cm.getLinkProperties(network);
+                if (lp != null && !lp.getDnsServers().isEmpty()) return lp;
+            }
+        }
+        Network active = cm.getActiveNetwork();
+        return active == null ? null : cm.getLinkProperties(active);
     }
 
     // There is no MDM on a house device, so no policy value is configured.

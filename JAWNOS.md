@@ -470,3 +470,17 @@ work and a full-width build has crashed it (2026-10-10).
 29. Gate detection used `welcome_logo` / `admin_panel_button`, which also exist
     on the manager, so the manager itself looked like the Gate and the view
     reloaded the splash in a loop. It now reads `document.title === 'gate'`.
+
+## Deltas round 19 (the exit node keeps its resolver)
+
+30. The embedded tailnet takes DNS again (`CorpDNS=true`). With `CorpDNS=false`
+    the VPN network carried no DNS servers; while the tunnel was the default
+    network the Go client had no resolver. An exit node changes the routes and
+    forces a reconnect, and Headscale and DERP then could not be resolved, so
+    the device dropped off the tailnet and all traffic into the exit stopped.
+    Headscale now carries 1.1.1.1 and 8.8.8.8, so MagicDNS forwards external
+    names. This supersedes round 17 item 27; the queue-full symptom was the
+    missing upstreams, not MagicDNS itself.
+31. `getPlatformDNSConfig` reads the physical network underneath the VPN, not
+    `getActiveNetwork` (which is the tunnel while it is up). The base config
+    must not name MagicDNS as its own upstream.
