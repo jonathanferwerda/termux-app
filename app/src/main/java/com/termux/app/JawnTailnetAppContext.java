@@ -228,7 +228,11 @@ public class JawnTailnetAppContext implements libtailscale.AppContext {
     public boolean bindSocketToNetwork(int fd) {
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            Network network = cm == null ? null : cm.getActiveNetwork();
+            // The tunnel is the active network while it is up; binding the
+            // client's own sockets to it would send their packets back into
+            // the tunnel. Use the physical network underneath.
+            Network network = JawnTailnetNetwork.get();
+            if (network == null) network = JawnTailnetNetwork.pick(cm);
             if (network == null) return false;
             android.os.ParcelFileDescriptor pfd = android.os.ParcelFileDescriptor.fromFd(fd);
             try {

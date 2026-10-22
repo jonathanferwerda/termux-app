@@ -41,7 +41,10 @@ public class JawnTailnetService extends VpnService implements IPNService {
     private final String id = UUID.randomUUID().toString();
     private boolean closed = false;
     private JawnTailnetController controller;
+    private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
+    private volatile Network underlying;
+    private final Object restartLock = new Object();
     private volatile long lastNetworkAt = 0;
     private volatile boolean restartPending = false;
 
@@ -52,6 +55,9 @@ public class JawnTailnetService extends VpnService implements IPNService {
         createChannel(LOGIN_CHANNEL, "JawnOS Tailnet login", NotificationManager.IMPORTANCE_DEFAULT);
         controller = new JawnTailnetController(this);
         controller.startWatching();
+        connectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        underlying = JawnTailnetNetwork.pick(connectivityManager);
+        JawnTailnetNetwork.set(connectivityManager, underlying);
         watchNetwork();
     }
 
@@ -67,9 +73,23 @@ public class JawnTailnetService extends VpnService implements IPNService {
             startForeground(NOTIF_ID, notification("Waiting for approval"));
             return START_NOT_STICKY;
         }
+        if (!ACTION_START.equals(action) && !JawnTailnetController.isEnabled(this)) {
+            // Android re-binds a VPN service (always-on, or a sticky restart)
+            // even after the user stopped it. The stored choice, not the
+            // intent, decides whether the tunnel comes back.
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         startForeground(NOTIF_ID, notification("Starting"));
         // the local API calls can wait on the backend; keep the UI thread free
-        new Thread(() -> controller.start(), "jawn-tailnet-start").start();
+        if (ACTION_START.equals(action)) {
+            new Thread(() -> controller.start(), "jawn-tailnet-start").start();
+        }
+        else {
+            // a system restart of an enabled tunnel: no prefs edit, no new
+            // login, just re-establish the TUN this process used to hold
+            new Thread(() -> controller.resume(), "jawn-tailnet-resume").start();
+        }
         return START_STICKY;
     }
 
@@ -107,6 +127,7 @@ public class JawnTailnetService extends VpnService implements IPNService {
     public void updateVpnStatus(boolean status) {
         JawnTailnetController.setStatus(this, status ? "connected" : "disconnected");
         updateNotification(status ? "Connected" : "Disconnected");
+        if (status) applyUnderlying();
     }
 
     @Override
@@ -125,13 +146,14 @@ public class JawnTailnetService extends VpnService implements IPNService {
     }
 
     /** The phone can change its default network (Wi-Fi to cellular, a new
-     *  Wi-Fi) while the tunnel is up. The Go client can keep using the old
-     *  route, so a settled change asks the controller to stop and start the
-     *  tunnel. The request excludes VPN transports, which keeps the tunnel
-     *  itself from triggering the watcher. */
+     *  Wi-Fi) while the tunnel is up. Keep the VpnService pointed at the
+     *  network underneath and let the Go client rebind its sockets; only a
+     *  real change of that network asks the controller to restart the
+     *  tunnel. The request excludes VPN transports, so the tunnel's own
+     *  coming and going is not a network change - restarting on that turned
+     *  every restart into the next one. */
     private void watchNetwork() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-        if (cm == null) return;
+        if (connectivityManager == null) return;
         NetworkRequest request = new NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
@@ -139,16 +161,22 @@ public class JawnTailnetService extends VpnService implements IPNService {
         networkCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network network) {
-                scheduleRestart();
+                refreshUnderlying();
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return;
+                refreshUnderlying();
             }
 
             @Override
             public void onLost(Network network) {
-                scheduleRestart();
+                refreshUnderlying();
             }
         };
         try {
-            cm.registerNetworkCallback(request, networkCallback);
+            connectivityManager.registerNetworkCallback(request, networkCallback);
         } catch (Exception e) {
             networkCallback = null;
         }
@@ -156,37 +184,86 @@ public class JawnTailnetService extends VpnService implements IPNService {
 
     private void unwatchNetwork() {
         if (networkCallback == null) return;
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-        if (cm != null) {
+        if (connectivityManager != null) {
             try {
-                cm.unregisterNetworkCallback(networkCallback);
+                connectivityManager.unregisterNetworkCallback(networkCallback);
             } catch (Exception ignored) {
             }
         }
         networkCallback = null;
     }
 
+    /** Adopt the physical network under the tunnel, tell Android about it and
+     *  poke the Go client's netmon; restart only when the network itself
+     *  changed. */
+    private void refreshUnderlying() {
+        Network next = JawnTailnetNetwork.pick(connectivityManager);
+        if (next != null && next.equals(underlying)) return;
+        if (next == null && underlying == null) return;
+        underlying = next;
+        JawnTailnetNetwork.set(connectivityManager, next);
+        applyUnderlying();
+        if (next != null) scheduleRestart();
+    }
+
+    /** Tell Android which network carries the tunnel. The system keeps the
+     *  underlying network alive and routes the VPN's own sockets over it;
+     *  leaving it null leaves the tunnel with no physical network to lean on
+     *  after a switch. */
+    private void applyUnderlying() {
+        try {
+            setUnderlyingNetworks(underlying == null ? new Network[0] : new Network[]{underlying});
+        } catch (Exception ignored) {
+            // an unestablished VpnService refuses the call; the next update
+            // carries the value anyway
+        }
+        // The Go client asks netmon for the default interface when it starts,
+        // and at that moment the tunnel is not up yet: "Rebind; defIf=\"\"".
+        // A network event with the physical interface named gets it rebinding
+        // its sockets over the right network.
+        try {
+            Libtailscale.onDNSConfigChanged(JawnTailnetNetwork.getInterfaceName());
+        } catch (Throwable ignored) {
+        }
+        String gateway = JawnTailnetNetwork.gateway(connectivityManager, underlying);
+        if (!gateway.isEmpty()) {
+            try {
+                Libtailscale.onGatewayChanged(gateway);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     /** Debounce a switch (a Wi-Fi change often arrives as a loss and an
      *  availability seconds apart), then restart the tunnel once the network
-     *  has been stable for two seconds. */
+     *  has been stable for two seconds. Only one restart runs at a time: a
+     *  second start overlapping a stop made the Go backend abort the whole
+     *  process. */
     private void scheduleRestart() {
         lastNetworkAt = System.currentTimeMillis();
-        if (restartPending) return;
-        restartPending = true;
+        synchronized (restartLock) {
+            if (restartPending) return;
+            restartPending = true;
+        }
         new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(3000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+            try {
+                while (true) {
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    if (System.currentTimeMillis() - lastNetworkAt < 2000) continue;
                     break;
                 }
-                if (System.currentTimeMillis() - lastNetworkAt < 2000) continue;
-                break;
-            }
-            restartPending = false;
-            if (JawnTailnetController.isEnabled(JawnTailnetService.this)) {
-                controller.restart();
+                if (JawnTailnetController.isEnabled(JawnTailnetService.this)) {
+                    controller.restart();
+                }
+            } finally {
+                synchronized (restartLock) {
+                    restartPending = false;
+                }
             }
         }, "jawn-tailnet-network").start();
     }

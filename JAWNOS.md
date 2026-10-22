@@ -508,3 +508,25 @@ work and a full-width build has crashed it (2026-10-10).
     actually playing; while it is, `onPause` leaves the WebView and its timers
     running. A real stop releases it a few seconds later and the page pauses
     as before.
+
+## Deltas round 22 (one tunnel, not a restart loop)
+
+36. The network watcher restarted the tunnel on every ConnectivityManager
+    callback. A restart tears the VPN down and re-establishes it, so its own
+    transition fed the watcher and the tunnel restarted about every four
+    seconds - the key icon flicker, peers answering "no route", and (twice on
+    2026-10-22) a SIGABRT inside `libgojni.so` that killed the whole app. The
+    new `JawnTailnetNetwork` picks the non-VPN network underneath; the service
+    passes it to `setUnderlyingNetworks`, names that interface to the Go
+    client's netmon (`onDNSConfigChanged`, `onGatewayChanged`), and restarts
+    only when the underlying network really changes. A restart is single-flight
+    and holds `restartPending` until it finishes.
+37. `bindSocketToNetwork` used `getActiveNetwork()` - the tunnel itself while it
+    is up - so the client's own sockets could be bound into the tunnel. It now
+    binds to the cached physical network.
+38. `JawnTailnetController.start/stop/restart/resume` are serialized; overlapping
+    start and stop was the shape of the SIGABRT. A system restart of the service
+    (`android.net.VpnService`, or a sticky re-start) now only re-requests the
+    TUN and honours the stored `enabled` choice instead of re-running the join.
+39. One approval notification per distinct login URL; every restart used to
+    re-post the same one.
