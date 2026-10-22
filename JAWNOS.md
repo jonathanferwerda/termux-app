@@ -498,3 +498,13 @@ work and a full-width build has crashed it (2026-10-10).
     runs in Termux, not in the page; the WebView no longer keeps its timers
     warm while the app is off-screen. The page reconnects its sockets on
     visibilitychange/resume, as before.
+
+## Deltas round 21 (music survives the screen going off)
+
+35. A WebView `onPause()` paused the page's timers (and, in practice, the
+    player) whenever the screen turned off or the app was backgrounded, so a
+    track stopped and the queue never reached the next one. `JawnMedia`
+    (`window.JawnMedia.playing`) lets the manager's player say when a track is
+    actually playing; while it is, `onPause` leaves the WebView and its timers
+    running. A real stop releases it a few seconds later and the page pauses
+    as before.
