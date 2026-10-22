@@ -53,6 +53,10 @@ public class JawnWebViewActivity extends Activity {
     private boolean gateFallback = false;
     // one-time move of the paired device id into loopback
     private boolean migrateThenLoopback = false;
+    // The page says when a track is playing, so the activity can leave the
+    // WebView (and the music) running while it is in the background.
+    private volatile boolean mediaPlaying = false;
+    private boolean isResumed = false;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFile;
     private GeolocationPermissions.Callback pendingGeo;
@@ -91,6 +95,8 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(contacts, "JawnContacts");
         web.addJavascriptInterface(new JawnSms(this, this::runJs), "JawnSms");
         web.addJavascriptInterface(new JawnScan(this, this::runJs), "JawnScan");
+        // the music player keeps the WebView alive while a track plays
+        web.addJavascriptInterface(new JawnMedia(), "JawnMedia");
         web.addJavascriptInterface(new JawnPhoneBridge(this), "JawnPhone");
         web.addJavascriptInterface(new AdminBridge(), "JawnAdmin");
         // the remote_control panel's VPN button: the embedded tailnet client owns
@@ -217,6 +223,26 @@ public class JawnWebViewActivity extends Activity {
         if (andFinish) finish();
     }
 
+    /** window.JawnMedia - the page tells the app when audio/video is playing.
+     *  The music player calls playing(true) on a track and playing(false) a
+     *  few seconds after a real stop; while it is true the activity does not
+     *  pause its WebView, so playback continues with the screen off or the app
+     *  in the background. */
+    public class JawnMedia {
+        @android.webkit.JavascriptInterface
+        public void playing(final boolean playing) {
+            mediaPlaying = playing;
+            if (!playing && !isResumed) {
+                runOnUiThread(() -> {
+                    if (!isResumed && web != null) {
+                        web.onPause();
+                        web.pauseTimers();
+                    }
+                });
+            }
+        }
+    }
+
     /** window.JawnAdmin - the web start menu's admin gear calls open(), the
      *  Android counterpart of the desktop view's `jawnos` message handler. */
     public class AdminBridge {
@@ -238,6 +264,7 @@ public class JawnWebViewActivity extends Activity {
 
     protected void onResume() {
         super.onResume();
+        isResumed = true;
         immersive();
         if (nfc != null) nfc.onResume();
         if (contacts != null) contacts.onResume();
@@ -252,13 +279,20 @@ public class JawnWebViewActivity extends Activity {
     }
 
     protected void onPause() {
+        isResumed = false;
         if (nfc != null) nfc.onPause();
         if (contacts != null) contacts.onPause();
         if (web != null) {
-            web.onPause();
-            // Stop the page's timers entirely while it is off-screen rather
-            // than letting the WebView keep them warm.
-            web.pauseTimers();
+            // A playing track owns the WebView. Pausing it here (the screen
+            // turning off, the app switched away from) stopped the music and
+            // the queue with it; the page releases this through JawnMedia when
+            // playback really ends, and the timers stop then.
+            if (!mediaPlaying) {
+                web.onPause();
+                // Stop the page's timers entirely while it is off-screen rather
+                // than letting the WebView keep them warm.
+                web.pauseTimers();
+            }
         }
         super.onPause();
     }
