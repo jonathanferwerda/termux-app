@@ -457,6 +457,14 @@ public class JawnWebViewActivity extends Activity {
 
     private class HouseClient extends WebViewClient {
         @Override
+        public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+            // A navigation ends whatever the old page was playing. The new page
+            // says playing(true) again when a track actually starts.
+            mediaPlaying = false;
+            super.onPageStarted(view, url, favicon);
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
             // the sms send and dial intents ride in as extras; hand them to the
             // page once (the chat opens on the number, the phone pad fills)
