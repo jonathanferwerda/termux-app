@@ -177,7 +177,7 @@ public class JawnSms {
             if (!f.exists()) { throw new IllegalArgumentException("no file at " + path); }
             Intent send = new Intent(Intent.ACTION_SEND);
             send.setType(mime == null || mime.isEmpty() ? "image/*" : mime);
-            send.putExtra(Intent.EXTRA_STREAM, uriFor(f));
+            send.putExtra(Intent.EXTRA_STREAM, uriFor(providerFile(f)));
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             if (digits != null && !digits.trim().isEmpty()) {
                 send.putExtra("address", digits.trim());
@@ -236,11 +236,37 @@ public class JawnSms {
     }
 
     private boolean isDefaultSmsApp() {
+        // Android 16 no longer reports the SMS role through the deprecated
+        // Telephony.Sms.getDefaultSmsPackage() - it answered null while the role
+        // was held - so ask the RoleManager first, and keep the old call as the
+        // fallback for devices below Android 10.
+        if (Build.VERSION.SDK_INT >= 29) {
+            android.app.role.RoleManager rm =
+                (android.app.role.RoleManager) activity.getSystemService(Context.ROLE_SERVICE);
+            if (rm != null) {
+                return rm.isRoleHeld(android.app.role.RoleManager.ROLE_SMS);
+            }
+        }
         if (Build.VERSION.SDK_INT >= 19) {
             String def = Telephony.Sms.getDefaultSmsPackage(activity);
             return def != null && def.equals(activity.getPackageName());
         }
         return true;
+    }
+
+    /**
+     * The file spelled the way the FileProvider's <files-path> root sees it.
+     * TermuxConstants and subs::home() say /data/data/... while getFilesDir()
+     * is /data/user/0/..., and a path outside that root makes getUriForFile
+     * throw "Failed to find configured root".
+     */
+    private File providerFile(File f) {
+        String termuxFiles = "/data/data/" + activity.getPackageName() + "/files";
+        String abs = f.getAbsolutePath();
+        if (abs.startsWith(termuxFiles + "/")) {
+            return new File(activity.getFilesDir(), abs.substring(termuxFiles.length() + 1));
+        }
+        return f;
     }
 
     private Uri uriFor(File f) {
