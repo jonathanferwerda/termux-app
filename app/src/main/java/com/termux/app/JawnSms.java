@@ -4,9 +4,13 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
+import android.content.ContentResolver;
+import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.database.Cursor;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -75,13 +79,14 @@ public class JawnSms {
     }
 
     /**
-     * Send an MMS. parts is a JSON array of {path, mime} - absolute paths the
-     * app can read (the house's storage lives in this app's own termux home).
+     * Send an MMS. text is the message's own words (a text part inside it, not
+     * a subject), parts is a JSON array of {path, mime} - absolute paths the app
+     * can read (the house's storage lives in this app's own termux home).
      * Answers via __jawnSmsResult.
      */
     @JavascriptInterface
-    public String mms(final String digits, final String subject, final String partsJson) {
-        activity.runOnUiThread(() -> mmsOnUi(digits, subject, partsJson));
+    public String mms(final String digits, final String text, final String partsJson, final String jawnUuid) {
+        activity.runOnUiThread(() -> mmsOnUi(digits, text, partsJson, jawnUuid));
         return "ok";
     }
 
@@ -129,7 +134,7 @@ public class JawnSms {
 
     // ---- MMS ----
 
-    private void mmsOnUi(String digits, String subject, String partsJson) {
+    private void mmsOnUi(String digits, String text, String partsJson, String jawnUuid) {
         String id = nextId();
         if (!isDefaultSmsApp()) {
             emit("{\"ok\":false,\"error\":\"not the default sms app\",\"id\":" + js(id) + "}");
@@ -140,8 +145,10 @@ public class JawnSms {
             Settings settings = new Settings();
             settings.setUseSystemSending(true);
             Transaction transaction = new Transaction(activity, settings);
-            Message message = new Message("", digits == null ? "" : digits.trim());
-            message.setSubject(subject == null ? "" : subject);
+            // the words are the message's text part, not its subject: an mms
+            // with a subject and a separate sms for the same words put two
+            // bubbles in the system thread for one thing the person sent
+            Message message = new Message(text == null ? "" : text, digits == null ? "" : digits.trim());
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject part = arr.optJSONObject(i);
                 if (part == null) continue;
@@ -162,9 +169,140 @@ public class JawnSms {
             }
             // the transaction reports through its own listener on its thread
             transaction.sendNewMessage(message, id.hashCode());
-            emit("{\"ok\":true,\"via\":\"mms\",\"id\":" + js(id) + "}");
+            // The library persists an outbox row before handing the PDU to the
+            // system MMS service and the provider drops that row once the send
+            // lands, so the thread would lose the picture. Copy it to a
+            // persistent sent row first - that row is the system thread's own
+            // copy, and its id is what the house row wears too.
+            long[] saved = copyOutboxToSent(digits);
+            emit("{\"ok\":true,\"via\":\"mms\",\"id\":" + js(id)
+                + ",\"mms_id\":" + saved[0] + ",\"mms_date\":" + saved[2]
+                + ",\"mms_thread\":" + saved[1] + ",\"jawn_uuid\":" + js(jawnUuid) + "}");
         } catch (Throwable t) {
             emit("{\"ok\":false,\"error\":" + js(String.valueOf(t.getMessage())) + ",\"id\":" + js(id) + "}");
+        }
+    }
+
+    /**
+     * Copy the library's outbox row to a persistent sent MMS row in the stock
+     * thread. Returns {id, threadId, date} - or {-1, 0, 0} when there was no
+     * outbox row to copy (the id then says the house row has no system twin).
+     */
+    private long[] copyOutboxToSent(String digits) {
+        ContentResolver cr = activity.getContentResolver();
+        Cursor c = null;
+        try {
+            Uri outbox = Uri.parse("content://mms/outbox");
+            c = cr.query(outbox, null, null, null, "_id DESC");
+            if (c == null || !c.moveToFirst()) return new long[] { -1, 0, 0 };
+            long oldId = c.getLong(c.getColumnIndexOrThrow("_id"));
+            ContentValues v = new ContentValues();
+            // the row's own envelope, so other messaging apps read it the way
+            // they read any sent mms (the columns the provider rejects are not
+            // in this list; _id and the lifecycle fields are set below)
+            String[] keys = new String[] {
+                "sub_id", "thread_id", "sub", "sub_cs",
+                "ct_t", "ct_l", "exp", "m_cls", "m_type", "m_size",
+                "pri", "rr", "rpt_a", "resp_st", "tr_id", "d_rpt", "text_only"
+            };
+            for (String key : keys) {
+                int idx = c.getColumnIndex(key);
+                if (idx >= 0 && !c.isNull(idx)) v.put(key, c.getString(idx));
+            }
+            long threadId = Telephony.Threads.getOrCreateThreadId(activity, digits == null ? "" : digits);
+            int tid = c.getColumnIndex("thread_id");
+            if (tid >= 0 && !c.isNull(tid)) threadId = c.getLong(tid);
+            long now = System.currentTimeMillis() / 1000;
+            long date = now;
+            int didx = c.getColumnIndex("date");
+            if (didx >= 0 && !c.isNull(didx)) {
+                try { date = c.getLong(didx); } catch (Throwable ignored) { }
+            }
+            if (date <= 0) date = now;
+            v.put("thread_id", threadId);
+            v.put(Telephony.Mms.DATE, date);
+            v.put(Telephony.Mms.DATE_SENT, now);
+            v.put(Telephony.Mms.MESSAGE_BOX, 2);
+            v.put(Telephony.Mms.READ, 1);
+            v.put(Telephony.Mms.SEEN, 1);
+            v.put("creator", activity.getPackageName());
+            // the send request's own id is what a reader uses to recognise the
+            // message; the outbox row has one, but a fresh one is better than
+            // none when it does not
+            String mid = v.getAsString("m_id");
+            if (mid == null || mid.isEmpty()) v.put("m_id", java.util.UUID.randomUUID().toString());
+            Uri sent = cr.insert(Telephony.Mms.CONTENT_URI, v);
+            c.close();
+            c = null;
+            if (sent == null) return new long[] { -1, 0, 0 };
+            long newId = ContentUris.parseId(sent);
+            Uri oldBase = ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, oldId);
+            Uri newBase = ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, newId);
+            copyAddresses(cr, Uri.withAppendedPath(oldBase, "addr"), Uri.withAppendedPath(newBase, "addr"));
+            copyParts(cr, Uri.withAppendedPath(oldBase, "part"), Uri.withAppendedPath(newBase, "part"));
+            return new long[] { newId, threadId, date };
+        } catch (Throwable t) {
+            android.util.Log.e("JawnSms", "copy outbox to sent: " + t);
+            return new long[] { -1, 0, 0 };
+        } finally {
+            if (c != null) c.close();
+        }
+    }
+
+    private void copyAddresses(ContentResolver cr, Uri from, Uri to) {
+        Cursor c = cr.query(from, null, null, null, null);
+        if (c == null) return;
+        try {
+            while (c.moveToNext()) {
+                ContentValues v = new ContentValues();
+                for (int i = 0; i < c.getColumnCount(); i++) {
+                    String name = c.getColumnName(i);
+                    if (c.isNull(i) || "_id".equals(name)) continue;
+                    v.put(name, c.getString(i));
+                }
+                cr.insert(to, v);
+            }
+        } finally { c.close(); }
+    }
+
+    private void copyParts(ContentResolver cr, Uri from, Uri to) {
+        Cursor c = cr.query(from, null, null, null, null);
+        if (c == null) return;
+        try {
+            while (c.moveToNext()) {
+                ContentValues v = new ContentValues();
+                String data = null;
+                for (int i = 0; i < c.getColumnCount(); i++) {
+                    String name = c.getColumnName(i);
+                    if (c.isNull(i) || "_id".equals(name)) continue;
+                    if ("_data".equals(name)) { data = c.getString(i); continue; }
+                    v.put(name, c.getString(i));
+                }
+                if (data != null) {
+                    File src = new File(data);
+                    if (src.exists()) {
+                        File dst = File.createTempFile("jawn-mms-", ".part", activity.getCacheDir());
+                        copyFile(src, dst);
+                        v.put("_data", dst.getAbsolutePath());
+                    }
+                }
+                cr.insert(to, v);
+            }
+        } catch (Throwable t) {
+            android.util.Log.e("JawnSms", "copy mms parts: " + t);
+        } finally { c.close(); }
+    }
+
+    private void copyFile(File from, File to) throws Exception {
+        java.io.InputStream in = new java.io.FileInputStream(from);
+        java.io.FileOutputStream out = new java.io.FileOutputStream(to);
+        try {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        } finally {
+            in.close();
+            out.close();
         }
     }
 
