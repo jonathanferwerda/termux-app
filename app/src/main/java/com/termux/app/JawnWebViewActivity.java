@@ -48,6 +48,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnNfcBridge nfc;
     private JawnCamera camera;
     private JawnContactsBridge contacts;
+    private JawnSpeech speech;
     public static final String EXTRA_URL = "com.termux.app.EXTRA_URL";
     private String houseHost = "";
     private boolean gateFallback = false;
@@ -104,6 +105,10 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnVpnBridge(this), "JawnVPN");
         web.addJavascriptInterface(new JawnBiometric(this, this::runJs), "JawnBiometric");
         web.addJavascriptInterface(new JawnBiometricKey(this, this::runJs), "JawnBiometricKey");
+        // the on-screen keyboard's microphone: a WebView has no Web Speech API,
+        // so dictation runs on the phone's own recognizer
+        speech = new JawnSpeech(this, this::runJs);
+        web.addJavascriptInterface(speech, "JawnSpeech");
         // the paired-device id survives an origin change (the view moving to
         // 127.0.0.1) because universal.js mirrors it here
         web.addJavascriptInterface(new JawnAppStorage(this), "JawnAppStorage");
@@ -348,6 +353,7 @@ public class JawnWebViewActivity extends Activity {
     /** The house, on any of its names, keeps navigation in the app. */
     @Override
     protected void onDestroy() {
+        if (speech != null) { speech.destroy(); speech = null; }
         JawnPhoneState.poster = null;
         super.onDestroy();
     }
@@ -428,6 +434,7 @@ public class JawnWebViewActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (speech != null && speech.onPermissionResult(requestCode, permissions, results)) return;
         if (requestCode == JawnContactsBridge.REQ_PERMS) { if (contacts != null) contacts.onPermissionResult(); return; }
         if (requestCode == REQ_GEO) {
             boolean geoOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;

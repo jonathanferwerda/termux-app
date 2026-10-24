@@ -530,3 +530,15 @@ work and a full-width build has crashed it (2026-10-10).
     TUN and honours the stored `enabled` choice instead of re-running the join.
 39. One approval notification per distinct login URL; every restart used to
     re-post the same one.
+
+## Deltas round 23 (the keyboard's microphone)
+
+40. `JawnSpeech` (new): window.JawnSpeech beside the other bridges. A WebView
+    has no Web Speech API, so the on-screen keyboard's microphone asks the
+    phone's own `SpeechRecognizer` instead. `start(language)` begins listening
+    (asking for RECORD_AUDIO the first time), final phrases arrive at
+    `window.jawnSpeechResult(text, true)` and interim ones with false, and an
+    error is named over `window.jawnSpeechState('error', reason)`. The page
+    restarts it after each phrase while the microphone is on. Registered in
+    `JawnWebViewActivity` beside the camera and contacts, with the permission
+    result routed to it and `destroy()` on the activity's own destroy.
