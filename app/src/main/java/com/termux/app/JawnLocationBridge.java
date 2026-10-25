@@ -73,4 +73,15 @@ public class JawnLocationBridge {
     public void stop() {
         JawnLocationService.stop(activity);
     }
+
+    /** Ask for one fresh GPS fix now (an appointment start or stop). */
+    @JavascriptInterface
+    public void sample() {
+        if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            activity.ensureLocationPermission();
+            return;
+        }
+        JawnLocationService.sample(activity);
+    }
 }

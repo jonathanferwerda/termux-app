@@ -561,3 +561,8 @@ work and a full-width build has crashed it (2026-10-10).
     ACCESS_FINE_LOCATION once and then starts the service.
 43. Manifest: `FOREGROUND_SERVICE_LOCATION` and the service entry. No held wake
     lock: a location foreground service wakes the process when a fix arrives.
+44. A start or stop in the manager asks for a fresh fix now, not the last beat:
+    `JawnLocation.sample()` / `ACTION_SAMPLE` calls `getCurrentLocation` (API 30+)
+    or a single update, and the page waits up to twelve seconds for a fix newer
+    than the press. A cached fix is only the fallback, and its own timestamp is
+    kept rather than restamped as today's.

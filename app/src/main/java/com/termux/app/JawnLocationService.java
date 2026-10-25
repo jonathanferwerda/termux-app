@@ -57,6 +57,7 @@ import java.nio.charset.StandardCharsets;
 public class JawnLocationService extends Service {
     public static final String ACTION_START = "com.termux.app.LOCATION_START";
     public static final String ACTION_STOP = "com.termux.app.LOCATION_STOP";
+    public static final String ACTION_SAMPLE = "com.termux.app.LOCATION_SAMPLE";
     public static final String EXTRA_MIN_TIME_MS = "min_time_ms";
     public static final String EXTRA_MIN_DISTANCE_M = "min_distance_m";
 
@@ -115,6 +116,13 @@ public class JawnLocationService extends Service {
         context.stopService(new Intent(context, JawnLocationService.class));
     }
 
+    /** Ask for one fresh GPS fix now. The periodic listener keeps its own pace;
+     *  this is the on-demand sample an appointment start/stop makes. */
+    public static void sample(Context context) {
+        Intent intent = new Intent(context, JawnLocationService.class).setAction(ACTION_SAMPLE);
+        ContextCompat.startForegroundService(context, intent);
+    }
+
     /** The latest fix as JSON, or "" when the service has never had one. */
     public static String latest() {
         String memory = latestJson;
@@ -169,6 +177,17 @@ public class JawnLocationService extends Service {
             stopForegroundCompat();
             stopSelf();
             return START_NOT_STICKY;
+        }
+
+        if (ACTION_SAMPLE.equals(action)) {
+            // A start/stop in the manager wants a place now, not the one from
+            // the last beat. The periodic listener stays; this asks once more.
+            prefs(this).edit().putBoolean(KEY_LOCATION_ON, true).apply();
+            running = true;
+            startForegroundCompat("GPS sample");
+            startUpdates();
+            requestFreshFix();
+            return START_STICKY;
         }
 
         // A null intent is Android restarting the service; the stored choice is
@@ -272,6 +291,33 @@ public class JawnLocationService extends Service {
             }
         }
         updatesOn = false;
+    }
+
+    /** One fresh fix for an on-demand sample. On API 30+ this is a real current
+     *  location request; older builds use a single update, which may hand back
+     *  the provider's last known fix until a new one arrives. The page checks the
+     *  fix's timestamp, so a cached answer cannot be mistaken for a fresh one. */
+    private void requestFreshFix() {
+        if (locationManager == null || !hasPermission(this)) return;
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                locationManager.getCurrentLocation(LocationManager.GPS_PROVIDER, null, getMainExecutor(),
+                        new java.util.function.Consumer<Location>() {
+                            @Override
+                            public void accept(Location location) {
+                                if (location != null
+                                        && LocationManager.GPS_PROVIDER.equals(location.getProvider())) {
+                                    publish("fix", location, satellitesUsed, satellitesInView);
+                                }
+                            }
+                        });
+            } else {
+                locationManager.requestSingleUpdate(LocationManager.GPS_PROVIDER, locationListener,
+                        Looper.getMainLooper());
+            }
+        } catch (Exception ignored) {
+            // no fix is a normal answer indoors; the page falls back or records none
+        }
     }
 
     private final LocationListener locationListener = new LocationListener() {
