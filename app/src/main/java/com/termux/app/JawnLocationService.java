@@ -199,7 +199,10 @@ public class JawnLocationService extends Service {
         File file = new File(dir, "wake_ready");
         try (FileOutputStream out = new FileOutputStream(file)) {
             out.write(String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // The handshake is what lets the phone sleep; a silent failure here
+            // would look like a scheduler that never armed. Leave a trace.
+            android.util.Log.w("JawnWake", "touchReady failed at " + file.getAbsolutePath(), e);
         }
     }
 
