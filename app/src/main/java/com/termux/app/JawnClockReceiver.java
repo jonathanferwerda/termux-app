@@ -36,6 +36,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
     public static final String ACTION_RING = "com.termux.app.JAWN_CLOCK_RING";
     public static final String ACTION_DISMISSED = "com.termux.app.JAWN_CLOCK_DISMISSED";
     public static final String ACTION_TIMER = "com.termux.app.JAWN_CLOCK_TIMER";
+    public static final String ACTION_PREVIEW = "com.termux.app.JAWN_CLOCK_PREVIEW";
     public static final String ACTION_SKIP = "com.termux.app.JAWN_CLOCK_SKIP";
     public static final String ACTION_UPCOMING = JawnClockAlarm.ACTION_UPCOMING;
 
@@ -70,6 +71,12 @@ public class JawnClockReceiver extends BroadcastReceiver {
                     intent.getStringExtra("uuid"),
                     intent.getStringExtra("app"),
                     intent.getLongExtra("at", 0L));
+            return;
+        }
+
+        if (ACTION_PREVIEW.equals(action)) {
+            if (intent.getIntExtra("stop", 0) == 1) JawnClockSound.stop();
+            else playSound(context, intent, false);
             return;
         }
 

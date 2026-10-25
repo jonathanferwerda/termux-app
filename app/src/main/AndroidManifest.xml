@@ -463,6 +463,7 @@
                 <action android:name="com.termux.app.JAWN_CLOCK_RING" />
                 <action android:name="com.termux.app.JAWN_CLOCK_DISMISSED" />
                 <action android:name="com.termux.app.JAWN_CLOCK_TIMER" />
+                <action android:name="com.termux.app.JAWN_CLOCK_PREVIEW" />
                 <action android:name="com.termux.app.CLOCK_UPCOMING" />
                 <action android:name="com.termux.app.JAWN_CLOCK_SKIP" />
                 <action android:name="com.termux.app.CLOCK_ALARM" />
