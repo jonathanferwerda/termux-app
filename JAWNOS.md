@@ -570,3 +570,13 @@ work and a full-width build has crashed it (2026-10-10).
     not have to wait for the first periodic slot. A `once` appointment whose
     start predates the first fix still takes the next real fix from the headless
     navigation run, so a cold GPS does not lose the point.
+46. `JawnScheduledWakeReceiver` (new): the scheduled wake that replaces the
+    permanently held Termux wake lock. An exact/allow-while-idle alarm every
+    navigation interval takes a CPU-only partial wake lock for 45 s, touches
+    `~/.president/wake_ready`, re-arms itself, and lets the timeout release. The
+    Perl tree releases its permanent `termux-wake-lock` once that file is fresh
+    and no track is playing, and takes it back if the scheduler stops or the
+    person switches the schedule off. `JawnLocationService` arms and cancels the
+    alarm on start/stop and on every pace change; a stale `wake_ready` is the
+    dead-man switch. Kept separate from the existing exported `JawnWakeReceiver`
+    (the `JAWN_WAKE` adb hook), whose behaviour is unchanged.
