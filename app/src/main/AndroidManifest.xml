@@ -440,6 +440,12 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- One short CPU wake per navigation interval, re-armed by the receiver.
+             It replaces the permanently held Termux wake lock. -->
+        <receiver
+            android:name=".app.JawnScheduledWakeReceiver"
+            android:exported="false" />
+
         <service
             android:name=".app.RunCommandService"
             android:exported="true"

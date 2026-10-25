@@ -1,6 +1,7 @@
 package com.termux.app;
 
 import android.Manifest;
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -20,6 +21,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 
 import androidx.core.app.NotificationCompat;
@@ -50,9 +52,11 @@ import java.nio.charset.StandardCharsets;
  * {@link JawnLocationBridge} as {@code window.JawnLocation}.
  *
  * Battery: the service is a location foreground service, so Android keeps the
- * process and wakes it when a fix arrives; there is no held wake lock. The
- * interval is the navigation pace (four minutes by default); the caller may
- * shorten it while a running appointment asks for faster fixes.
+ * process and wakes it when a fix arrives. It holds no permanent wake lock: a
+ * scheduled receiver ({@link JawnScheduledWakeReceiver}) takes a short CPU-only lock once
+ * per navigation interval so the Perl tree can run its due utilities, then lets
+ * the device sleep again. The interval is the navigation pace (four minutes by
+ * default); the caller may shorten it while an appointment asks for faster fixes.
  */
 public class JawnLocationService extends Service {
     public static final String ACTION_START = "com.termux.app.LOCATION_START";
@@ -113,6 +117,8 @@ public class JawnLocationService extends Service {
 
     public static void stop(Context context) {
         prefs(context).edit().putBoolean(KEY_LOCATION_ON, false).apply();
+        cancelWake(context);
+        clearReady(context);
         context.stopService(new Intent(context, JawnLocationService.class));
     }
 
@@ -121,6 +127,78 @@ public class JawnLocationService extends Service {
     public static void sample(Context context) {
         Intent intent = new Intent(context, JawnLocationService.class).setAction(ACTION_SAMPLE);
         ContextCompat.startForegroundService(context, intent);
+    }
+
+    // ------------------------------------------------------- scheduled wake
+
+    /**
+     * Arm the next short wake. It is one-shot and re-armed by the receiver each
+     * time, so the interval can change without a stale alarm. The interval is the
+     * GPS pace, clamped to a sane range. An exempt app may use an exact alarm;
+     * otherwise an allow-while-idle alarm still gets through Doze.
+     */
+    public static void scheduleWake(Context context) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        PendingIntent pending = alarmIntent(context, PendingIntent.FLAG_UPDATE_CURRENT);
+        if (pending == null) return;
+        long interval = prefs(context).getLong(KEY_LOCATION_MIN_TIME, DEFAULT_MIN_TIME_MS);
+        if (interval < 60_000L) interval = 60_000L;
+        if (interval > 30 * 60_000L) interval = 30 * 60_000L;
+        long at = System.currentTimeMillis() + interval;
+        try {
+            if (Build.VERSION.SDK_INT >= 23 && wakeIsExempt(context)) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending);
+            } else if (Build.VERSION.SDK_INT >= 23) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending);
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, at, pending);
+            }
+        } catch (Exception e) {
+            try {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    public static void cancelWake(Context context) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return;
+        PendingIntent pending = alarmIntent(context, PendingIntent.FLAG_NO_CREATE);
+        if (pending != null) am.cancel(pending);
+    }
+
+    /** The app side of the handshake: a fresh wake_ready tells the Perl tree it
+     *  may release the permanent Termux wake lock. */
+    public static void touchReady(Context context) {
+        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        if (!dir.exists() && !dir.mkdirs()) return;
+        File file = new File(dir, "wake_ready");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            out.write(String.valueOf(System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void clearReady(Context context) {
+        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        File file = new File(dir, "wake_ready");
+        //noinspection ResultOfMethodCallIgnored
+        file.delete();
+    }
+
+    private static PendingIntent alarmIntent(Context context, int flags) {
+        Intent intent = new Intent(context, JawnScheduledWakeReceiver.class)
+                .setAction(JawnScheduledWakeReceiver.ACTION_WAKE);
+        if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return PendingIntent.getBroadcast(context, 0, intent, flags);
+    }
+
+    private static boolean wakeIsExempt(Context context) {
+        if (Build.VERSION.SDK_INT < 23) return false;
+        PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(context.getPackageName());
     }
 
     /** The latest fix as JSON, or "" when the service has never had one. */
@@ -172,6 +250,8 @@ public class JawnLocationService extends Service {
         if (ACTION_STOP.equals(action)) {
             prefs(this).edit().putBoolean(KEY_LOCATION_ON, false).apply();
             stopUpdates();
+            cancelWake(this);
+            clearReady(this);
             publish("stopped", null, 0, 0);
             running = false;
             stopForegroundCompat();
@@ -187,6 +267,8 @@ public class JawnLocationService extends Service {
             startForegroundCompat("GPS sample");
             startUpdates();
             requestFreshFix();
+            scheduleWake(this);
+            touchReady(this);
             return START_STICKY;
         }
 
@@ -212,6 +294,8 @@ public class JawnLocationService extends Service {
         running = true;
         startForegroundCompat("GPS starting");
         startUpdates();
+        scheduleWake(this);
+        touchReady(this);
         return START_STICKY;
     }
 
