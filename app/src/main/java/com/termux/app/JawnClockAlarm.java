@@ -23,16 +23,23 @@ import java.nio.charset.StandardCharsets;
  * reads that file (or the broadcast's own extras) and sets an exact,
  * allow-while-idle AlarmManager alarm five seconds before the clock time. That
  * wake gives the Perl alarm worker a CPU to fire on, and the receiver posts the
- * lock-screen notification and opens the app. Android may have the phone in
- * Doze, so this is separate from the navigation-interval wake: an alarm is a
- * promise to wake at a named moment, not at the next convenient one.
+ * lock-screen notification and plays the sound.
+ *
+ * A second alarm, thirty minutes earlier, carries the heads-up notice that the
+ * alarm is coming. Android may have the phone in Doze, so these are separate
+ * from the navigation-interval wake: an alarm is a promise to wake at a named
+ * moment, not at the next convenient one.
  */
 public final class JawnClockAlarm {
     private static final String LOG_TAG = "JawnClockAlarm";
     public static final String ACTION_ALARM = "com.termux.app.CLOCK_ALARM";
+    public static final String ACTION_UPCOMING = "com.termux.app.CLOCK_UPCOMING";
     private static final int REQUEST_CODE = 7201;
+    private static final int REQUEST_UPCOMING = 7203;
     /** Wake this early so the worker has the CPU when the minute turns. */
     private static final long LEAD_MS = 5_000L;
+    /** The heads-up notice that the alarm is half an hour away. */
+    private static final long UPCOMING_LEAD_MS = 30 * 60_000L;
 
     private JawnClockAlarm() {}
 
@@ -91,10 +98,13 @@ public final class JawnClockAlarm {
         if (am == null) return;
 
         PendingIntent pending = pendingIntent(context, at, label, uuid, app);
+        PendingIntent upcoming = upcomingIntent(context, at, label, uuid, app);
         long now = System.currentTimeMillis();
         if (at <= 0L || at < now - 60_000L) {
             am.cancel(pending);
             pending.cancel();
+            am.cancel(upcoming);
+            upcoming.cancel();
             Log.i(LOG_TAG, "no next clock alarm");
             return;
         }
@@ -113,6 +123,19 @@ public final class JawnClockAlarm {
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not schedule clock alarm", e);
         }
+
+        long noticeAt = at - UPCOMING_LEAD_MS;
+        try {
+            if (noticeAt > now + 60_000L) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, noticeAt, upcoming);
+                Log.i(LOG_TAG, "alarm notice at " + noticeAt + " (" + label + ")");
+            } else {
+                am.cancel(upcoming);
+                upcoming.cancel();
+            }
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "could not schedule the alarm notice", e);
+        }
     }
 
     public static void cancel(Context context) {
@@ -121,6 +144,9 @@ public final class JawnClockAlarm {
         PendingIntent pending = pendingIntent(context, 0L, "", "", "");
         am.cancel(pending);
         pending.cancel();
+        PendingIntent upcoming = upcomingIntent(context, 0L, "", "", "");
+        am.cancel(upcoming);
+        upcoming.cancel();
     }
 
     private static PendingIntent pendingIntent(Context context, long at, String label, String uuid, String app) {
@@ -130,10 +156,24 @@ public final class JawnClockAlarm {
                 .putExtra("label", label)
                 .putExtra("uuid", uuid)
                 .putExtra("app", app);
+        return PendingIntent.getBroadcast(context, REQUEST_CODE, intent, flags());
+    }
+
+    private static PendingIntent upcomingIntent(Context context, long at, String label, String uuid, String app) {
+        Intent intent = new Intent(context, JawnClockReceiver.class)
+                .setAction(ACTION_UPCOMING)
+                .putExtra("at", at)
+                .putExtra("label", label)
+                .putExtra("uuid", uuid)
+                .putExtra("app", app);
+        return PendingIntent.getBroadcast(context, REQUEST_UPCOMING, intent, flags());
+    }
+
+    private static int flags() {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags |= PendingIntent.FLAG_IMMUTABLE;
         }
-        return PendingIntent.getBroadcast(context, REQUEST_CODE, intent, flags);
+        return flags;
     }
 }

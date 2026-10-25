@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.PowerManager;
 import android.util.Log;
@@ -16,20 +17,22 @@ import java.text.DateFormat;
 import java.util.Date;
 
 /**
- * The lock-screen face of an alarm.
+ * The lock-screen face of an alarm, and the heads-up notice before it.
  *
- * The sound belongs to the Perl side (it plays the chosen chime or long track
- * through the operating system). This class is what wakes the screen and puts
- * the alarm in front of the person while the phone is locked: a high-importance
- * alarm-channel notification with a full-screen intent that opens the manager,
- * where the Clock ring card waits. The wake lock is held across the ring so a
- * long track is not cut off by the phone going back to sleep.
+ * The sound is played by {@link JawnClockSound} on the alarm stream. This class
+ * draws the notification; the ring one is a high-importance alarm-channel
+ * notification with a full-screen intent that opens the manager, where the
+ * Clock ring card waits.
  */
 public final class JawnClockNotifier {
     private static final String LOG_TAG = "JawnClockNotifier";
     public static final String CHANNEL = "jawn_alarms";
+    public static final String UPCOMING_CHANNEL = "jawn_alarm_upcoming";
     private static final int NOTIFICATION_ID = 7301;
     private static final int CONTENT_REQUEST = 7302;
+    private static final int UPCOMING_ID = 7304;
+    private static final int UPCOMING_CONTENT_REQUEST = 7305;
+    private static final int UPCOMING_SKIP_REQUEST = 7306;
     private static final long WAKE_MS = 15 * 60_000L;
 
     private static PowerManager.WakeLock wakeLock;
@@ -39,6 +42,7 @@ public final class JawnClockNotifier {
     public static void show(Context context, String label, String uuid, String app, long at) {
         String title = (label == null || label.isEmpty()) ? "Alarm" : label;
         if (at <= 0L) at = System.currentTimeMillis();
+        cancelUpcoming(context);
 
         PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
@@ -66,13 +70,9 @@ public final class JawnClockNotifier {
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         open.putExtra(JawnWebViewActivity.EXTRA_SHOW_WHEN_LOCKED, true);
         open.putExtra("clock_alarm_uuid", uuid == null ? "" : uuid);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
-        PendingIntent content = PendingIntent.getActivity(context, CONTENT_REQUEST, open, flags);
+        PendingIntent content = PendingIntent.getActivity(context, CONTENT_REQUEST, open, flags());
 
-        Notification.Builder builder = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                ? new Notification.Builder(context, CHANNEL)
-                : new Notification.Builder(context);
+        Notification.Builder builder = new Notification.Builder(context, CHANNEL);
         builder.setSmallIcon(R.drawable.ic_new_session)
                 .setContentTitle(title)
                 .setContentText(timeText(at) + (app == null || app.isEmpty() ? "" : " · " + app.replace('_', ' ')))
@@ -86,9 +86,6 @@ public final class JawnClockNotifier {
                 .setContentIntent(content)
                 .setFullScreenIntent(content, true)
                 .setColor(0xFFC94F4F);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            builder.setDefaults(Notification.DEFAULT_VIBRATE);
-        }
         // canUseFullScreenIntent() is API 34 and the app compiles against SDK 30;
         // ask for it reflectively so the same APK still builds and older phones
         // simply skip the check.
@@ -107,9 +104,59 @@ public final class JawnClockNotifier {
         }
     }
 
+    /** Half an hour before: say when the alarm will sound, and offer the skip. */
+    public static void showUpcoming(Context context, String label, String uuid, String app, long at) {
+        if (at <= 0L) return;
+        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        createUpcomingChannel(nm);
+
+        String appt = (app == null || app.isEmpty()) ? "" : app.replace('_', ' ');
+        String title = "Alarm";
+        String text = "Alarm" + (appt.isEmpty() ? "" : " for " + appt) + " will sound at " + timeText(at);
+
+        Intent open = new Intent(context, JawnWebViewActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent content = PendingIntent.getActivity(context, UPCOMING_CONTENT_REQUEST, open, flags());
+
+        Intent skip = new Intent(context, JawnClockReceiver.class)
+                .setAction(JawnClockReceiver.ACTION_SKIP)
+                .putExtra("uuid", uuid == null ? "" : uuid)
+                .putExtra("at", at)
+                .putExtra("app", app == null ? "" : app)
+                .putExtra("label", label == null ? "" : label);
+        PendingIntent skipPending = PendingIntent.getBroadcast(context, UPCOMING_SKIP_REQUEST, skip, flags());
+
+        Notification.Builder builder = new Notification.Builder(context, UPCOMING_CHANNEL);
+        builder.setSmallIcon(R.drawable.ic_new_session)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setWhen(at)
+                .setShowWhen(true)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setPriority(Notification.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setContentIntent(content)
+                .addAction(new Notification.Action.Builder(
+                        Icon.createWithResource(context, R.drawable.ic_new_session),
+                        "Skip today", skipPending).build());
+        try {
+            nm.notify(UPCOMING_ID, builder.build());
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "could not post the alarm notice", e);
+        }
+    }
+
     public static void cancel(Context context) {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(NOTIFICATION_ID);
+    }
+
+    public static void cancelUpcoming(Context context) {
+        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(UPCOMING_ID);
     }
 
     public static void releaseWakeLock() {
@@ -118,16 +165,31 @@ public final class JawnClockNotifier {
     }
 
     private static void createChannel(NotificationManager nm) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL, "Alarms", NotificationManager.IMPORTANCE_HIGH);
         channel.setDescription("JawnOS alarms");
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        // The Perl side plays the alarm's own sound; a channel sound here would
-        // talk over a long track.
+        // The app plays the alarm's own sound on the alarm stream; a channel
+        // sound here would talk over it.
         channel.setSound(null, null);
         channel.enableVibration(true);
         nm.createNotificationChannel(channel);
+    }
+
+    private static void createUpcomingChannel(NotificationManager nm) {
+        NotificationChannel channel = new NotificationChannel(
+                UPCOMING_CHANNEL, "Alarm reminders", NotificationManager.IMPORTANCE_DEFAULT);
+        channel.setDescription("Half an hour before a JawnOS alarm");
+        channel.setShowBadge(false);
+        channel.setSound(null, null);
+        channel.enableVibration(false);
+        nm.createNotificationChannel(channel);
+    }
+
+    private static int flags() {
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return flags;
     }
 
     private static String timeText(long at) {
