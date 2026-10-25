@@ -269,15 +269,19 @@ public class JawnLocationService extends Service {
             return;
         }
 
-        try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                locationManager.registerGnssStatusCallback(gnssCallback,
-                        new Handler(Looper.getMainLooper()));
-            }
-        } catch (Exception ignored) {
-            // satellites are a nicety; the fix itself is what matters
-        }
-    }
+        		try {
+        			if (Build.VERSION.SDK_INT >= 24) {
+        				locationManager.registerGnssStatusCallback(gnssCallback,
+        						new Handler(Looper.getMainLooper()));
+        			}
+        		} catch (Exception ignored) {
+        			// satellites are a nicety; the fix itself is what matters
+        		}
+        		// A cold start otherwise waits for the first periodic slot, which can be
+        		// the full navigation interval. Ask once, now, so a fix is ready before
+        		// the first appointment start needs it.
+        		requestFreshFix();
+        	}
 
     private void stopUpdates() {
         if (locationManager != null) {

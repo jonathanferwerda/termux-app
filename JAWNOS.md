@@ -563,6 +563,10 @@ work and a full-width build has crashed it (2026-10-10).
     lock: a location foreground service wakes the process when a fix arrives.
 44. A start or stop in the manager asks for a fresh fix now, not the last beat:
     `JawnLocation.sample()` / `ACTION_SAMPLE` calls `getCurrentLocation` (API 30+)
-    or a single update, and the page waits up to twelve seconds for a fix newer
+    or a single update, and the page waits up to twenty seconds for a fix newer
     than the press. A cached fix is only the fallback, and its own timestamp is
     kept rather than restamped as today's.
+45. The service also asks for one fresh fix when it starts, so a cold start does
+    not have to wait for the first periodic slot. A `once` appointment whose
+    start predates the first fix still takes the next real fix from the headless
+    navigation run, so a cold GPS does not lose the point.
