@@ -591,3 +591,10 @@ work and a full-width build has crashed it (2026-10-10).
     track holds its lock. A generation counter keeps a re-armed alarm from being
     released by the wake it replaced; the 45 s timeout stays the backstop. The
     Perl side marks the work done because the app cannot see the runner.
+48. The navigation pace is one number, not two. The manager writes the
+    navigation pool's seconds (including a running appointment's faster request)
+    to `~/.president/gps_pace` whenever it changes, and
+    `JawnLocationService.restingPaceMs()` reads it for both the GPS sample
+    interval and the scheduled wake. The receiver retunes during a wake, so
+    editing the navigation pool in Configure → Sys moves the phone's own pace
+    without restarting the service; the stored setting is the fallback.

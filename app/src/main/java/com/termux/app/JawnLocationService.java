@@ -83,6 +83,8 @@ public class JawnLocationService extends Service {
     private boolean updatesOn = false;
     private int satellitesUsed = 0;
     private int satellitesInView = 0;
+    private long currentMinTimeMs = -1;
+    private static JawnLocationService instance;
 
     // ---------------------------------------------------------------- public
 
@@ -92,6 +94,26 @@ public class JawnLocationService extends Service {
 
     public static boolean isEnabled(Context context) {
         return prefs(context).getBoolean(KEY_LOCATION_ON, false);
+    }
+
+    /** The resting pace. The manager writes the navigation pool's seconds to
+     *  {@code ~/.president/gps_pace}, so editing that pool in Configure -> Sys
+     *  moves the phone's own sampling and wake interval too; the stored setting
+     *  is the fallback and four minutes the last resort. */
+    public static long restingPaceMs(Context context) {
+        File file = new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), "gps_pace");
+        if (file.exists()) {
+            try (FileInputStream in = new FileInputStream(file)) {
+                byte[] bytes = new byte[32];
+                int read = in.read(bytes);
+                if (read > 0) {
+                    long seconds = Long.parseLong(new String(bytes, 0, read, StandardCharsets.UTF_8).trim());
+                    if (seconds >= 60 && seconds <= 30 * 60) return seconds * 1000L;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return prefs(context).getLong(KEY_LOCATION_MIN_TIME, DEFAULT_MIN_TIME_MS);
     }
 
     public static boolean hasPermission(Context context) {
@@ -142,7 +164,7 @@ public class JawnLocationService extends Service {
         if (am == null) return;
         PendingIntent pending = alarmIntent(context, PendingIntent.FLAG_UPDATE_CURRENT);
         if (pending == null) return;
-        long interval = prefs(context).getLong(KEY_LOCATION_MIN_TIME, DEFAULT_MIN_TIME_MS);
+        long interval = restingPaceMs(context);
         if (interval < 60_000L) interval = 60_000L;
         if (interval > 30 * 60_000L) interval = 30 * 60_000L;
         long at = System.currentTimeMillis() + interval;
@@ -239,6 +261,7 @@ public class JawnLocationService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         createChannel();
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
     }
@@ -301,6 +324,7 @@ public class JawnLocationService extends Service {
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         running = false;
         stopUpdates();
         publish("stopped", null, 0, 0);
@@ -331,7 +355,8 @@ public class JawnLocationService extends Service {
         }
         if (updatesOn) return;
 
-        long minTime = prefs(this).getLong(KEY_LOCATION_MIN_TIME, DEFAULT_MIN_TIME_MS);
+        long minTime = restingPaceMs(this);
+        currentMinTimeMs = minTime;
         float minDistance = prefs(this).getFloat(KEY_LOCATION_MIN_DISTANCE, DEFAULT_MIN_DISTANCE_M);
         try {
             Location last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
@@ -519,6 +544,25 @@ public class JawnLocationService extends Service {
         File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
         if (!dir.exists() && !dir.mkdirs()) return null;
         return new File(dir, "location.json");
+    }
+
+    /** Re-read the resting pace and retune the listener if the pool moved
+     *  while the service was already running. */
+    public static void retunePace() {
+        JawnLocationService service = instance;
+        if (service != null) service.retuneUpdates();
+    }
+
+    private void retuneUpdates() {
+        if (!updatesOn || locationManager == null) return;
+        long minTime = restingPaceMs(this);
+        if (minTime == currentMinTimeMs) return;
+        try {
+            locationManager.removeUpdates(locationListener);
+        } catch (Exception ignored) {
+        }
+        updatesOn = false;
+        startUpdates();
     }
 
     // ---------------------------------------------------------- notification
