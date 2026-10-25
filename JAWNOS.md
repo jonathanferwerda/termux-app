@@ -606,3 +606,16 @@ work and a full-width build has crashed it (2026-10-10).
     phone therefore answers a delta pull to the end; a five-minute hard cap
     keeps a runaway peer from holding the CPU, and the ordinary early release
     resumes as soon as the marker ages out.
+
+## Deltas round 26 (GPS rests between wakes)
+
+50. At the resting pace the service holds no location listener. The scheduled
+    wake now asks for one one-shot fix (`getCurrentLocation`) instead of a
+    standing `requestLocationUpdates` that kept the GPS provider in
+    high-accuracy mode all day. `FAST_PACE_MS` (two minutes) is the switch: a
+    running appointment that asks for fixes faster than that - the navigation
+    pool's own value is already folded into `~/.president/gps_pace` by
+    `subs::navigation_pace` - still gets the standing listener, and
+    `retuneUpdates()` moves between the two when the pace changes. The
+    notification reads "Checks every N min" while resting rather than waiting
+    on a fix that is not being requested.

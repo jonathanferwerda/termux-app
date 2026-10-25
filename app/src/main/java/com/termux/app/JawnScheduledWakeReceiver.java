@@ -73,9 +73,12 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
 
         JawnLocationService.touchReady(app);
         // The navigation pool may have moved since the last beat; take the new
-        // pace for the next alarm and retune the GPS listener to it.
+        // pace for the next alarm and retune the GPS listener to it. At the
+        // resting pace no listener is held, so this wake asks for the one fresh
+        // fix the standing request used to deliver.
         JawnLocationService.retunePace();
         JawnLocationService.scheduleWake(app);
+        JawnLocationService.wakeFix(app);
 
         Thread worker = new Thread(() -> releaseWhenIdle(app, lock, started, myGeneration),
                 "jawn-scheduled-wake");

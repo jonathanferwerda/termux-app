@@ -55,8 +55,9 @@ import java.nio.charset.StandardCharsets;
  * process and wakes it when a fix arrives. It holds no permanent wake lock: a
  * scheduled receiver ({@link JawnScheduledWakeReceiver}) takes a short CPU-only lock once
  * per navigation interval so the Perl tree can run its due utilities, then lets
- * the device sleep again. The interval is the navigation pace (four minutes by
- * default); the caller may shorten it while an appointment asks for faster fixes.
+ * the device sleep again. At the resting pace that wake also asks for one
+ * one-shot fix; a standing listener is held only while a running appointment
+ * asks for fixes faster than {@link #FAST_PACE_MS}.
  */
 public class JawnLocationService extends Service {
     public static final String ACTION_START = "com.termux.app.LOCATION_START";
@@ -71,6 +72,13 @@ public class JawnLocationService extends Service {
     public static final String KEY_LOCATION_MIN_DISTANCE = "location_min_distance_m";
     public static final long DEFAULT_MIN_TIME_MS = 4 * 60 * 1000L;
     public static final float DEFAULT_MIN_DISTANCE_M = 0f;
+
+    /** A pace this short means a running app wants fixes often (navigation at
+     *  seconds, a travel route at a minute). A standing listener is worth its
+     *  power then. At or above it the scheduled wake asks for one one-shot fix
+     *  and the GNSS engine powers down in between, instead of staying in
+     *  high-accuracy mode all day for a four-minute delivery. */
+    private static final long FAST_PACE_MS = 2 * 60 * 1000L;
 
     private static final String CHANNEL = "jawn_location";
     private static final int NOTIF_ID = 0x4A4C;
@@ -292,7 +300,6 @@ public class JawnLocationService extends Service {
             running = true;
             startForegroundCompat("GPS sample");
             startUpdates();
-            requestFreshFix();
             scheduleWake(this);
             touchReady(this);
             return START_STICKY;
@@ -356,44 +363,55 @@ public class JawnLocationService extends Service {
             updateNotification("GPS is off");
             return;
         }
-        if (updatesOn) return;
-
         long minTime = restingPaceMs(this);
         currentMinTimeMs = minTime;
-        float minDistance = prefs(this).getFloat(KEY_LOCATION_MIN_DISTANCE, DEFAULT_MIN_DISTANCE_M);
-        try {
-            Location last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            if (last != null) publish("fix", last, satellitesUsed, satellitesInView);
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, minTime, minDistance,
-                    locationListener, Looper.getMainLooper());
-            updatesOn = true;
-            if (last == null) {
-                publish("searching", null, 0, 0);
-                updateNotification("Waiting for a GPS fix");
-            }
-        } catch (SecurityException e) {
-            publish("permission", null, 0, 0);
-            updateNotification("Location permission needed");
-            return;
-        } catch (Exception e) {
-            publish("error", null, 0, 0);
-            updateNotification("GPS error");
-            return;
-        }
+        boolean fast = minTime > 0 && minTime <= FAST_PACE_MS;
 
-        		try {
-        			if (Build.VERSION.SDK_INT >= 24) {
-        				locationManager.registerGnssStatusCallback(gnssCallback,
-        						new Handler(Looper.getMainLooper()));
-        			}
-        		} catch (Exception ignored) {
-        			// satellites are a nicety; the fix itself is what matters
-        		}
-        		// A cold start otherwise waits for the first periodic slot, which can be
-        		// the full navigation interval. Ask once, now, so a fix is ready before
-        		// the first appointment start needs it.
-        		requestFreshFix();
-        	}
+        if (fast && !updatesOn) {
+            float minDistance = prefs(this).getFloat(KEY_LOCATION_MIN_DISTANCE, DEFAULT_MIN_DISTANCE_M);
+            try {
+                Location last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                if (last != null) publish("fix", last, satellitesUsed, satellitesInView);
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, minTime, minDistance,
+                        locationListener, Looper.getMainLooper());
+                updatesOn = true;
+                if (last == null) {
+                    publish("searching", null, 0, 0);
+                    updateNotification("Waiting for a GPS fix");
+                }
+            } catch (SecurityException e) {
+                publish("permission", null, 0, 0);
+                updateNotification("Location permission needed");
+                return;
+            } catch (Exception e) {
+                publish("error", null, 0, 0);
+                updateNotification("GPS error");
+                return;
+            }
+
+            try {
+                if (Build.VERSION.SDK_INT >= 24) {
+                    locationManager.registerGnssStatusCallback(gnssCallback,
+                            new Handler(Looper.getMainLooper()));
+                }
+            } catch (Exception ignored) {
+                // satellites are a nicety; the fix itself is what matters
+            }
+        }
+        else if (!fast && updatesOn) {
+            // The pace lengthened (or the app stopped asking): the scheduled
+            // wake drives the fix now, and the GNSS engine can rest between.
+            stopUpdates();
+        }
+        else if (!fast) {
+            long minutes = Math.max(1L, minTime / 60000L);
+            updateNotification("Checks every " + minutes + " min");
+        }
+        // Ask once now. A cold start otherwise waits for the first periodic slot,
+        // which can be the whole navigation interval; while resting, the
+        // scheduled wake is the only other opportunity.
+        requestFreshFix();
+    }
 
     private void stopUpdates() {
         if (locationManager != null) {
@@ -556,15 +574,24 @@ public class JawnLocationService extends Service {
         if (service != null) service.retuneUpdates();
     }
 
-    private void retuneUpdates() {
-        if (!updatesOn || locationManager == null) return;
-        long minTime = restingPaceMs(this);
-        if (minTime == currentMinTimeMs) return;
-        try {
-            locationManager.removeUpdates(locationListener);
-        } catch (Exception ignored) {
+    /** One fresh fix for the scheduled wake. The service usually outlives the
+     *  receiver; if Android reclaimed it, bring it back at the stored pace. */
+    public static void wakeFix(Context context) {
+        JawnLocationService service = instance;
+        if (service != null) {
+            service.requestFreshFix();
+        } else {
+            ensureStarted(context);
         }
-        updatesOn = false;
+    }
+
+    private void retuneUpdates() {
+        if (locationManager == null) return;
+        long minTime = restingPaceMs(this);
+        boolean fast = minTime > 0 && minTime <= FAST_PACE_MS;
+        // Nothing to do when the listener state already matches the pace.
+        if (fast == updatesOn && (!fast || minTime == currentMinTimeMs)) return;
+        stopUpdates();
         startUpdates();
     }
 
