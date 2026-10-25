@@ -15,6 +15,8 @@ public class JawnBootReceiver extends BroadcastReceiver {
         if (intent == null || intent.getAction() == null) return;
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         Logger.logInfo(LOG_TAG, "BOOT_COMPLETED received");
+        // The next Clock alarm lives in a file on disk; arm it again.
+        JawnClockAlarm.sync(context);
         if (JawnTailnetController.isEnabled(context)) JawnTailnetController.startService(context);
         if (!JawnLauncher.isAutostartEnabled(context)) {
             Logger.logInfo(LOG_TAG, "Autostart disabled; not starting jawn");

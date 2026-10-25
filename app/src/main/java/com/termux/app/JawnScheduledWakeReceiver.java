@@ -49,6 +49,11 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (intent == null || !ACTION_WAKE.equals(intent.getAction())) return;
 
+        // The clock's exact alarm is independent of navigation: re-arm it on
+        // every beat so a saved alarm is never missed because the location
+        // service is resting.
+        JawnClockAlarm.sync(context);
+
         // A stopped location service must not keep arming alarms: the Perl side
         // would read a fresh wake_ready and release its own lock for nothing.
         if (!JawnLocationService.isEnabled(context)) {

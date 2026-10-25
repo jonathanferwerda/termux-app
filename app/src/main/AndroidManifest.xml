@@ -25,6 +25,11 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The Clock app's alarms are real alarm-clock alarms: exact while the
+         phone is idle, shown over the lock screen, and allowed to wake it. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -445,6 +450,21 @@
         <receiver
             android:name=".app.JawnScheduledWakeReceiver"
             android:exported="false" />
+
+        <!-- The Clock's exact wake and its lock-screen alarm notification.
+             jawn broadcasts to these three actions; the fourth is the
+             AlarmManager wake itself. Exported because jawn's process
+             broadcasts from the terminal side. -->
+        <receiver
+            android:name=".app.JawnClockReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.termux.app.JAWN_CLOCK_SYNC" />
+                <action android:name="com.termux.app.JAWN_CLOCK_RING" />
+                <action android:name="com.termux.app.JAWN_CLOCK_DISMISSED" />
+                <action android:name="com.termux.app.CLOCK_ALARM" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".app.RunCommandService"

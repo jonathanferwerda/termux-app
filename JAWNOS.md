@@ -619,3 +619,18 @@ work and a full-width build has crashed it (2026-10-10).
     `retuneUpdates()` moves between the two when the pace changes. The
     notification reads "Checks every N min" while resting rather than waiting
     on a fix that is not being requested.
+
+## Deltas round 27 (an alarm wakes the phone and shows on the lock screen)
+
+51. `JawnClockAlarm` (new): reads `~/.president/clock_alarm.json` (written by
+    jawn's Clock) and sets an exact, allow-while-idle AlarmManager alarm five
+    seconds before the named time. `JawnClockReceiver` handles
+    `JAWN_CLOCK_SYNC` / `JAWN_CLOCK_RING` / `JAWN_CLOCK_DISMISSED` and the exact
+    `CLOCK_ALARM`; `JawnClockNotifier` posts a high-importance alarm-channel
+    notification with a full-screen intent and holds a partial wake lock across
+    the ring. The navigation wake and the boot receiver re-arm it, and the
+    activity shows over the lock screen when the full-screen intent names the
+    alarm.
+52. `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` and `USE_FULL_SCREEN_INTENT` added.
+    The sound stays on jawn's Perl side (sox `play`); the app's notification is
+    silent so a long track is not talked over.

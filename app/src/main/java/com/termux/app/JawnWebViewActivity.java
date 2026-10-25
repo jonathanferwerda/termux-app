@@ -50,6 +50,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnContactsBridge contacts;
     private JawnSpeech speech;
     public static final String EXTRA_URL = "com.termux.app.EXTRA_URL";
+    public static final String EXTRA_SHOW_WHEN_LOCKED = "com.termux.app.EXTRA_SHOW_WHEN_LOCKED";
     private String houseHost = "";
     private boolean gateFallback = false;
     // one-time move of the paired device id into loopback
@@ -70,6 +71,7 @@ public class JawnWebViewActivity extends Activity {
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        showWhenLockedIfAsked(getIntent());
         // Deliberately no FLAG_KEEP_SCREEN_ON: this is a UI, not a kiosk.
         // Holding the screen awake while it idles was the phone's biggest heat
         // and battery cost; the system screen timeout now applies normally.
@@ -119,6 +121,8 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnLocationBridge(this), "JawnLocation");
         // a service the person already turned on resumes with the view
         JawnLocationService.ensureStarted(this);
+        // Opening the app is also a chance to re-arm the next clock alarm.
+        JawnClockAlarm.sync(this);
         // a nudge for the page when something happens with no page's finger in
         // it - a call that just ended is filed from the service's own record
         JawnPhoneState.poster = this::runJs;
@@ -332,10 +336,23 @@ public class JawnWebViewActivity extends Activity {
             | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
+    /** A full-screen alarm intent brings the Clock over the lock screen. */
+    private void showWhenLockedIfAsked(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_SHOW_WHEN_LOCKED, false)) return;
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
+    }
+
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        showWhenLockedIfAsked(intent);
         // singleTask: a re-tap of the home screen icon brings this activity
         // forward without recreating it, so reload - a fresh ticket, or a jawn
         // that has since restarted, is picked up instead of the stale page.
