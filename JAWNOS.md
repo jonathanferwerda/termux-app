@@ -580,3 +580,14 @@ work and a full-width build has crashed it (2026-10-10).
     alarm on start/stop and on every pace change; a stale `wake_ready` is the
     dead-man switch. Kept separate from the existing exported `JawnWakeReceiver`
     (the `JAWN_WAKE` adb hook), whose behaviour is unchanged.
+
+## Deltas round 25 (wake only as long as the work)
+
+47. `JawnScheduledWakeReceiver` releases its partial wake lock as soon as the
+    wake has nothing left to do, instead of always holding the CPU for 45 s. It
+    polls `~/.president/utility_idle` (written by the manager after a utility
+    tick that ran nothing, removed when a job starts) and releases when the
+    marker is newer than the wake's own start, the screen is off, and no music
+    track holds its lock. A generation counter keeps a re-armed alarm from being
+    released by the wake it replaced; the 45 s timeout stays the backstop. The
+    Perl side marks the work done because the app cannot see the runner.
