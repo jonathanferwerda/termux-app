@@ -598,3 +598,11 @@ work and a full-width build has crashed it (2026-10-10).
     interval and the scheduled wake. The receiver retunes during a wake, so
     editing the navigation pool in Configure → Sys moves the phone's own pace
     without restarting the service; the stored setting is the fallback.
+49. A wake is renewed while a peer pulls. The manager touches
+    `~/.president/sync_pull` for every row batch a `/manager/sync_rows`,
+    `/manager/sync_buckets` or `/manager/backup_serve` request serves, and
+    `JawnScheduledWakeReceiver` renews its own partial lock (15 s at a time)
+    while that marker is fresh instead of releasing at the 45 s window. The
+    phone therefore answers a delta pull to the end; a five-minute hard cap
+    keeps a runaway peer from holding the CPU, and the ordinary early release
+    resumes as soon as the marker ages out.

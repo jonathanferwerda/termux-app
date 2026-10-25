@@ -22,7 +22,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * seconds, so the window is long enough to run whatever is due (navigation,
  * health, mail, the slow code sync). Once that work is finished the lock is
  * released early - see {@link #releaseWhenIdle} - so the phone sleeps for the
- * rest of the interval instead of always burning the full 45 seconds.
+ * rest of the interval instead of always burning the full 45 seconds. A peer
+ * pulling rows from this machine renews the lock instead, so a sync is never
+ * cut in half by that window.
  *
  * This is separate from {@link JawnWakeReceiver}, which is the exported
  * {@code JAWN_WAKE} hook adb uses to start jawn from outside the app.
@@ -34,6 +36,10 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
     public static final String ACTION_WAKE = "com.termux.app.SCHEDULED_WAKE";
     private static final long WAKE_MS = 45_000L;
     private static final long POLL_MS = 2_000L;
+    /** While a peer is pulling rows from this phone, the lock is renewed. */
+    private static final long RENEW_MS = 15_000L;
+    /** A runaway pull cannot hold the CPU forever. */
+    private static final long MAX_HOLD_MS = 5 * 60_000L;
 
     /** Only the newest wake decides when the CPU may sleep: a re-armed alarm
      *  must not be released by the thread of the wake it replaced. */
@@ -84,17 +90,26 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
      * no job, and removes it as soon as one starts, so a marker newer than this
      * wake's start means every due job has finished. The screen being on means a
      * person is using the phone; a music track keeps its own lock and must not be
-     * cut short. The 45s timeout stays the backstop for a tree that is down or a
-     * job that overran, so the thread never outlives the lock.
+     * cut short. A pull being served renews the lock, with a five-minute hard cap
+     * so a runaway peer cannot hold the CPU forever.
      */
     private static void releaseWhenIdle(Context context, PowerManager.WakeLock lock,
                                         long started, long myGeneration) {
-        long deadline = started + WAKE_MS - POLL_MS;
+        long normalDeadline = started + WAKE_MS - POLL_MS;
+        long hardDeadline = started + MAX_HOLD_MS;
         try {
-            while (System.currentTimeMillis() < deadline) {
+            while (System.currentTimeMillis() < hardDeadline) {
                 Thread.sleep(POLL_MS);
                 if (generation.get() != myGeneration) return;
                 if (!lock.isHeld()) return;
+                // A peer is reading this phone's rows right now. Renew our own
+                // lock and keep answering: a pull must not be cut in half by the
+                // ordinary 45s window (the manager marks the file per batch).
+                if (syncPullActive(started)) {
+                    lock.acquire(RENEW_MS);
+                    continue;
+                }
+                if (System.currentTimeMillis() < normalDeadline) continue;
                 if (screenIsOn(context)) continue;
                 if (musicWakeCount() > 0) continue;
                 if (utilityIdleAt() < started) continue;
@@ -119,6 +134,17 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
     private static long utilityIdleAt() {
         File file = presidentFile("utility_idle");
         return file.exists() ? file.lastModified() : 0L;
+    }
+
+    /** Is a peer pulling rows from this machine right now? The manager touches
+     *  {@code ~/.president/sync_pull} for every row batch it serves. A marker
+     *  older than this wake is ignored: it belongs to a pull already finished. */
+    private static boolean syncPullActive(long started) {
+        File file = presidentFile("sync_pull");
+        if (!file.exists()) return false;
+        long at = file.lastModified();
+        long now = System.currentTimeMillis();
+        return at >= started && now - at < 15_000L;
     }
 
     /** How many tracks are holding the music stream's own wake lock. */
