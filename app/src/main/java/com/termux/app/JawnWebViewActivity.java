@@ -65,6 +65,8 @@ public class JawnWebViewActivity extends Activity {
     private static final int REQ_PERMS = 7001;
     private static final int REQ_FILE = 7002;
     private static final int REQ_GEO = 7003;
+    private static final int REQ_LOC = 7004;
+    private boolean pendingLocationStart = false;
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -79,9 +81,10 @@ public class JawnWebViewActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        // navigator.geolocation is refused by a WebView unless asked for; the
-        // web app records travel and stamps appointments with it.
-        s.setGeolocationEnabled(true);
+        // Location comes from the app's own GPS service, never from
+        // navigator.geolocation: a WebView geolocation answer carries no
+        // provider, so it cannot be told apart from a Wi-Fi guess.
+        s.setGeolocationEnabled(false);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
@@ -112,6 +115,10 @@ public class JawnWebViewActivity extends Activity {
         // the paired-device id survives an origin change (the view moving to
         // 127.0.0.1) because universal.js mirrors it here
         web.addJavascriptInterface(new JawnAppStorage(this), "JawnAppStorage");
+        // the manager's only source of place: a GPS-provider foreground service
+        web.addJavascriptInterface(new JawnLocationBridge(this), "JawnLocation");
+        // a service the person already turned on resumes with the view
+        JawnLocationService.ensureStarted(this);
         // a nudge for the page when something happens with no page's finger in
         // it - a call that just ended is filed from the service's own record
         JawnPhoneState.poster = this::runJs;
@@ -431,11 +438,31 @@ public class JawnWebViewActivity extends Activity {
         }
     }
 
+    /** The page asked for the GPS service: ask for the runtime permission once,
+     *  then start it. The service itself never requests anything. */
+    public void ensureLocationPermission() {
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            pendingLocationStart = true;
+            requestPermissions(new String[] {
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION }, REQ_LOC);
+            return;
+        }
+        JawnLocationService.start(this, 0, -1);
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (speech != null && speech.onPermissionResult(requestCode, permissions, results)) return;
         if (requestCode == JawnContactsBridge.REQ_PERMS) { if (contacts != null) contacts.onPermissionResult(); return; }
+        if (requestCode == REQ_LOC) {
+            boolean locationOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+            if (pendingLocationStart && locationOk) JawnLocationService.start(this, 0, -1);
+            pendingLocationStart = false;
+            return;
+        }
         if (requestCode == REQ_GEO) {
             boolean geoOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             if (pendingGeo != null) { pendingGeo.invoke(pendingGeoOrigin, geoOk, false); pendingGeo = null; pendingGeoOrigin = null; }

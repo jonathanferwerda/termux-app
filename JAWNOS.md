@@ -542,3 +542,22 @@ work and a full-width build has crashed it (2026-10-10).
     restarts it after each phrase while the microphone is on. Registered in
     `JawnWebViewActivity` beside the camera and contacts, with the permission
     result routed to it and `destroy()` on the activity's own destroy.
+
+## Deltas round 24 (one GPS, and it is really GPS)
+
+41. `JawnLocationService` (new): a `foregroundServiceType="location"` service
+    that reads `LocationManager.GPS_PROVIDER` and nothing else, writes each fix
+    to `~/.president/location.json`, and speaks the page through
+    `window.JawnLocation` (`latest()`, `status()`, `start()`, `startAt()`, `stop()`).
+    A WebView's `navigator.geolocation` (and `termux-location -p network`) can
+    answer from Wi-Fi or a cell tower while reporting a plausible accuracy, which
+    put the phone in places it had never been. Every record this service emits
+    names `provider: "gps"`; the fork disables WebView geolocation in favour of
+    it. The interval is the navigation pace (four minutes by default) and is
+    retuned by the page while a running appointment asks for faster fixes.
+42. `JawnLocationBridge` (new): the permission prompt, start/stop, and the JSON
+    the page and the Perl tree both read. Added as `JawnLocation` beside the
+    other bridges; `JawnWebViewActivity.ensureLocationPermission()` asks for
+    ACCESS_FINE_LOCATION once and then starts the service.
+43. Manifest: `FOREGROUND_SERVICE_LOCATION` and the service entry. No held wake
+    lock: a location foreground service wakes the process when a fix arrives.
