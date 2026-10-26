@@ -111,17 +111,30 @@ final class JawnHomeApps {
         if (pm == null || intent == null) return null;
         try {
             ResolveInfo ri = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
-            if (ri != null) return ri;
+            if (ri != null && !isResolver(ri)) return ri;
         } catch (Throwable ignored) {
             // fall through to the list form
         }
         try {
             List<ResolveInfo> list = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
-            if (list != null && !list.isEmpty()) return list.get(0);
+            if (list != null) {
+                for (ResolveInfo ri : list) {
+                    if (!isResolver(ri)) return ri;
+                }
+            }
         } catch (Throwable ignored) {
             // nothing resolves
         }
         return null;
+    }
+
+    /** The system chooser is not an app: it answers with "Complete action". */
+    static boolean isResolver(ResolveInfo ri) {
+        String pkg = ri == null || ri.activityInfo == null ? "" : ri.activityInfo.packageName;
+        if (pkg.isEmpty()) return true;
+        return pkg.equals("android")
+            || pkg.contains("intentresolver")
+            || pkg.contains("android.internal.app");
     }
 
     /** Start the app's own launcher activity, not a home-screen intent. */

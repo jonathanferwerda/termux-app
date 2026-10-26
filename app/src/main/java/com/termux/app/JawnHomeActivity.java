@@ -6,12 +6,15 @@ import android.app.PendingIntent;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -528,7 +531,10 @@ public class JawnHomeActivity extends Activity {
         text.setLayoutParams(lp);
         item.addView(text);
 
-        final Intent launch = intent;
+        final Intent launch = new Intent(intent);
+        if (ri.activityInfo != null) {
+            launch.setComponent(new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name));
+        }
         item.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -554,7 +560,9 @@ public class JawnHomeActivity extends Activity {
     // ---------------------------------------------------------------- usage
 
     /**
-     * Today's app time, from the manager's usage summary.
+     * Today's time, from the manager's usage summary. Site time is the
+     *  only kind Android can record today: the browser reports it. App time
+     *  (UsageStatsManager) is the separate permission path in the contract.
      *
      * <p>The request rides the app's own manager session (the CookieManager
      * cookie the web view already holds), so no new credential is minted. It is
@@ -574,40 +582,21 @@ public class JawnHomeActivity extends Activity {
         usageFetchedAt = now;
         usageValue.setText("Checking...");
 
-        final String manager = JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this));
-        // CookieManager is a local store lookup, not a network call. Do it on the
-        // main thread so the background request starts with the cookie in hand.
-        String cookie = null;
-        try {
-            cookie = CookieManager.getInstance().getCookie(manager);
-        } catch (Throwable t) {
-            Log.w(TAG, "manager cookie unavailable", t);
-        }
-        final String session = cookie == null ? "" : cookie;
         final long from = JawnHomeApps.todayStartMs();
         final long to = now;
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                long total;
-                if (session.isEmpty()) {
-                    total = -2; // signed out: no point asking the manager
-                } else {
-                    total = fetchTodayAppMs(manager, session, from, to);
-                }
-                final long result = total;
+                final long result = fetchTodayMs(from, to);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         usageInFlight = false;
                         usageFetchedAt = System.currentTimeMillis();
                         if (isFinishing() || isDestroyed()) return;
-                        if (result == -2) {
-                            usageValue.setText("Open the manager once to sign in; "
-                                + "today's app time will appear here.");
-                        } else if (result < 0) {
-                            usageValue.setText("App time is unavailable right now.");
+                        if (result < 0) {
+                            usageValue.setText("Time is unavailable right now.");
                         } else {
                             usageValue.setText(JawnHomeApps.formatDuration(result));
                         }
@@ -617,62 +606,35 @@ public class JawnHomeActivity extends Activity {
         }, "jawn-home-usage").start();
     }
 
-    /** The today's-total, or -1 when the manager cannot answer. Background only. */
-    private static long fetchTodayAppMs(String manager, String cookie, long from, long to) {
-        HttpsURLConnection conn = null;
+    /**
+     * Today's site time, read straight from the house's own database.
+     *
+     * <p>The app and Termux share a UID, so the home screen can read
+     * {@code database/jawnos.db} without a session or the manager running. That
+     * matters: the manager session cookie is HttpOnly, so an ordinary HTTP
+     * request from this activity cannot see it. App time (UsageStatsManager) is
+     * the separate permission path in the contract.
+     */
+    private long fetchTodayMs(long from, long to) {
+        java.io.File dbFile = new java.io.File(JawnLauncher.getJawnDirPath(this), "database/jawnos.db");
+        if (!dbFile.isFile()) return -1;
+        SQLiteDatabase db = null;
+        Cursor cursor = null;
         try {
-            URL url = new URL(manager + "/usage/summary?kind=app&from=" + from + "&to=" + to);
-            conn = (HttpsURLConnection) url.openConnection();
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, MANAGER_TRUST, new SecureRandom());
-            conn.setSSLSocketFactory(sc.getSocketFactory());
-            conn.setHostnameVerifier(new javax.net.ssl.HostnameVerifier() {
-                @Override
-                public boolean verify(String host, javax.net.ssl.SSLSession session) {
-                    return true;
-                }
-            });
-            conn.setConnectTimeout(2500);
-            conn.setReadTimeout(4000);
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("Cookie", cookie);
-
-            int code = conn.getResponseCode();
-            if (code < 200 || code >= 300) return -1;
-
-            InputStream in = conn.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
-            StringBuilder body = new StringBuilder();
-            String line;
-            int lines = 0;
-            while ((line = reader.readLine()) != null) {
-                body.append(line);
-                if (++lines > 256) break;
-            }
-            reader.close();
-
-            JSONObject json = new JSONObject(body.toString());
-            JSONArray rows = json.optJSONArray("rows");
-            long total = 0;
-            if (rows != null) {
-                for (int i = 0; i < rows.length(); i++) {
-                    JSONObject row = rows.optJSONObject(i);
-                    if (row != null) total += row.optLong("total_ms", 0);
-                }
-            }
-            return total;
+            db = SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
+            cursor = db.rawQuery(
+                "select coalesce(sum(max(0, cast(ended_at as integer) - cast(started_at as integer)"
+                    + " - cast(coalesce(nullif(idle_ms, ''), '0') as integer))), 0) as total"
+                    + " from usage_sessions where kind = 'site'"
+                    + " and cast(ended_at as integer) >= ? and cast(started_at as integer) <= ?",
+                new String[] { String.valueOf(from), String.valueOf(to) });
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         } catch (Throwable t) {
-            Log.w(TAG, "usage summary failed", t);
+            Log.w(TAG, "usage read failed", t);
             return -1;
         } finally {
-            if (conn != null) {
-                try {
-                    conn.disconnect();
-                } catch (Throwable ignored) {
-                    // already closed
-                }
-            }
+            if (cursor != null) { try { cursor.close(); } catch (Throwable ignored) { } }
+            if (db != null) { try { db.close(); } catch (Throwable ignored) { } }
         }
     }
 

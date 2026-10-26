@@ -434,7 +434,7 @@
         </activity-alias>
 
         <activity
-            android:name=".JawnBrowserActivity"
+            android:name=".app.JawnBrowserActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation"
             android:exported="false"
             android:label="@string/application_name"
@@ -442,7 +442,7 @@
             android:theme="@style/Theme.Termux.JawnDashboard" />
 
         <activity
-            android:name=".JawnHomeActivity"
+            android:name=".app.JawnHomeActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation"
             android:excludeFromRecents="true"
             android:exported="true"
