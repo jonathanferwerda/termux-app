@@ -48,6 +48,38 @@ public class JawnLauncher {
         return TermuxConstants.TERMUX_HOME_DIR_PATH + "/" + getJawnDirName(context);
     }
 
+    /** True when the house is all there: the tree, a usable config.json (the
+     *  server's own gate is {@code signatorial}) and the live database. A
+     *  fresh device fails this and is provisioned on first launch; a device
+     *  that has been set up keeps the everyday launch path untouched. */
+    public static boolean isJawnInstalled(Context context) {
+        File dir = new File(getJawnDirPath(context));
+        return new File(dir, "jawn").isFile()
+            && new File(dir, "President.pl").isFile()
+            && configIsUsable(new File(dir, "config.json"))
+            && nonEmptyFile(new File(dir, "database/jawnos.db"));
+    }
+
+    /** The same test the server makes before it skips its setup wizard. */
+    private static boolean configIsUsable(File file) {
+        if (!nonEmptyFile(file)) return false;
+        try {
+            StringBuilder sb = new StringBuilder();
+            BufferedReader r = new BufferedReader(new FileReader(file));
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line);
+            r.close();
+            JSONObject o = new JSONObject(sb.toString());
+            return !o.optString("signatorial", "").isEmpty();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean nonEmptyFile(File file) {
+        return file.isFile() && file.length() > 0;
+    }
+
     /** The human version from <jawn dir>/VERSION, or "unknown" if it is absent. */
     public static String getJawnVersion(Context context) {
         File version = new File(getJawnDirPath(context), "VERSION");
@@ -285,21 +317,30 @@ public class JawnLauncher {
 
     /** Read working_port from the jawn config.json, defaulting to 3000. */
     public static int getJawnPort(Context context) {
+        return readConfigPort(context, "working_port", 3000);
+    }
+
+    /** The port the login ticket is served on: config.json's "port". */
+    public static int getJawnTicketPort(Context context) {
+        return readConfigPort(context, "port", 3000);
+    }
+
+    private static int readConfigPort(Context context, String key, int fallback) {
         try {
             File f = new File(getJawnDirPath(context), "config.json");
-            if (!f.exists()) return 3000;
+            if (!f.exists()) return fallback;
             StringBuilder sb = new StringBuilder();
             BufferedReader r = new BufferedReader(new FileReader(f));
             String line;
             while ((line = r.readLine()) != null) sb.append(line);
             r.close();
             JSONObject o = new JSONObject(sb.toString());
-            int p = o.optInt("working_port", 0);
+            int p = o.optInt(key, 0);
             if (p > 0) return p;
         } catch (Throwable t) {
             // fall through to the default
         }
-        return 3000;
+        return fallback;
     }
 
     /** Whether the view opens this machine's manager at loopback.

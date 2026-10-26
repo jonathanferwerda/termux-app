@@ -8,13 +8,15 @@
   html, body { height: 100%; margin: 0; background: #000; color: #ededed;
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   body { display: flex; flex-direction: column; align-items: center;
-         justify-content: center; gap: 22px; padding: 24px; box-sizing: border-box; }
+         justify-content: center; gap: 22px; padding: 24px; box-sizing: border-box;
+         overflow-y: auto; }
   .logo { height: 34vh; max-height: 330px; animation: glow 2.4s ease-in-out infinite; }
   @keyframes glow {
     0%, 100% { filter: drop-shadow(0 0 22px rgba(255, 204, 0, 0.30)); }
     50%      { filter: drop-shadow(0 0 58px rgba(255, 204, 0, 0.78)); }
   }
-  .status { color: #8e8e8e; font-size: 15px; text-align: center; }
+  .status { color: #8e8e8e; font-size: 15px; text-align: center;
+            white-space: pre-line; max-width: 90vw; line-height: 1.4; }
   button { background: #ffcc00; color: #0a0a0a; border: none; border-radius: 13px;
            padding: 14px 24px; font-size: 16px; font-weight: 700; }
   button:active { background: #e6b800; }

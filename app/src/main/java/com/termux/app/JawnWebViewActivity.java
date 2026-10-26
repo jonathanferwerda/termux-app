@@ -53,6 +53,12 @@ public class JawnWebViewActivity extends Activity {
     public static final String EXTRA_SHOW_WHEN_LOCKED = "com.termux.app.EXTRA_SHOW_WHEN_LOCKED";
     private String houseHost = "";
     private boolean gateFallback = false;
+    // A device with no seeded JawnOS is provisioned once, in the background,
+    // before the manager opens. A device that already has the house never
+    // enters this path, so its launches are unchanged.
+    private boolean firstRun = false;
+    private boolean firstRunRunning = false;
+    private String lastSplashStatus;
     // one-time move of the paired device id into loopback
     private boolean migrateThenLoopback = false;
     // The page says when a track is playing, so the activity can leave the
@@ -147,10 +153,59 @@ public class JawnWebViewActivity extends Activity {
             web.loadUrl(extraUrl);
             return;
         }
+        if (JawnLauncher.isJawnInstalled(this)) {
+            openDestination();
+        } else {
+            beginFirstRun();
+        }
+    }
+
+    /** The everyday launch: the manager when the view holds a session, else
+     *  the saved ticket (or the manager) on the house's host. */
+    private void openDestination() {
+        // The setup splash is about to be replaced; a later gate fallback
+        // should not show the last setup line again.
+        lastSplashStatus = null;
         String url = destination();
         try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
         if (houseHost == null) houseHost = "";
         loadWhenReady(url);
+    }
+
+    /** First launch on a device with no house: show the splash and provision
+     *  in the background ({@link JawnFirstRun}), then open the manager.
+     *  Try again and a re-tap of the icon re-enter here; a running attempt is
+     *  left alone. A device that is already installed never comes here. */
+    private void beginFirstRun() {
+        firstRun = true;
+        if (firstRunRunning) {
+            splashStatus(lastSplashStatus);
+            return;
+        }
+        // Set the line before the splash starts loading: the page may finish
+        // after this call, and onPageFinished replays the saved status.
+        splashStatus("Setting up JawnOS for the first time...");
+        showSplash();
+        firstRunRunning = true;
+        JawnFirstRun.start(this, new JawnFirstRun.Listener() {
+            public void progress(String message) {
+                splashStatus(message);
+            }
+
+            public void done(boolean ok, String message) {
+                firstRunRunning = false;
+                if (!ok) {
+                    splashStatus(message == null ? "Setup failed. Tap Try again." : message);
+                    return;
+                }
+                firstRun = false;
+                if (message != null && !message.isEmpty()) {
+                    android.widget.Toast.makeText(JawnWebViewActivity.this, message,
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
+                openDestination();
+            }
+        });
     }
 
     /** Straight to the manager when the view already holds a session - the
@@ -226,9 +281,14 @@ public class JawnWebViewActivity extends Activity {
         });
     }
 
-    /** Nudge the splash's status line (a no-op when the splash is not up). */
+    /** Nudge the splash's status line (a no-op when the splash is not up).
+     *  The last message is kept so the splash can show it again after a
+     *  reload, and newlines survive the trip into the page. */
     private void splashStatus(String text) {
-        String escaped = text.replace("\\", "\\\\").replace("\"", "\\\"");
+        if (text == null || text.isEmpty()) return;
+        lastSplashStatus = text;
+        String escaped = text.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "");
         runJs("window.jawnSplashStatus && window.jawnSplashStatus(\"" + escaped + "\");");
     }
 
@@ -269,7 +329,14 @@ public class JawnWebViewActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public void retry() {
-            runOnUiThread(() -> { gateFallback = false; loadWhenReady(destination()); });
+            runOnUiThread(() -> {
+                if (firstRun) {
+                    beginFirstRun();
+                    return;
+                }
+                gateFallback = false;
+                loadWhenReady(destination());
+            });
         }
     }
 
@@ -353,6 +420,10 @@ public class JawnWebViewActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         showWhenLockedIfAsked(intent);
+        if (firstRun) {
+            beginFirstRun();
+            return;
+        }
         // singleTask: a re-tap of the home screen icon brings this activity
         // forward without recreating it, so reload - a fresh ticket, or a jawn
         // that has since restarted, is picked up instead of the stale page.
@@ -520,6 +591,12 @@ public class JawnWebViewActivity extends Activity {
             // the sms send and dial intents ride in as extras; hand them to the
             // page once (the chat opens on the number, the phone pad fills)
             injectLaunchExtras(view);
+            // the splash may have loaded after the setup had already said
+            // something; put the current line back on it
+            if (url != null && url.startsWith("file:///android_asset/splash.html")
+                    && lastSplashStatus != null) {
+                splashStatus(lastSplashStatus);
+            }
             if (migrateThenLoopback) {
                 migrateThenLoopback = false;
                 view.evaluateJavascript(
