@@ -656,3 +656,12 @@ work and a full-width build has crashed it (2026-10-10).
 56. The alarm's own **Snooze length** rides the ring and exact-wake intents, so
     the notification button and the lock-screen tap snooze for that alarm's
     configured minutes rather than a fixed five.
+
+## Deltas round 29 (a peer pull holds the CPU)
+
+57. `JawnScheduledWakeReceiver`: a new `~/.president/wake_hold` lease. jawn
+    touches the file when a peer is about to pull or while a row batch is being
+    served; the receiver renews its partial wake lock while a touch younger than
+    60s belongs to this wake. This keeps the 45-second scheduled window from
+    cutting a pull in half when the peer is slow between batches. The existing
+    five-minute cap still bounds a runaway peer.
