@@ -16,6 +16,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import java.lang.ref.WeakReference;
 import java.text.DateFormat;
 import java.util.Date;
 
@@ -61,6 +62,7 @@ public class JawnClockAlarmActivity extends Activity {
     private String app = "";
     private long at;
     private int snoozeMinutes = 5;
+    private static WeakReference<JawnClockAlarmActivity> current;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -83,6 +85,27 @@ public class JawnClockAlarmActivity extends Activity {
             if (!closing) snooze();
         });
         readIntent(getIntent());
+        current = new WeakReference<>(this);
+    }
+
+    /** Called by the receiver when a notification action (or another machine)
+     *  ends the ring, so the full-screen face does not stay over the keyguard. */
+    public static void closeIfShowing() {
+        JawnClockAlarmActivity a = current == null ? null : current.get();
+        if (a == null) return;
+        a.runOnUiThread(a::closeSilently);
+    }
+
+    private void closeSilently() {
+        if (closing) return;
+        closing = true;
+        JawnClockSound.stop();
+        JawnClockNotifier.cancel(this);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        root.animate().alpha(0f).setDuration(FADE_MS).withEndAction(() -> {
+            finish();
+            overridePendingTransition(0, 0);
+        }).start();
     }
 
     /** Over the keyguard on API 27+, with the pre-27 window flags otherwise. */
@@ -287,6 +310,12 @@ public class JawnClockAlarmActivity extends Activity {
         highlightTarget(false);
         root.setAlpha(1f);
         readIntent(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (current != null && current.get() == this) current = null;
+        super.onDestroy();
     }
 
     /** Back is never a silent dismissal; it is the same gentle snooze. */

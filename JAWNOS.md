@@ -670,3 +670,10 @@ work and a full-width build has crashed it (2026-10-10).
     update and skip the full-screen intent, leaving only a heads-up. The
     activity and the receiver also log the gesture (`snooze`/`dismiss`) and the
     written control action, so a device test can be read from `logcat`.
+58. The last ring id is kept in `jawn_clock_alarm` preferences, so a process
+    restart cancels the previous ring instead of leaving it; `cancel` touches
+    only that id plus the three legacy ids, staying under Android's cancel rate
+    limit (the previous wide sweep tripped it and the current notification
+    survived). The receiver calls `JawnClockAlarmActivity.closeIfShowing()` on a
+    notification action or a peer dismiss, so the full-screen face does not stay
+    over the keyguard after the alarm is answered elsewhere.

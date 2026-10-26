@@ -61,6 +61,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
             JawnClockNotifier.cancelUpcoming(context);
             JawnClockNotifier.releaseWakeLock();
             JawnClockAlarm.sync(context);
+            JawnClockAlarmActivity.closeIfShowing();
             return;
         }
 
@@ -79,6 +80,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
             // snooze) and broadcasts ACTION_SYNC, which arms it again. Calling
             // sync() here would re-read the old moment and ring again at once.
             JawnClockAlarm.cancel(context);
+            JawnClockAlarmActivity.closeIfShowing();
             return;
         }
 
