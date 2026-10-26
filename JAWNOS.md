@@ -634,3 +634,25 @@ work and a full-width build has crashed it (2026-10-10).
 52. `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` and `USE_FULL_SCREEN_INTENT` added.
     The sound stays on jawn's Perl side (sox `play`); the app's notification is
     silent so a long track is not talked over.
+
+## Deltas round 28 (answer the alarm without opening the UI)
+
+53. `JawnClockAlarmActivity` (new): the ring's full-screen face on a locked
+    phone. A dark theme gradient, a filled circle with the app logo at the
+    bottom and an empty ring near the top. Tap the logo to snooze; drag it to
+    the top ring to dismiss. It uses `setShowWhenLocked` / `setTurnScreenOn` on
+    API 27+ (legacy window flags below), keeps the screen on for the ring, and
+    finishes with a fade. The notification's content and full-screen intents
+    now open this activity instead of the manager WebView.
+54. `JAWN_CLOCK_DISMISS` / `JAWN_CLOCK_SNOOZE` (new receiver actions): the ring
+    notification carries Dismiss and Snooze buttons. Both stop the sound,
+    cancel the ring notification and write `~/.president/clock_control.json`
+    for jawn's alarm worker to apply to the shared alarm. Neither re-reads the
+    old schedule (that armed the moment that had just rung), so the Perl side
+    writes the snooze or the next alarm and broadcasts `JAWN_CLOCK_SYNC`.
+55. Every alarm sound loops until Dismiss, Snooze or the five-minute guard; a
+    missing `loop` extra on an alarm ring now means loop, and a long recording
+    no longer plays once and stops.
+56. The alarm's own **Snooze length** rides the ring and exact-wake intents, so
+    the notification button and the lock-screen tap snooze for that alarm's
+    configured minutes rather than a fixed five.

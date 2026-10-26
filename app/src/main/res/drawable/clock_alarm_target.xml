@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The empty ring at the top: drop the logo here to dismiss. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@android:color/transparent" />
+    <stroke
+        android:width="2dp"
+        android:color="@color/clock_alarm_accent"
+        android:dashGap="7dp"
+        android:dashWidth="9dp" />
+</shape>

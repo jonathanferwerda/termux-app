@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dark slate the alarm screen sits on, warmed from below by the accent
+     glow that surrounds the logo's circle. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:endColor="@color/clock_alarm_bg_bottom"
+                android:startColor="@color/clock_alarm_bg_top" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="0.84"
+                android:endColor="#002F8F6D"
+                android:gradientRadius="360dp"
+                android:startColor="@color/clock_alarm_accent_glow"
+                android:type="radial" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="0.14"
+                android:endColor="#002F8F6D"
+                android:gradientRadius="250dp"
+                android:startColor="@color/clock_alarm_accent_glow_soft"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

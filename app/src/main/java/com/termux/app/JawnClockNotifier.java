@@ -21,8 +21,9 @@ import java.util.Date;
  *
  * The sound is played by {@link JawnClockSound} on the alarm stream. This class
  * draws the notification; the ring one is a high-importance alarm-channel
- * notification with a full-screen intent that opens the manager, where the
- * Clock ring card waits.
+ * notification with a full-screen intent that opens
+ * {@link JawnClockAlarmActivity}, and two actions - Dismiss and Snooze - that
+ * end the ring without opening anything.
  */
 public final class JawnClockNotifier {
     private static final String LOG_TAG = "JawnClockNotifier";
@@ -30,6 +31,9 @@ public final class JawnClockNotifier {
     public static final String UPCOMING_CHANNEL = "jawn_alarm_upcoming";
     private static final int NOTIFICATION_ID = 7301;
     private static final int CONTENT_REQUEST = 7302;
+    private static final int DISMISS_REQUEST = 7307;
+    private static final int SNOOZE_REQUEST = 7308;
+    private static final int DEFAULT_SNOOZE_MINUTES = 5;
     private static final int UPCOMING_ID = 7304;
     private static final int UPCOMING_CONTENT_REQUEST = 7305;
     private static final int UPCOMING_SKIP_REQUEST = 7306;
@@ -40,7 +44,14 @@ public final class JawnClockNotifier {
     private JawnClockNotifier() {}
 
     public static void show(Context context, String label, String uuid, String app, long at) {
-        String title = (label == null || label.isEmpty()) ? "Alarm" : label;
+        show(context, label, uuid, app, at, DEFAULT_SNOOZE_MINUTES);
+    }
+
+    public static void show(Context context, String label, String uuid, String app, long at,
+                            int snoozeMinutes) {
+        if (snoozeMinutes <= 0) snoozeMinutes = DEFAULT_SNOOZE_MINUTES;
+        String title = (label == null || label.isEmpty())
+                ? context.getString(R.string.clock_alarm_default_label) : label;
         if (at <= 0L) at = System.currentTimeMillis();
         cancelUpcoming(context);
 
@@ -66,11 +77,34 @@ public final class JawnClockNotifier {
         if (nm == null) return;
         createChannel(nm);
 
-        Intent open = new Intent(context, JawnWebViewActivity.class);
+        Intent open = new Intent(context, JawnClockAlarmActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        open.putExtra(JawnWebViewActivity.EXTRA_SHOW_WHEN_LOCKED, true);
-        open.putExtra("clock_alarm_uuid", uuid == null ? "" : uuid);
+        open.putExtra("uuid", uuid == null ? "" : uuid);
+        open.putExtra("label", title);
+        open.putExtra("app", app == null ? "" : app);
+        open.putExtra("at", at);
+        open.putExtra("snooze", snoozeMinutes);
         PendingIntent content = PendingIntent.getActivity(context, CONTENT_REQUEST, open, flags());
+
+        // The drawer's own controls: each ends the ring in the receiver and
+        // leaves the shared-alarm edit to the Perl worker.
+        Intent dismiss = new Intent(context, JawnClockReceiver.class)
+                .setAction(JawnClockReceiver.ACTION_DISMISS)
+                .putExtra("uuid", uuid == null ? "" : uuid)
+                .putExtra("label", title)
+                .putExtra("at", at)
+                .putExtra("snooze", snoozeMinutes);
+        PendingIntent dismissPending = PendingIntent.getBroadcast(
+                context, DISMISS_REQUEST, dismiss, flags());
+
+        Intent snooze = new Intent(context, JawnClockReceiver.class)
+                .setAction(JawnClockReceiver.ACTION_SNOOZE)
+                .putExtra("uuid", uuid == null ? "" : uuid)
+                .putExtra("label", title)
+                .putExtra("at", at)
+                .putExtra("snooze", snoozeMinutes);
+        PendingIntent snoozePending = PendingIntent.getBroadcast(
+                context, SNOOZE_REQUEST, snooze, flags());
 
         Notification.Builder builder = new Notification.Builder(context, CHANNEL);
         builder.setSmallIcon(R.drawable.ic_new_session)
@@ -85,7 +119,14 @@ public final class JawnClockNotifier {
                 .setAutoCancel(false)
                 .setContentIntent(content)
                 .setFullScreenIntent(content, true)
-                .setColor(0xFFC94F4F);
+                .setColor(0xFFC94F4F)
+                .addAction(new Notification.Action.Builder(
+                        Icon.createWithResource(context, R.drawable.ic_new_session),
+                        context.getString(R.string.clock_alarm_dismiss), dismissPending).build())
+                .addAction(new Notification.Action.Builder(
+                        Icon.createWithResource(context, R.drawable.ic_new_session),
+                        context.getString(R.string.clock_alarm_snooze, snoozeMinutes),
+                        snoozePending).build());
         // canUseFullScreenIntent() is API 34 and the app compiles against SDK 30;
         // ask for it reflectively so the same APK still builds and older phones
         // simply skip the check.

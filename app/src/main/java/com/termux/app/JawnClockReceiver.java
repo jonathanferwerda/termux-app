@@ -28,7 +28,9 @@ import java.nio.charset.StandardCharsets;
  * and AlarmManager delivers CLOCK_ALARM five seconds before the named time and
  * CLOCK_UPCOMING half an hour before it. The pre-notice carries a Skip today
  * action; the skip ends the phone's own wake at once and leaves a request the
- * Perl side reads and applies to the shared alarm.
+ * Perl side reads and applies to the shared alarm. Dismiss and Snooze (from
+ * the notification actions or the full-screen alarm) write the same kind of
+ * request to clock_control.json for the Perl alarm worker to poll.
  */
 public class JawnClockReceiver extends BroadcastReceiver {
     private static final String LOG_TAG = "JawnClockReceiver";
@@ -38,6 +40,8 @@ public class JawnClockReceiver extends BroadcastReceiver {
     public static final String ACTION_TIMER = "com.termux.app.JAWN_CLOCK_TIMER";
     public static final String ACTION_PREVIEW = "com.termux.app.JAWN_CLOCK_PREVIEW";
     public static final String ACTION_SKIP = "com.termux.app.JAWN_CLOCK_SKIP";
+    public static final String ACTION_DISMISS = "com.termux.app.JAWN_CLOCK_DISMISS";
+    public static final String ACTION_SNOOZE = "com.termux.app.JAWN_CLOCK_SNOOZE";
     public static final String ACTION_UPCOMING = JawnClockAlarm.ACTION_UPCOMING;
 
     @Override
@@ -60,6 +64,24 @@ public class JawnClockReceiver extends BroadcastReceiver {
             return;
         }
 
+        if (ACTION_DISMISS.equals(action) || ACTION_SNOOZE.equals(action)) {
+            // The notification's actions and the lock-screen gestures both end
+            // the ring here, then leave the shared-alarm edit to the Perl side.
+            boolean snooze = ACTION_SNOOZE.equals(action);
+            int minutes = intent.getIntExtra("snooze", 5);
+            if (minutes <= 0) minutes = 5;
+            JawnClockSound.stop();
+            JawnClockNotifier.cancel(context);
+            JawnClockNotifier.releaseWakeLock();
+            writeControl(context, intent.getStringExtra("uuid"),
+                    snooze ? "snooze" : "dismiss", minutes);
+            // End this wake now. The Perl worker writes the next schedule (or the
+            // snooze) and broadcasts ACTION_SYNC, which arms it again. Calling
+            // sync() here would re-read the old moment and ring again at once.
+            JawnClockAlarm.cancel(context);
+            return;
+        }
+
         if (ACTION_SKIP.equals(action)) {
             skipToday(context, intent);
             return;
@@ -76,18 +98,18 @@ public class JawnClockReceiver extends BroadcastReceiver {
 
         if (ACTION_PREVIEW.equals(action)) {
             if (intent.getIntExtra("stop", 0) == 1) JawnClockSound.stop();
-            else playSound(context, intent, false);
+            else playSound(context, intent, false, false);
             return;
         }
 
         if (ACTION_TIMER.equals(action)) {
-            playSound(context, intent, false);
+            playSound(context, intent, false, false);
             return;
         }
 
         if (ACTION_RING.equals(action)) {
             show(context, intent, false);
-            playSound(context, intent, false);
+            playSound(context, intent, false, true);
             return;
         }
 
@@ -95,7 +117,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
             // The exact alarm has done its job and does not repeat. The ring
             // starts at the named moment, not at this five-second lead.
             show(context, intent, true);
-            playSound(context, intent, true);
+            playSound(context, intent, true, true);
         }
     }
 
@@ -104,6 +126,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
         String uuid = intent.getStringExtra("uuid");
         String app = intent.getStringExtra("app");
         long at = intent.getLongExtra("at", 0L);
+        int snooze = intent.getIntExtra("snooze", 0);
         if (fromExactAlarm && (label == null || label.isEmpty() || at <= 0L)) {
             JSONObject data = JawnClockAlarm.read(context);
             if (data != null) {
@@ -111,19 +134,24 @@ public class JawnClockReceiver extends BroadcastReceiver {
                 if (uuid == null || uuid.isEmpty()) uuid = data.optString("uuid", "");
                 if (app == null || app.isEmpty()) app = data.optString("app", "");
                 if (at <= 0L) at = data.optLong("at", 0L);
+                if (snooze <= 0) snooze = data.optInt("snooze", 0);
             }
         }
+        if (snooze <= 0) snooze = 5;
         Log.i(LOG_TAG, "clock alarm ringing: " + (label == null ? "" : label));
-        JawnClockNotifier.show(context, label, uuid, app, at);
+        JawnClockNotifier.show(context, label, uuid, app, at, snooze);
     }
 
     /** Sound an alarm or a timer on the alarm stream, at the alarm's own level. */
-    private void playSound(Context context, Intent intent, boolean delayToAt) {
+    private void playSound(Context context, Intent intent, boolean delayToAt, boolean alarmRing) {
         String file = intent.getStringExtra("file");
         int volume = intent.getIntExtra("volume", 70);
         int ramp = intent.getIntExtra("ramp", 0);
         int guard = intent.getIntExtra("guard", 300_000);
-        boolean loop = intent.getIntExtra("loop", 0) == 1;
+        // An alarm ring repeats until it is answered even when an older jawn
+        // sent no loop extra; a timer or preview keeps its one-shot behaviour.
+        int loopExtra = intent.getIntExtra("loop", -1);
+        boolean loop = loopExtra < 0 ? alarmRing : loopExtra == 1;
         long at = intent.getLongExtra("at", 0L);
         if (file == null || file.isEmpty()) {
             JSONObject data = JawnClockAlarm.read(context);
@@ -154,6 +182,29 @@ public class JawnClockReceiver extends BroadcastReceiver {
         }
         else {
             JawnClockSound.play(app, path, v, r, l, g);
+        }
+    }
+
+    /**
+     * Leave the Perl alarm worker a request it polls and applies to the shared
+     * alarm. Nothing here talks HTTP; the phone's own state is already ended by
+     * the caller, and this file is the edit that has to reach every other device.
+     */
+    static void writeControl(Context context, String uuid, String action, int minutes) {
+        if (uuid == null || uuid.isEmpty()) return;
+        try {
+            File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+            if (!dir.exists()) dir.mkdirs();
+            JSONObject json = new JSONObject();
+            json.put("action", action);
+            json.put("uuid", uuid);
+            json.put("minutes", minutes);
+            try (FileOutputStream out = new FileOutputStream(new File(dir, "clock_control.json"))) {
+                out.write(json.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            Log.i(LOG_TAG, action + " written for " + uuid);
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "could not write the clock control request", e);
         }
     }
 

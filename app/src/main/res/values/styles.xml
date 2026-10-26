@@ -58,4 +58,21 @@
         <item name="android:colorPrimary">#FF000000</item>
     </style>
 
+
+    <!-- The ringing alarm is a full-screen, no-action-bar surface with its own
+         dark gradient; the activity also asks for show-when-locked and turn-
+         screen-on, so the two paths agree on older and newer Androids. -->
+    <style name="Theme.Termux.JawnAlarm" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/clock_alarm_background</item>
+        <item name="android:colorBackground">@color/clock_alarm_bg_bottom</item>
+        <item name="android:colorPrimary">@color/clock_alarm_bg_bottom</item>
+        <item name="android:colorAccent">@color/clock_alarm_accent</item>
+        <item name="android:statusBarColor">@color/clock_alarm_bg_bottom</item>
+        <item name="android:navigationBarColor">@color/clock_alarm_bg_top</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
 </resources>

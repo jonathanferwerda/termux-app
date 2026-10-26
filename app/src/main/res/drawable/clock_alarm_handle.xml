@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The filled circle under the thumb, holding the JawnOS logo. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <gradient
+        android:centerX="0.5"
+        android:centerY="0.38"
+        android:endColor="@color/clock_alarm_handle_fill"
+        android:gradientRadius="120dp"
+        android:startColor="#FF243B32"
+        android:type="radial" />
+    <stroke
+        android:width="2dp"
+        android:color="@color/clock_alarm_accent" />
+</shape>

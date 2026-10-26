@@ -1,3 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The ringing clock screen: the house's dark green-black, with the
+         JawnOS accent as its only light source. -->
+    <color name="clock_alarm_bg_top">#FF1E1E1E</color>
+    <color name="clock_alarm_bg_bottom">#FF101512</color>
+    <color name="clock_alarm_accent">#FF2F8F6D</color>
+    <color name="clock_alarm_accent_glow">#402F8F6D</color>
+    <color name="clock_alarm_accent_glow_soft">#1A2F8F6D</color>
+    <color name="clock_alarm_handle_fill">#FF1B2A25</color>
+    <color name="clock_alarm_text">#FFF2F7F4</color>
+    <color name="clock_alarm_text_dim">#FFA8BDB4</color>
 </resources>

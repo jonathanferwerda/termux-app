@@ -451,10 +451,26 @@
             android:name=".app.JawnScheduledWakeReceiver"
             android:exported="false" />
 
+        <!-- The ringing alarm's own face: full screen, over the keyguard,
+             woken and kept lit. Not exported - it is reached from the app's
+             own notification and content intents only. -->
+        <activity
+            android:name=".app.JawnClockAlarmActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|uiMode|keyboard|keyboardHidden|navigation"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:label="@string/clock_alarm_default_label"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Termux.JawnAlarm"
+            android:turnScreenOn="true"
+            tools:targetApi="27" />
+
         <!-- The Clock's exact wake and its lock-screen alarm notification.
-             jawn broadcasts to these three actions; the fourth is the
-             AlarmManager wake itself. Exported because jawn's process
-             broadcasts from the terminal side. -->
+             jawn broadcasts to these actions; one is the AlarmManager wake
+             itself. Exported because jawn's process broadcasts from the
+             terminal side. -->
         <receiver
             android:name=".app.JawnClockReceiver"
             android:exported="true">
@@ -466,6 +482,8 @@
                 <action android:name="com.termux.app.JAWN_CLOCK_PREVIEW" />
                 <action android:name="com.termux.app.CLOCK_UPCOMING" />
                 <action android:name="com.termux.app.JAWN_CLOCK_SKIP" />
+                <action android:name="com.termux.app.JAWN_CLOCK_DISMISS" />
+                <action android:name="com.termux.app.JAWN_CLOCK_SNOOZE" />
                 <action android:name="com.termux.app.CLOCK_ALARM" />
             </intent-filter>
         </receiver>

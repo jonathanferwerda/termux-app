@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/alarm_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/clock_alarm_background"
+    android:contentDescription="@string/clock_alarm_screen_description"
+    android:keepScreenOn="true">
+
+    <!-- The empty ring near the top: the drop target that dismisses. -->
+    <View
+        android:id="@+id/alarm_target"
+        android:layout_width="128dp"
+        android:layout_height="128dp"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="72dp"
+        android:alpha="0.8"
+        android:background="@drawable/clock_alarm_target"
+        android:contentDescription="@string/clock_alarm_target_description"
+        android:focusable="true" />
+
+    <!-- Label, time and the gesture hint, in the space between the two circles. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|center_vertical"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingLeft="32dp"
+        android:paddingRight="32dp">
+
+        <TextView
+            android:id="@+id/alarm_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.04"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textColor="@color/clock_alarm_text_dim"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/alarm_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="sans-serif-light"
+            android:textColor="@color/clock_alarm_text"
+            android:textSize="40sp" />
+
+        <TextView
+            android:id="@+id/alarm_app"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/clock_alarm_text_dim"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/alarm_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:lineSpacingExtra="3dp"
+            android:text="@string/clock_alarm_hint"
+            android:textColor="@color/clock_alarm_text_dim"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- The filled circle at the bottom, holding the logo. A tap snoozes; a
+         drag up to the ring dismisses. -->
+    <FrameLayout
+        android:id="@+id/alarm_handle"
+        android:layout_width="176dp"
+        android:layout_height="176dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="32dp"
+        android:background="@drawable/clock_alarm_handle"
+        android:clickable="true"
+        android:contentDescription="@string/clock_alarm_handle_description"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/alarm_logo"
+            android:layout_width="92dp"
+            android:layout_height="92dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/clock_alarm_logo_description"
+            android:scaleType="fitCenter"
+            android:src="@drawable/jawn_logo" />
+    </FrameLayout>
+</FrameLayout>
