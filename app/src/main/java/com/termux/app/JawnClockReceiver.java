@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
  *   com.termux.app.JAWN_CLOCK_RING      an alarm is ringing now (show and sound it)
  *   com.termux.app.JAWN_CLOCK_DISMISSED Dismiss/Snooze (take it down)
  *   com.termux.app.JAWN_CLOCK_TIMER     a timer finished (sound the chime)
+ *   com.termux.app.JAWN_CLOCK_REJECT    the scanned tag was not this alarm's
  *
  * and AlarmManager delivers CLOCK_ALARM five seconds before the named time and
  * CLOCK_UPCOMING half an hour before it. The pre-notice carries a Skip today
@@ -42,6 +43,8 @@ public class JawnClockReceiver extends BroadcastReceiver {
     public static final String ACTION_SKIP = "com.termux.app.JAWN_CLOCK_SKIP";
     public static final String ACTION_DISMISS = "com.termux.app.JAWN_CLOCK_DISMISS";
     public static final String ACTION_SNOOZE = "com.termux.app.JAWN_CLOCK_SNOOZE";
+    /** The Perl side refused a scanned NFC tag: the alarm stays ringing. */
+    public static final String ACTION_REJECT = "com.termux.app.JAWN_CLOCK_REJECT";
     public static final String ACTION_UPCOMING = JawnClockAlarm.ACTION_UPCOMING;
 
     @Override
@@ -62,6 +65,13 @@ public class JawnClockReceiver extends BroadcastReceiver {
             JawnClockNotifier.releaseWakeLock();
             JawnClockAlarm.sync(context);
             JawnClockAlarmActivity.closeIfShowing();
+            return;
+        }
+
+        if (ACTION_REJECT.equals(action)) {
+            // A tag was scanned but it is not the one assigned to this alarm.
+            // Say so on the full-screen face and keep the ring going.
+            JawnClockAlarmActivity.showRejected();
             return;
         }
 
@@ -129,7 +139,12 @@ public class JawnClockReceiver extends BroadcastReceiver {
         String app = intent.getStringExtra("app");
         long at = intent.getLongExtra("at", 0L);
         int snooze = intent.getIntExtra("snooze", 0);
-        if (fromExactAlarm && (label == null || label.isEmpty() || at <= 0L)) {
+        String play = intent.getStringExtra("play");
+        int nfc = intent.hasExtra("nfc") ? intent.getIntExtra("nfc", 0) : -1;
+        String nfcAction = intent.getStringExtra("nfc_action");
+        if (fromExactAlarm) {
+            // The exact AlarmManager wake carries only the basics; the ring's
+            // gates live in the file jawn wrote beside it.
             JSONObject data = JawnClockAlarm.read(context);
             if (data != null) {
                 if (label == null || label.isEmpty()) label = data.optString("label", "");
@@ -137,11 +152,18 @@ public class JawnClockReceiver extends BroadcastReceiver {
                 if (app == null || app.isEmpty()) app = data.optString("app", "");
                 if (at <= 0L) at = data.optLong("at", 0L);
                 if (snooze <= 0) snooze = data.optInt("snooze", 0);
+                if (play == null) play = data.optString("play", "");
+                if (nfc < 0) nfc = data.optInt("nfc", 0);
+                if (nfcAction == null) nfcAction = data.optString("nfc_action", "snooze");
             }
         }
         if (snooze <= 0) snooze = 5;
-        Log.i(LOG_TAG, "clock alarm ringing: " + (label == null ? "" : label));
-        JawnClockNotifier.show(context, label, uuid, app, at, snooze);
+        if (play == null) play = "";
+        if (nfc < 0) nfc = 0;
+        if (nfcAction == null || nfcAction.isEmpty()) nfcAction = "snooze";
+        Log.i(LOG_TAG, "clock alarm ringing: " + (label == null ? "" : label)
+                + (play.isEmpty() && nfc != 1 ? "" : " (play=" + play + ", nfc=" + nfc + ")"));
+        JawnClockNotifier.show(context, label, uuid, app, at, snooze, play, nfc, nfcAction);
     }
 
     /** Sound an alarm or a timer on the alarm stream, at the alarm's own level. */
@@ -193,6 +215,21 @@ public class JawnClockReceiver extends BroadcastReceiver {
      * the caller, and this file is the edit that has to reach every other device.
      */
     static void writeControl(Context context, String uuid, String action, int minutes) {
+        writeControl(context, uuid, action, minutes, null, null);
+    }
+
+    /**
+     * The same request, plus the tag that asked for it. The Perl side checks
+     * that the tag is the one assigned to this alarm and either applies the
+     * action or broadcasts {@link #ACTION_REJECT}.
+     */
+    static void writeControlForNfc(Context context, String uuid, String action, int minutes,
+                                   String nfcUuid, String nfcSerial) {
+        writeControl(context, uuid, action, minutes, nfcUuid, nfcSerial);
+    }
+
+    static void writeControl(Context context, String uuid, String action, int minutes,
+                             String nfcUuid, String nfcSerial) {
         if (uuid == null || uuid.isEmpty()) return;
         try {
             File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
@@ -201,6 +238,8 @@ public class JawnClockReceiver extends BroadcastReceiver {
             json.put("action", action);
             json.put("uuid", uuid);
             json.put("minutes", minutes);
+            if (nfcUuid != null) json.put("nfc_uuid", nfcUuid);
+            if (nfcSerial != null) json.put("nfc_serial", nfcSerial);
             try (FileOutputStream out = new FileOutputStream(new File(dir, "clock_control.json"))) {
                 out.write(json.toString().getBytes(StandardCharsets.UTF_8));
             }

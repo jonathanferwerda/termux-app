@@ -2,6 +2,7 @@ package com.termux.app;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
@@ -33,6 +34,9 @@ public final class JawnClockSound {
     private static PowerManager.WakeLock wakeLock;
     private static String currentPath;
     private static long startedAt;
+    /** The alarm stream's volume before the ring, so stop() can put it back. */
+    private static AudioManager alarmAudio;
+    private static int savedAlarmVolume = -1;
 
     private JawnClockSound() {}
 
@@ -55,6 +59,10 @@ public final class JawnClockSound {
             Log.w(LOG_TAG, "sound missing: " + file.getAbsolutePath());
             return;
         }
+        // A phone's volume keys turn down the alarm stream, and a ring nobody
+        // hears is a missed alarm. Raise it for the ring; the player's own
+        // volume (the alarm's percentage, and the ramp) scales on top.
+        raiseAlarmVolume(context);
         try {
             MediaPlayer mp = new MediaPlayer();
             mp.setAudioAttributes(new AudioAttributes.Builder()
@@ -63,6 +71,7 @@ public final class JawnClockSound {
                     .build());
             mp.setWakeMode(context, PowerManager.PARTIAL_WAKE_LOCK);
             mp.setLooping(loop);
+            mp.setOnCompletionListener(done -> restoreAlarmVolume());
             mp.setDataSource(file.getAbsolutePath());
 
             float target = Math.max(0.02f, Math.min(1f, volumePercent / 100f));
@@ -138,5 +147,34 @@ public final class JawnClockSound {
         }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         wakeLock = null;
+        restoreAlarmVolume();
+    }
+
+    private static void raiseAlarmVolume(Context context) {
+        try {
+            AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return;
+            int current = am.getStreamVolume(AudioManager.STREAM_ALARM);
+            int max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM);
+            if (max <= 0 || current >= max) return;
+            alarmAudio = am;
+            savedAlarmVolume = current;
+            am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0);
+            Log.i(LOG_TAG, "alarm stream " + current + " -> " + max);
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "could not raise the alarm stream", e);
+            alarmAudio = null;
+            savedAlarmVolume = -1;
+        }
+    }
+
+    private static void restoreAlarmVolume() {
+        if (alarmAudio != null && savedAlarmVolume >= 0) {
+            try {
+                alarmAudio.setStreamVolume(AudioManager.STREAM_ALARM, savedAlarmVolume, 0);
+            } catch (Exception ignored) {}
+        }
+        alarmAudio = null;
+        savedAlarmVolume = -1;
     }
 }

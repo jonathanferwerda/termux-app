@@ -67,6 +67,51 @@
             android:text="@string/clock_alarm_hint"
             android:textColor="@color/clock_alarm_text_dim"
             android:textSize="13sp" />
+
+        <!-- The sum an alarm set to "math" must be answered before the
+             gestures will act. Hidden for every other alarm. -->
+        <LinearLayout
+            android:id="@+id/alarm_math_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/alarm_math_problem"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-light"
+                android:textColor="@color/clock_alarm_text"
+                android:textSize="26sp" />
+
+            <EditText
+                android:id="@+id/alarm_math_answer"
+                android:layout_width="150dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:hint="@string/clock_alarm_math_answer"
+                android:imeOptions="actionDone"
+                android:inputType="number"
+                android:maxLength="4"
+                android:textColor="@color/clock_alarm_text"
+                android:textColorHint="@color/clock_alarm_text_dim"
+                android:textSize="22sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/alarm_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:textColor="@color/clock_alarm_text"
+            android:textSize="14sp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- The filled circle at the bottom, holding the logo. A tap snoozes; a

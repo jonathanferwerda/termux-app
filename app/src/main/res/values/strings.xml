@@ -29,6 +29,20 @@
     <string name="clock_alarm_handle_description">Snooze the alarm. Drag the logo to the top circle to dismiss.</string>
     <string name="clock_alarm_target_description">Dismiss. Drop the logo here.</string>
     <string name="clock_alarm_logo_description">JawnOS logo. Tap to snooze, or drag it to the top circle to dismiss.</string>
+    <string name="clock_alarm_math_hint">Solve the problem below to snooze or dismiss</string>
+    <string name="clock_alarm_math_answer">Answer</string>
+    <string name="clock_alarm_math_prompt">%1$d × %2$d − %3$d = ?</string>
+    <string name="clock_alarm_math_correct">Correct - tap the logo to snooze or drag it to dismiss</string>
+    <string name="clock_alarm_math_correct_nfc_snooze">Correct - scan the NFC tag to snooze</string>
+    <string name="clock_alarm_math_correct_nfc_dismiss">Correct - scan the NFC tag to dismiss</string>
+    <string name="clock_alarm_math_wrong">Try again</string>
+    <string name="clock_alarm_nfc_hint">Scan the NFC tag to snooze</string>
+    <string name="clock_alarm_nfc_hint_dismiss">Scan the NFC tag to dismiss</string>
+    <string name="clock_alarm_nfc_checking">Checking tag…</string>
+    <string name="clock_alarm_nfc_rejected">That tag is not the one assigned to this alarm.</string>
+    <string name="clock_alarm_nfc_first">Solve the problem first</string>
+    <string name="clock_alarm_nfc_unavailable">NFC is off - turn it on to snooze or dismiss</string>
+    <string name="clock_alarm_nfc_unreadable">Could not read that tag - try again</string>
 
 
 

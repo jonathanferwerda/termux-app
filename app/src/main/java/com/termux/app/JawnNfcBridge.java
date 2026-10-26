@@ -142,12 +142,17 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
                 if (scanning) activity.runOnUiThread(this::enableReaderMode);
                 return;
             }
-            String payload = readTag(tag);
+            String payload = readTagJson(tag);
             emit("reading", payload == null ? "{}" : payload);
         }).start();
     }
 
-    private String readTag(Tag tag) {
+    /**
+     * The tag's NDEF records as JSON ({@code {serial, records:[...]}}), or null
+     * when it carries none. Shared with the alarm screen, which needs the tag's
+     * own uuid and serial without a WebView.
+     */
+    public static String readTagJson(Tag tag) {
         Ndef ndef = Ndef.get(tag);
         if (ndef == null) return null;
         try {
@@ -190,7 +195,7 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     }
 
     /** One NDEF record, shaped like the Web NFC record the page reads. */
-    private JSONObject recordToJson(NdefRecord r) {
+    private static JSONObject recordToJson(NdefRecord r) {
         try {
             short tnf = r.getTnf();
             byte[] type = r.getType();
@@ -243,7 +248,7 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
         return new NdefMessage(out);
     }
 
-    private String serialOf(Tag tag) {
+    private static String serialOf(Tag tag) {
         byte[] id = tag.getId();
         if (id == null) return "";
         StringBuilder sb = new StringBuilder();

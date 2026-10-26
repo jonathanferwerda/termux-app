@@ -69,7 +69,19 @@ public final class JawnClockNotifier {
 
     public static void show(Context context, String label, String uuid, String app, long at,
                             int snoozeMinutes) {
+        show(context, label, uuid, app, at, snoozeMinutes, "", 0, "snooze");
+    }
+
+    /**
+     * @param play      "" for a normal alarm, "math" for one answered by a sum
+     * @param nfc       1 when the assigned NFC tag is the way through
+     * @param nfcAction "snooze" or "dismiss" for the tag's effect
+     */
+    public static void show(Context context, String label, String uuid, String app, long at,
+                            int snoozeMinutes, String play, int nfc, String nfcAction) {
         if (snoozeMinutes <= 0) snoozeMinutes = DEFAULT_SNOOZE_MINUTES;
+        if (play == null) play = "";
+        if (nfcAction == null || nfcAction.isEmpty()) nfcAction = "snooze";
         String title = (label == null || label.isEmpty())
                 ? context.getString(R.string.clock_alarm_default_label) : label;
         if (at <= 0L) at = System.currentTimeMillis();
@@ -104,6 +116,9 @@ public final class JawnClockNotifier {
         open.putExtra("app", app == null ? "" : app);
         open.putExtra("at", at);
         open.putExtra("snooze", snoozeMinutes);
+        open.putExtra("play", play);
+        open.putExtra("nfc", nfc);
+        open.putExtra("nfc_action", nfcAction);
         PendingIntent content = PendingIntent.getActivity(context, CONTENT_REQUEST, open, flags());
 
         // The drawer's own controls: each ends the ring in the receiver and
@@ -139,14 +154,22 @@ public final class JawnClockNotifier {
                 .setAutoCancel(false)
                 .setContentIntent(content)
                 .setFullScreenIntent(content, true)
-                .setColor(0xFFC94F4F)
-                .addAction(new Notification.Action.Builder(
-                        Icon.createWithResource(context, R.drawable.ic_new_session),
-                        context.getString(R.string.clock_alarm_dismiss), dismissPending).build())
-                .addAction(new Notification.Action.Builder(
-                        Icon.createWithResource(context, R.drawable.ic_new_session),
-                        context.getString(R.string.clock_alarm_snooze, snoozeMinutes),
-                        snoozePending).build());
+                .setColor(0xFFC94F4F);
+        // A sum or a tag is the way through this alarm; a one-tap Dismiss
+        // would walk around it. The notification still opens the activity,
+        // where the puzzle or the tag is enforced.
+        if (nfc == 1 || "math".equals(play)) {
+            Log.i(LOG_TAG, "ring gated by " + ("math".equals(play) ? "math" : "nfc")
+                    + "; notification actions withheld");
+        } else {
+            builder.addAction(new Notification.Action.Builder(
+                            Icon.createWithResource(context, R.drawable.ic_new_session),
+                            context.getString(R.string.clock_alarm_dismiss), dismissPending).build())
+                    .addAction(new Notification.Action.Builder(
+                            Icon.createWithResource(context, R.drawable.ic_new_session),
+                            context.getString(R.string.clock_alarm_snooze, snoozeMinutes),
+                            snoozePending).build());
+        }
         // canUseFullScreenIntent() is API 34 and the app compiles against SDK 30;
         // ask for it reflectively so the same APK still builds and older phones
         // simply skip the check.
