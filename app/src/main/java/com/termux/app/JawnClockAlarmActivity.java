@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.graphics.RectF;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
@@ -248,6 +249,8 @@ public class JawnClockAlarmActivity extends Activity {
      * phone also re-reads its own schedule so a snooze has a wake to land on.
      */
     private void complete(boolean dismissed) {
+        Log.i("JawnClockAlarmActivity", (dismissed ? "dismiss" : "snooze")
+                + " gesture for " + uuid + " (" + snoozeMinutes + " min)");
         JawnClockSound.stop();
         JawnClockNotifier.cancel(this);
         JawnClockNotifier.releaseWakeLock();

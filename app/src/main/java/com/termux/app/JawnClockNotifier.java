@@ -30,6 +30,12 @@ public final class JawnClockNotifier {
     public static final String CHANNEL = "jawn_alarms";
     public static final String UPCOMING_CHANNEL = "jawn_alarm_upcoming";
     private static final int NOTIFICATION_ID = 7301;
+    /** A fresh id per ring: Android only honours a full-screen intent when the
+     *  notification is newly posted, so re-using one id turned a second ring
+     *  into a heads-up. The block is small; cancel() sweeps all of it. */
+    private static final int RING_ID_SPAN = 50;
+    private static int ringId = NOTIFICATION_ID;
+    private static int ringSeq = 0;
     private static final int CONTENT_REQUEST = 7302;
     private static final int DISMISS_REQUEST = 7307;
     private static final int SNOOZE_REQUEST = 7308;
@@ -139,7 +145,13 @@ public final class JawnClockNotifier {
             } catch (Exception ignored) {}
         }
         try {
-            nm.notify(NOTIFICATION_ID, builder.build());
+            // A new id each time, so the full-screen intent fires again on a
+            // second ring instead of silently updating a notification Android
+            // already decided about.
+            nm.cancel(ringId);
+            ringId = NOTIFICATION_ID + (++ringSeq % RING_ID_SPAN);
+            Log.i(LOG_TAG, "ring notification id=" + ringId + " for " + uuid);
+            nm.notify(ringId, builder.build());
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not post alarm notification", e);
         }
@@ -192,7 +204,8 @@ public final class JawnClockNotifier {
 
     public static void cancel(Context context) {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) nm.cancel(NOTIFICATION_ID);
+        if (nm == null) return;
+        for (int id = NOTIFICATION_ID; id < NOTIFICATION_ID + RING_ID_SPAN; id++) nm.cancel(id);
     }
 
     public static void cancelUpcoming(Context context) {

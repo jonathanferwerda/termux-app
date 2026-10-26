@@ -665,3 +665,8 @@ work and a full-width build has crashed it (2026-10-10).
     60s belongs to this wake. This keeps the 45-second scheduled window from
     cutting a pull in half when the peer is slow between batches. The existing
     five-minute cap still bounds a runaway peer.
+57. Each ring posts under a fresh notification id (a small rotating block,
+    swept by `cancel`). Re-using one id made Android treat a second ring as an
+    update and skip the full-screen intent, leaving only a heads-up. The
+    activity and the receiver also log the gesture (`snooze`/`dismiss`) and the
+    written control action, so a device test can be read from `logcat`.
