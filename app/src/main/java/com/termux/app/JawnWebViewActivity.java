@@ -59,6 +59,12 @@ public class JawnWebViewActivity extends Activity {
     private boolean firstRun = false;
     private boolean firstRunRunning = false;
     private String lastSplashStatus;
+    // JawnNetwork is added in onCreate, but only the local JawnOS origin may
+    // use it: onPageStarted removes it for any other page. onLocalPage is the
+    // bridge's own guard (read from the WebView's JS thread).
+    private JawnNetwork network;
+    private boolean networkAttached = false;
+    private volatile boolean onLocalPage = false;
     // one-time move of the paired device id into loopback
     private boolean migrateThenLoopback = false;
     // The page says when a track is playing, so the activity can leave the
@@ -125,6 +131,11 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnAppStorage(this), "JawnAppStorage");
         // the manager's only source of place: a GPS-provider foreground service
         web.addJavascriptInterface(new JawnLocationBridge(this), "JawnLocation");
+        // the Network app: Wi-Fi/SSID/signal, interfaces, VPN and the connect
+        // path. Only the local manager page may use it (see onPageStarted).
+        network = new JawnNetwork(this);
+        web.addJavascriptInterface(network, "JawnNetwork");
+        networkAttached = true;
         // a service the person already turned on resumes with the view
         JawnLocationService.ensureStarted(this);
         // Opening the app is also a chance to re-arm the next clock alarm.
@@ -170,6 +181,38 @@ public class JawnWebViewActivity extends Activity {
         try { houseHost = new URI(url).getHost(); } catch (Exception e) { houseHost = ""; }
         if (houseHost == null) houseHost = "";
         loadWhenReady(url);
+    }
+
+    /** True while the WebView's top-level page is the local JawnOS origin. */
+    boolean isLocalJawnPage() {
+        return onLocalPage;
+    }
+
+    /** Keep the JawnNetwork interface on the local origin only. The activity
+     *  may load the one allowed sponsor link in the WebView; that page (and
+     *  anything else that is not the house) must not keep the bridge. */
+    private void updateNetworkAccess(WebView view, String url) {
+        String host;
+        try {
+            host = url == null ? "" : new URI(url).getHost();
+        } catch (Exception e) {
+            host = "";
+        }
+        if (host == null) host = "";
+        boolean local = isLocalHost(host);
+        onLocalPage = local;
+        if (local == networkAttached) return;
+        if (local) view.addJavascriptInterface(network, "JawnNetwork");
+        else view.removeJavascriptInterface("JawnNetwork");
+        networkAttached = local;
+    }
+
+    private boolean isLocalHost(String host) {
+        if (host == null || host.isEmpty()) return false;
+        if (host.equals("127.0.0.1") || host.equals("localhost")
+                || host.equals("::1") || host.equals("[::1]")) return true;
+        String domain = JawnLauncher.getJawnDomain(this);
+        return !domain.isEmpty() && host.equalsIgnoreCase(domain);
     }
 
     /** First launch on a device with no house: show the splash and provision
@@ -583,6 +626,7 @@ public class JawnWebViewActivity extends Activity {
             // A navigation ends whatever the old page was playing. The new page
             // says playing(true) again when a track actually starts.
             mediaPlaying = false;
+            updateNetworkAccess(view, url);
             super.onPageStarted(view, url, favicon);
         }
 

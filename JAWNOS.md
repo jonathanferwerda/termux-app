@@ -677,3 +677,29 @@ work and a full-width build has crashed it (2026-10-10).
     survived). The receiver calls `JawnClockAlarmActivity.closeIfShowing()` on a
     notification action or a peer dismiss, so the full-screen face does not stay
     over the keyguard after the alarm is answered elsewhere.
+
+## Deltas round 30 (the Network app's native half)
+
+59. `JawnNetwork` (new): `window.JawnNetwork`, registered by
+    `JawnWebViewActivity`. `status()` reports connected/type/ssid/signal(dBm)/ip/
+    vpn/interfaces (`{name,type,ip,up}`); `scan()` lists visible networks
+    (`{ssid,signal,secure}`, strongest first, duplicates collapsed);
+    `vpn()` reports the VPN transport and its interface; `openSettings('wifi'|
+    'vpn')` opens `Settings.Panel.ACTION_WIFI` (API 29+) or the full settings
+    screen.
+60. Connecting is Android's decision. API 29+ hands a password over as a
+    `WifiNetworkSuggestion` (`mode:'suggested'`) — WPA2, WPA3 or Enhanced Open
+    chosen from the scan's capabilities — and falls back to the Wi-Fi panel
+    (`mode:'settings'`) for enterprise networks, Wi-Fi off, or a refused
+    suggestion. Below 29 the panel is the only path. It never reports a
+    connection it did not make; `status()` is the truth. `disconnect()` is
+    honest too: Android 10+ does not let an app drop Wi-Fi, so it returns
+    `ok:false` with that message.
+61. Only the local JawnOS origin may use it. `onPageStarted` adds the JS
+    interface for the house's host (configured domain or loopback) and removes
+    it for any other page (including the one allowed sponsor link); the bridge
+    also checks the same flag on every call. Scan needs `ACCESS_FINE_LOCATION`
+    granted and location services on (API 29+); without them it returns
+    `{error}`. Manifest adds `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` and
+    `CHANGE_NETWORK_STATE` (`ACCESS_NETWORK_STATE` and the location permissions
+    were already there).
