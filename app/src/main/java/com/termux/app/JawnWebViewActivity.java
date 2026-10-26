@@ -131,6 +131,7 @@ public class JawnWebViewActivity extends Activity {
         web.addJavascriptInterface(new JawnAppStorage(this), "JawnAppStorage");
         // the manager's only source of place: a GPS-provider foreground service
         web.addJavascriptInterface(new JawnLocationBridge(this), "JawnLocation");
+        web.addJavascriptInterface(new JawnBrowseBridge(this), "JawnBrowse");
         // the Network app: Wi-Fi/SSID/signal, interfaces, VPN and the connect
         // path. Only the local manager page may use it (see onPageStarted).
         network = new JawnNetwork(this);

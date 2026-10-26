@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The small "Home settings" chip. A pressed state, so a tap on the header
+     reads as a button rather than a label. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#FF2C2C2C" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FF1F1F1F" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</selector>
