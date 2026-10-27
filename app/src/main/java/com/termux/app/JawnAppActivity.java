@@ -93,7 +93,10 @@ public class JawnAppActivity extends Activity {
 
     private static final String CHROME_STYLE =
         "#taskbar,#start_menu,#start_menu_backlog,#clothesline,"
-            + "#background,#everything,#header{display:none!important} body{background:#000}";
+            + "#background,#everything,#header{display:none!important}"
+            + ".top_navbar{display:none!important}"
+            + ".window_contents{height:100%!important}"
+            + " body{background:#000}";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -180,6 +183,9 @@ public class JawnAppActivity extends Activity {
         titleParams.leftMargin = dp(4);
         bar.addView(titleView, titleParams);
 
+        // The app view is the app: its own window's title bar and this native
+        // one both go, and Android's Back gesture/button leaves the app.
+        bar.setVisibility(View.GONE);
         root.addView(bar, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -400,15 +406,31 @@ public class JawnAppActivity extends Activity {
         String js =
             "(function(){"
                 + "var app=" + quotedApp + ";"
-                // Internet is not an appointment window: its own opener builds
-                // the window from /manager/internet and restores the tab that
-                // was last used. The start menu's toggle is not on this page,
-                // so the request is made here instead.
+                // Every manager app has its own opener: the start menu's icon
+                // handler (music opens the player, gallery the gallery, passes
+                // the ticket maker). The start menu is not part of this page,
+                // so its markup is fetched once into a hidden box and the
+                // matching icon is pressed. An app with no icon there (a
+                // person's own app) is an appointment window instead.
                 + "try{"
-                + "if(app==='internet'){"
-                + "  $.ajax({url:'/manager/internet',type:'GET',data:{timestamp:Date.now(),user_agent:navigator.userAgent},success:function(r){windowMaker(r);"
-                + "    setTimeout(function(){try{internetTab(localStorage.getItem('internet_tab')||'web');}catch(e){}},100);}});"
-                + "}else{appointmentGrabber(app, Date.now());}"
+                + "var special={box_office:'ticketmaker',budget:'budget',gallery:'image_toggle',configure:'main_logo'};"
+                + "var go=function(){"
+                + "  var box=document.getElementById('jawnos_hidden_start_menu');"
+                + "  if(!box)return false;"
+                + "  var icon=document.getElementById(special[app]||(app+'_toggle'));"
+                + "  if(!icon)return false;"
+                + "  $(icon).trigger('click');"
+                + "  return true;};"
+                + "if(!go()){"
+                + "  $.getJSON('/manager/start_menu',{menu:'app'},function(d){"
+                + "    if(!d||!d.html){appointmentGrabber(app,Date.now());return;}"
+                + "    var box=document.getElementById('jawnos_hidden_start_menu');"
+                + "    if(!box){box=document.createElement('div');box.id='jawnos_hidden_start_menu';"
+                + "      box.style.display='none';document.body.appendChild(box);}"
+                + "    box.innerHTML=d.html;"
+                + "    if(!go()){appointmentGrabber(app,Date.now());}"
+                + "  }).fail(function(){appointmentGrabber(app,Date.now());});"
+                + "}"
                 + "}catch(e){}"
                 + "var st=document.getElementById('jawnos_single_app_style');"
                 + "if(!st){st=document.createElement('style');"
