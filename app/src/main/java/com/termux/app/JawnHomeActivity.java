@@ -6,6 +6,10 @@ import android.app.PendingIntent;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.appwidget.AppWidgetHost;
+import android.appwidget.AppWidgetHostView;
+import android.appwidget.AppWidgetManager;
+import android.appwidget.AppWidgetProviderInfo;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -15,6 +19,9 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -37,6 +44,7 @@ import android.webkit.CookieManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -51,6 +59,8 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -96,6 +106,8 @@ public class JawnHomeActivity extends Activity {
     private static final int CRASH_LIMIT = 3;
     private static final long HEALTHY_MS = 60L * 1000L;
     private static final long USAGE_REFRESH_MS = 60L * 1000L;
+    private static final long JAWN_APPS_REFRESH_MS = 60L * 1000L;
+    private static final int JAWN_APPS_LIMIT = 16;
 
     private static final int GROUND = 0xFF101010;
     private static final int TEXT = 0xFFF2F2F2;
@@ -132,6 +144,8 @@ public class JawnHomeActivity extends Activity {
     private LinearLayout roleBanner;
     private TextView roleText;
     private TextView roleAction;
+    private LinearLayout jawnosSection;
+    private LinearLayout jawnosRow;
 
     private HomeAdapter adapter;
 
@@ -139,6 +153,17 @@ public class JawnHomeActivity extends Activity {
     private boolean roleBannerUsesRoleManager;
     private boolean usageInFlight;
     private long usageFetchedAt;
+    private boolean jawnAppsInFlight;
+    private static final int WIDGET_HOST_ID = 0x4a57;
+    private static final int REQ_BIND_WIDGET = 7311;
+    private static final String WIDGET_PREFS = "jawn_home_widgets";
+    private static final String WIDGET_KEY = "clockface_id";
+
+    private AppWidgetHost widgetHost;
+    private int clockWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
+
+    private long jawnAppsFetchedAt;
+    private int jawnAppsRetries;
     private boolean packageReceiverRegistered;
 
     private final Runnable clockTick = new Runnable() {
@@ -186,6 +211,10 @@ public class JawnHomeActivity extends Activity {
         appsGrid = (GridView) findViewById(R.id.home_apps);
         search = (EditText) findViewById(R.id.home_search);
         dock = (LinearLayout) findViewById(R.id.home_dock);
+        jawnosSection = (LinearLayout) findViewById(R.id.home_jawnos_section);
+        jawnosRow = (LinearLayout) findViewById(R.id.home_jawnos_row);
+
+        setupPrinterWidget();
 
         findViewById(R.id.home_settings).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -270,6 +299,7 @@ public class JawnHomeActivity extends Activity {
 
         buildDock();
         loadApps();
+        loadJawnApps(false);
         refreshClock();
         refreshUsage(false);
         updateRoleBanner();
@@ -287,6 +317,9 @@ public class JawnHomeActivity extends Activity {
         refreshClock();
         updateRoleBanner();
         refreshUsage(false);
+        // Jawn may have been started (or finished booting) while Home was
+        // behind another app; the throttle keeps this cheap.
+        loadJawnApps(false);
     }
 
     @Override
@@ -298,6 +331,9 @@ public class JawnHomeActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (widgetHost != null) {
+            try { widgetHost.stopListening(); } catch (Throwable ignored) { }
+        }
         sAlive = false;
         ui.removeCallbacksAndMessages(null);
         unregisterPackageReceiver();
@@ -326,6 +362,15 @@ public class JawnHomeActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_ROLE_HOME) updateRoleBanner();
+        if (requestCode == REQ_BIND_WIDGET && resultCode == RESULT_OK) {
+            AppWidgetManager manager = AppWidgetManager.getInstance(this);
+            manager.bindAppWidgetIdIfAllowed(clockWidgetId,
+                new ComponentName(this, JawnPrinterWidget.class));
+            getSharedPreferences(WIDGET_PREFS, MODE_PRIVATE)
+                .edit().putInt(WIDGET_KEY, clockWidgetId).apply();
+            FrameLayout slot = (FrameLayout) findViewById(R.id.home_widget_slot);
+            if (slot != null) showPrinterWidget(slot, manager);
+        }
     }
 
     // ---------------------------------------------------------------- clock
@@ -363,6 +408,330 @@ public class JawnHomeActivity extends Activity {
                 });
             }
         }, "jawn-home-apps").start();
+    }
+
+    // ------------------------------------------------------- printer widget
+
+    /**
+     * The clockface card, hosted here rather than left to the system
+     * launcher: JawnOS Home is a plain activity, and Android widgets only
+     * appear inside an AppWidgetHost. The provider is JawnOS's own, bound
+     * without a picker (the home role holds the bind permission); if the
+     * system insists on consent, its own binder screen is shown once.
+     */
+    private void setupPrinterWidget() {
+        FrameLayout slot = (FrameLayout) findViewById(R.id.home_widget_slot);
+        if (slot == null) return;
+        AppWidgetManager manager = AppWidgetManager.getInstance(this);
+        widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
+        widgetHost.startListening();
+        SharedPreferences prefs = getSharedPreferences(WIDGET_PREFS, MODE_PRIVATE);
+        clockWidgetId = prefs.getInt(WIDGET_KEY, AppWidgetManager.INVALID_APPWIDGET_ID);
+        if (clockWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID
+                || manager.getAppWidgetInfo(clockWidgetId) == null) {
+            clockWidgetId = widgetHost.allocateAppWidgetId();
+            if (!manager.bindAppWidgetIdIfAllowed(clockWidgetId,
+                    new ComponentName(this, JawnPrinterWidget.class))) {
+                try {
+                    Intent bind = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND);
+                    bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, clockWidgetId);
+                    bind.putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER,
+                        new ComponentName(this, JawnPrinterWidget.class));
+                    startActivityForResult(bind, REQ_BIND_WIDGET);
+                } catch (Throwable ignored) {
+                    // no binder screen on this device: no card
+                }
+                return;
+            }
+            prefs.edit().putInt(WIDGET_KEY, clockWidgetId).apply();
+        }
+        showPrinterWidget(slot, manager);
+    }
+
+    private void showPrinterWidget(FrameLayout slot, AppWidgetManager manager) {
+        AppWidgetProviderInfo info = manager.getAppWidgetInfo(clockWidgetId);
+        if (info == null) return;
+        AppWidgetHostView view = widgetHost.createView(this, clockWidgetId, info);
+        view.setAppWidget(clockWidgetId, info);
+        slot.removeAllViews();
+        slot.addView(view, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        slot.setVisibility(View.VISIBLE);
+        Intent update = new Intent(this, JawnPrinterWidget.class);
+        update.setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
+        update.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, new int[] { clockWidgetId });
+        sendBroadcast(update);
+    }
+
+    // -------------------------------------------------------------- JawnOS row
+
+    /**
+     * The JawnOS app row, above the installed-app grid: the manager's own
+     * apps, so Marker, Music, Gallery and the rest are one tap from Home.
+     *
+     * <p>{@code /apps/list} is public and carries only app names, titles and
+     * icon paths, so this works before any session exists. The whole thing is
+     * best-effort: on any failure the section simply stays hidden, and it
+     * never delays or blocks {@link #loadApps()}.
+     */
+    private void loadJawnApps(boolean force) {
+        if (jawnAppsInFlight) return;
+        long now = System.currentTimeMillis();
+        if (!force && now - jawnAppsFetchedAt < JAWN_APPS_REFRESH_MS) return;
+        jawnAppsInFlight = true;
+        jawnAppsFetchedAt = now;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<JawnAppEntry> loaded = fetchJawnApps();
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        jawnAppsInFlight = false;
+                        if (isFinishing() || isDestroyed()) return;
+                        // A failed fetch (the tree still booting, a refused
+                        // connection) used to count as fresh for a minute and
+                        // leave the row hidden. Try once more soon instead.
+                        if ((loaded == null || loaded.isEmpty()) && jawnAppsRetries < 3) {
+                            jawnAppsRetries++;
+                            jawnAppsFetchedAt = 0;
+                            ui.postDelayed(new Runnable() {
+                                @Override
+                                public void run() { loadJawnApps(true); }
+                            }, 3000L);
+                        }
+                        renderJawnApps(loaded);
+                    }
+                });
+            }
+        }, "jawn-home-jawnos-apps").start();
+    }
+
+    /** One JawnOS app: the app id, its title and (when it downloaded) its icon. */
+    private static final class JawnAppEntry {
+        final String app;
+        final String title;
+        final Bitmap icon;
+
+        JawnAppEntry(String app, String title, Bitmap icon) {
+            this.app = app;
+            this.title = title;
+            this.icon = icon;
+        }
+    }
+
+    private List<JawnAppEntry> fetchJawnApps() {
+        List<JawnAppEntry> entries = new ArrayList<>();
+        String base = managerOrigin();
+        if (base.isEmpty()) return entries;
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(base + "/apps/list").openConnection();
+            trustHouse(conn, base);
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(3500);
+            conn.setRequestProperty("Accept", "application/json");
+            // The route is public, but a browser that has not signed in is
+            // still met by the login gate in this build. Pass the manager's
+            // cookie along when the WebView already holds it; with no cookie
+            // the public answer still works.
+            try {
+                String cookie = CookieManager.getInstance().getCookie(base);
+                if (cookie != null && !cookie.isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookie);
+                }
+            } catch (Throwable ignored) {
+                // no cookie store: the public read is still attempted
+            }
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) return entries;
+
+            StringBuilder body = new StringBuilder();
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            try {
+                String line;
+                while ((line = reader.readLine()) != null) body.append(line);
+            } finally {
+                reader.close();
+            }
+
+            JSONArray apps = new JSONObject(body.toString()).optJSONArray("apps");
+            if (apps == null) return entries;
+            for (int i = 0; i < apps.length() && entries.size() < JAWN_APPS_LIMIT; i++) {
+                JSONObject item = apps.optJSONObject(i);
+                if (item == null) continue;
+                String app = item.optString("app", "").trim();
+                if (app.isEmpty()) continue;
+                String title = item.optString("title", "").trim();
+                if (title.isEmpty()) title = app;
+                String iconPath = item.optString("icon", "").trim();
+                Bitmap icon = iconPath.isEmpty() ? null : fetchJawnIcon(base, iconPath);
+                entries.add(new JawnAppEntry(app, title, icon));
+            }
+        } catch (Throwable t) {
+            // Manager down or a bad answer: hide the row rather than show an
+            // error where apps should be.
+            return new ArrayList<>();
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+        return entries;
+    }
+
+    /** The server origin, with the manager path removed. */
+    private String managerOrigin() {
+        String manager = JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this));
+        if (manager.endsWith("/manager")) {
+            manager = manager.substring(0, manager.length() - "/manager".length());
+        }
+        return manager;
+    }
+
+    /**
+     * Trust the house's own certificate for this request only. An absolute
+     * external icon URL is left on the platform's normal TLS (the row only
+     * carries the manager's icon paths in practice).
+     */
+    private void trustHouse(HttpURLConnection conn, String urlText) {
+        if (!(conn instanceof HttpsURLConnection)) return;
+        String host;
+        try {
+            host = new URI(urlText).getHost();
+        } catch (Throwable t) {
+            return;
+        }
+        if (!isHouseHost(host)) return;
+        try {
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, MANAGER_TRUST, new SecureRandom());
+            ((HttpsURLConnection) conn).setSSLSocketFactory(sc.getSocketFactory());
+            ((HttpsURLConnection) conn).setHostnameVerifier((h, session) -> true);
+        } catch (Throwable ignored) {
+            // the platform chain is still the fallback
+        }
+    }
+
+    private boolean isHouseHost(String host) {
+        if (host == null) return false;
+        if (host.equals("127.0.0.1") || host.equals("localhost")) return true;
+        try {
+            String managerHost = new URI(managerOrigin()).getHost();
+            return managerHost != null && managerHost.equals(host);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private Bitmap fetchJawnIcon(String base, String iconPath) {
+        HttpURLConnection conn = null;
+        try {
+            String urlText;
+            if (iconPath.startsWith("http://") || iconPath.startsWith("https://")) {
+                urlText = iconPath;
+            } else {
+                // Icon paths can contain spaces (e.g. "/images/make believe/…");
+                // escape the bytes a URL cannot carry, keeping the separators.
+                urlText = base + (!iconPath.startsWith("/") ? "/" : "") + Uri.encode(Uri.decode(iconPath), "/");
+            }
+            conn = (HttpURLConnection) new URL(urlText).openConnection();
+            trustHouse(conn, urlText);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2500);
+            // An icon route is behind the manager's app gate until a session
+            // exists; carry the WebView's cookie the same way /apps/list does.
+            try {
+                String cookie = CookieManager.getInstance().getCookie(base);
+                if (cookie != null && !cookie.isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookie);
+                }
+            } catch (Throwable ignored) {
+                // no cookie store: the placeholder tile is the fallback
+            }
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) return null;
+            InputStream in = conn.getInputStream();
+            try {
+                return BitmapFactory.decodeStream(in);
+            } finally {
+                try { in.close(); } catch (Throwable ignored) { }
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    private void renderJawnApps(List<JawnAppEntry> apps) {
+        if (jawnosSection == null || jawnosRow == null) return;
+        jawnosRow.removeAllViews();
+        if (apps == null || apps.isEmpty()) {
+            jawnosSection.setVisibility(View.GONE);
+            return;
+        }
+
+        Drawable placeholder = null;
+        try {
+            placeholder = getPackageManager().getApplicationIcon(getPackageName());
+        } catch (Throwable ignored) {
+            // fall through to the generic tile
+        }
+        if (placeholder == null) {
+            placeholder = getResources().getDrawable(android.R.drawable.sym_def_app_icon, getTheme());
+        }
+
+        for (final JawnAppEntry entry : apps) {
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setGravity(Gravity.CENTER_HORIZONTAL);
+            item.setPadding(dp(4), dp(6), dp(4), dp(6));
+            item.setContentDescription(entry.title);
+            int selector = selectableBackground();
+            if (selector != 0) item.setBackgroundResource(selector);
+
+            ImageView icon = new ImageView(this);
+            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            if (entry.icon != null) {
+                icon.setImageDrawable(new BitmapDrawable(getResources(), entry.icon));
+            } else {
+                icon.setImageDrawable(placeholder);
+            }
+            item.addView(icon);
+
+            TextView label = new TextView(this);
+            label.setText(entry.title);
+            label.setTextColor(TEXT);
+            label.setTextSize(11);
+            label.setGravity(Gravity.CENTER);
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(68),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(5);
+            label.setLayoutParams(lp);
+            item.addView(label);
+
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        Intent open = new Intent(JawnHomeActivity.this, JawnAppActivity.class);
+                        open.putExtra(JawnAppActivity.EXTRA_APP, entry.app);
+                        startActivity(open);
+                    } catch (Throwable t) {
+                        Toast.makeText(JawnHomeActivity.this,
+                            "Could not open " + entry.title, Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+
+            jawnosRow.addView(item, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        jawnosSection.setVisibility(View.VISIBLE);
     }
 
     private void applyFilter(String query) {

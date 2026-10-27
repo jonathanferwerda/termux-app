@@ -1,6 +1,7 @@
 package com.termux.app;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.pm.PackageManager;
 
 import androidx.core.content.ContextCompat;
@@ -16,10 +17,18 @@ import android.webkit.JavascriptInterface;
  * GPS-only fix as the same JSON the Perl tree reads.
  */
 public class JawnLocationBridge {
-    private final JawnWebViewActivity activity;
+    private final Activity activity;
+    private final Runnable permissionRequester;
 
     public JawnLocationBridge(JawnWebViewActivity activity) {
+        this(activity, activity::ensureLocationPermission);
+    }
+
+    /** The same bridge for another manager view, which supplies its own way of
+     *  asking for the location permission. */
+    public JawnLocationBridge(Activity activity, Runnable permissionRequester) {
         this.activity = activity;
+        this.permissionRequester = permissionRequester;
     }
 
     /** The latest GPS fix, or "" when there has not been one yet. */
@@ -37,7 +46,7 @@ public class JawnLocationBridge {
     /** Start at the default pace (four minutes). */
     @JavascriptInterface
     public void start() {
-        activity.ensureLocationPermission();
+        permissionRequester.run();
     }
 
     /**
@@ -63,7 +72,7 @@ public class JawnLocationBridge {
         }
         if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
-            activity.ensureLocationPermission();
+            permissionRequester.run();
             return;
         }
         JawnLocationService.start(activity, minTime, minDistance);
@@ -79,7 +88,7 @@ public class JawnLocationBridge {
     public void sample() {
         if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
-            activity.ensureLocationPermission();
+            permissionRequester.run();
             return;
         }
         JawnLocationService.sample(activity);

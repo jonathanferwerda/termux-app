@@ -457,6 +457,22 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".app.JawnAppActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:label="@string/application_name"
+            android:theme="@style/Theme.Termux.JawnDashboard" />
+
+        <receiver android:name=".app.JawnPrinterWidget" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/jawn_printer_info" />
+        </receiver>
+
+        <service android:name=".app.JawnPrinterService" android:exported="false" />
+
         <receiver android:name=".shared.activities.ReportActivity$ReportActivityBroadcastReceiver" android:exported="false" />
 
 

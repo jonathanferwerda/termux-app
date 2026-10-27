@@ -1,6 +1,7 @@
 package com.termux.app;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /**
  * {@code window.JawnNetwork}: the house's view of the device's networking.
@@ -55,12 +57,21 @@ import java.util.Set;
  */
 public class JawnNetwork {
 
-    private final JawnWebViewActivity activity;
+    private final Activity activity;
     private final Context context;
+    private final BooleanSupplier localPage;
 
     public JawnNetwork(JawnWebViewActivity activity) {
+        this(activity, activity::isLocalJawnPage);
+    }
+
+    /** The same bridge for another manager view: {@code localPage} answers the
+     *  only activity-specific question, whether the top-level page is the
+     *  house's own origin. */
+    public JawnNetwork(Activity activity, BooleanSupplier localPage) {
         this.activity = activity;
         this.context = activity.getApplicationContext();
+        this.localPage = localPage;
     }
 
     // ------------------------------------------------------------------
@@ -418,7 +429,7 @@ public class JawnNetwork {
     // ------------------------------------------------------------------
 
     private boolean local() {
-        return activity != null && activity.isLocalJawnPage();
+        return activity != null && localPage != null && localPage.getAsBoolean();
     }
 
     private WifiManager wifi() {
