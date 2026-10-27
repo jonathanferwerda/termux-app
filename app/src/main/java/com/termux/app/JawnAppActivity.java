@@ -101,6 +101,9 @@ public class JawnAppActivity extends Activity {
             // them by it; with the bar gone that padding is the gap at the top.
             + ".window_contents{height:100%!important;padding-top:0!important}"
             + ".window_drawer{top:0!important;height:100%!important}"
+            // the dock is the keyboard here; the pinned window's 99999 would
+            // otherwise draw over it and the field would focus with no keys
+            + "#jawn_soft_keyboard{z-index:100000!important}"
             + " body{background:#000}";
 
     private final Handler ui = new Handler(Looper.getMainLooper());

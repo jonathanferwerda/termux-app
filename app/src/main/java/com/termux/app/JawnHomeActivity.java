@@ -1332,6 +1332,17 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
 
             final JawnHomeApps.AppEntry entry = shownApps.get(position);
             item.setLongClickable(true);
+            // A long-clickable tile consumes a plain tap, so the GridView's
+            // OnItemClickListener never saw one: every installed app was dead.
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!JawnHomeApps.launch(JawnHomeActivity.this, entry)) {
+                        Toast.makeText(JawnHomeActivity.this,
+                            "Could not open " + entry.label, Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
             item.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View v) {
