@@ -84,18 +84,6 @@
 
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/browser_title"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingBottom="2dp"
-        android:textSize="12sp"
-        android:textColor="?android:attr/textColorSecondary" />
-
     <ProgressBar
         android:id="@+id/browser_progress"
         style="?android:attr/progressBarStyleHorizontal"

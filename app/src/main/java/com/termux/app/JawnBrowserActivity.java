@@ -105,7 +105,6 @@ public class JawnBrowserActivity extends Activity {
     private LinearLayout tabStrip;
     private FrameLayout webContainer;
     private EditText urlBar;
-    private TextView titleView;
     private TextView backButton;
     private TextView forwardButton;
     private TextView reloadButton;
@@ -183,7 +182,6 @@ public class JawnBrowserActivity extends Activity {
         tabStrip = (LinearLayout) findViewById(com.termux.R.id.browser_tabs);
         webContainer = (FrameLayout) findViewById(com.termux.R.id.browser_container);
         urlBar = (EditText) findViewById(com.termux.R.id.browser_url);
-        titleView = (TextView) findViewById(com.termux.R.id.browser_title);
         backButton = (TextView) findViewById(com.termux.R.id.browser_back);
         forwardButton = (TextView) findViewById(com.termux.R.id.browser_forward);
         reloadButton = (TextView) findViewById(com.termux.R.id.browser_reload);
@@ -487,9 +485,6 @@ public class JawnBrowserActivity extends Activity {
         if (current == null) return;
         String url = current.web.getUrl();
         if (!urlBar.hasFocus()) urlBar.setText(url == null ? "about:blank" : url);
-        String title = current.title;
-        if (title == null || title.trim().isEmpty()) title = url == null ? "" : url;
-        titleView.setText(title);
 
         boolean canBack = current.web.canGoBack();
         boolean canForward = current.web.canGoForward();
@@ -605,7 +600,6 @@ public class JawnBrowserActivity extends Activity {
         public void onReceivedTitle(WebView view, String title) {
             if (title != null && !title.trim().isEmpty()) tab.title = title;
             updateTabLabel(tab);
-            if (tab == current) titleView.setText(tab.title);
         }
 
         @Override
