@@ -238,6 +238,24 @@
         </receiver>
 
 
+        <!-- The JawnOS keyboard as an Android input method. It is the plain
+             typing surface; the manager's dock keeps the field-aware extras
+             (time chips, units, conversions). Android requires the person to
+             enable it once in Settings; the dashboard's Keyboard card opens
+             that screen. -->
+        <service
+            android:name=".app.JawnImeService"
+            android:label="JawnOS Keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
         <!-- The phone app's caller id: with the Call screening role granted,
              Android hands each incoming call's number to this service (a plain
              phone-state listener no longer gets it on Android 12+), and the

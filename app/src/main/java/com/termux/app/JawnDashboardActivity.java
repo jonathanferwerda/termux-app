@@ -15,6 +15,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -110,6 +111,18 @@ public class JawnDashboardActivity extends Activity {
             () -> startActivity(new Intent(self, JawnLogActivity.class)),
             () -> startActivity(new Intent(self, TermuxActivity.class)),
         }, null);
+
+        // ---- keyboard ----
+        LinearLayout keyboard = card(root, "Keyboard");
+        fullButton(keyboard, "Choose JawnOS keyboard", true, () -> openKeyboardSettings());
+        fullButton(keyboard, "Show the keyboard picker", false, () -> {
+            try {
+                InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showInputMethodPicker();
+            } catch (Throwable t) {
+                toast("No keyboard picker on this device");
+            }
+        });
 
         // ---- bluetooth ----
         LinearLayout ble = card(root, "Bluetooth");
@@ -501,6 +514,16 @@ public class JawnDashboardActivity extends Activity {
             startActivity(i);
         } catch (Throwable t) {
             toast("JawnOS API app is not installed");
+        }
+    }
+
+    /** Open Android's keyboard settings; the person turns JawnOS on there. */
+    private void openKeyboardSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS));
+            toast("Turn on JawnOS Keyboard, then pick it");
+        } catch (Throwable t) {
+            toast("Keyboard settings are unavailable");
         }
     }
 

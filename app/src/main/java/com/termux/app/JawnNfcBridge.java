@@ -148,6 +148,46 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     }
 
     /**
+     * The manager's own tap shape ({@code {message, serial}}) for a native
+     * screen with no WebView - Home. The message is the array the manager's
+     * page would build: text and url records become {@code {text}}, and a JSON
+     * record becomes the object it carries.
+     */
+    public static JSONObject launcherTap(Tag tag) {
+        String raw = readTagJson(tag);
+        if (raw == null) return null;
+        try {
+            JSONObject src = new JSONObject(raw);
+            JSONArray out = new JSONArray();
+            JSONArray records = src.optJSONArray("records");
+            if (records != null) {
+                for (int i = 0; i < records.length(); i++) {
+                    JSONObject r = records.optJSONObject(i);
+                    if (r == null) continue;
+                    String rt = r.optString("recordType", "");
+                    String mt = r.optString("mediaType", "");
+                    String data = r.optString("data", "");
+                    byte[] bytes;
+                    try { bytes = Base64.decode(data, Base64.DEFAULT); } catch (Throwable t) { continue; }
+                    if ("text".equals(rt) || "url".equals(rt)) {
+                        out.put(new JSONObject().put("text", new String(bytes, Charset.forName("UTF-8"))));
+                    }
+                    else if ("application/json".equals(mt)) {
+                        try {
+                            out.put(new JSONObject(new String(bytes, Charset.forName("UTF-8"))));
+                        } catch (Throwable ignored) {
+                            // a malformed JSON record is not a tap
+                        }
+                    }
+                }
+            }
+            return new JSONObject().put("message", out.toString()).put("serial", src.optString("serial", ""));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
      * The tag's NDEF records as JSON ({@code {serial, records:[...]}}), or null
      * when it carries none. Shared with the alarm screen, which needs the tag's
      * own uuid and serial without a WebView.

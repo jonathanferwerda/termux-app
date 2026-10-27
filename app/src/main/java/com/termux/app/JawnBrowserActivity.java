@@ -202,6 +202,7 @@ public class JawnBrowserActivity extends Activity {
             }
         });
         findViewById(com.termux.R.id.browser_go).setOnClickListener(v -> goTyped());
+        findViewById(com.termux.R.id.browser_search_add).setOnClickListener(v -> addToSearch());
         findViewById(com.termux.R.id.browser_tab_add).setOnClickListener(v -> {
             Tab tab = newTab("about:blank");
             urlBar.requestFocus();
@@ -464,6 +465,39 @@ public class JawnBrowserActivity extends Activity {
         } catch (Throwable ignored) {
             toast("No app can open that link.");
         }
+    }
+
+    /**
+     * Add the page on screen to Search's engines. The server looks for the
+     * site's OpenSearch description, then for a search parameter already in
+     * the address, and falls back to /search?q=. The entry is enabled at once
+     * and can be removed from Search's settings panel.
+     */
+    private void addToSearch() {
+        if (current == null) { return; }
+        final String url = current.web.getUrl();
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            toast("Open a website first.");
+            return;
+        }
+        final String pageName = (current.title == null) ? "" : current.title.trim();
+        toast("Adding to Search...");
+        apiPool.execute(() -> {
+            try {
+                Map<String, String> params = new HashMap<>();
+                params.put("url", url);
+                if (!pageName.isEmpty()) { params.put("name", pageName); }
+                String body = http("POST", "/manager/search/engine/probe", params);
+                JSONObject answer = new JSONObject(body);
+                final boolean ok = answer.optInt("ok", 0) == 1;
+                final String label = answer.optString("name", pageName);
+                mainHandler.post(() -> toast(ok
+                    ? ("Added " + label + " to Search")
+                    : "Could not add that site to Search"));
+            } catch (Throwable t) {
+                mainHandler.post(() -> toast("Could not add that site to Search"));
+            }
+        });
     }
 
     private void goBack() {

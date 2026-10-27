@@ -118,6 +118,21 @@
         </HorizontalScrollView>
 
         <TextView
+            android:id="@+id/browser_search_add"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:gravity="center"
+            android:text="+ Search"
+            android:textSize="12sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Add this site to search engines" />
+
+        <TextView
             android:id="@+id/browser_tab_add"
             android:layout_width="44dp"
             android:layout_height="match_parent"

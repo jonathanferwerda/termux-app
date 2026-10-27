@@ -2,6 +2,7 @@ package com.termux.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
@@ -27,6 +28,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -71,7 +73,7 @@ public class JawnAppActivity extends Activity {
     private static final int TEXT = 0xFFF2F2F2;
 
     private static final long POLL_TIMEOUT_MS = 10000L;
-    private static final long POLL_INTERVAL_MS = 500L;
+    private static final long POLL_INTERVAL_MS = 100L;
     /** The app-required page waits for a biometric prompt (and may run a
      *  bounded reload), so it gets a longer window than an ordinary page. */
     private static final long LOGIN_TIMEOUT_MS = 60000L;
@@ -105,6 +107,7 @@ public class JawnAppActivity extends Activity {
 
     private WebView web;
     private TextView titleView;
+    private TextView opening;
     private String appName = "";
     private String houseHost = "";
     private int stage = STAGE_STARTED;
@@ -142,6 +145,13 @@ public class JawnAppActivity extends Activity {
         appName = appName.trim();
         String label = formatAppName(appName);
         setTitle(label);
+        // The Recents card is the app, with its own name and colour, rather
+        // than an unlabelled black rectangle over the Home task.
+        try {
+            setTaskDescription(new ActivityManager.TaskDescription(label, null, GROUND));
+        } catch (Throwable ignored) {
+            // older devices keep the default task description
+        }
 
         try {
             houseHost = new URI(JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this))).getHost();
@@ -244,7 +254,26 @@ public class JawnAppActivity extends Activity {
         root.addView(web, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
 
-        setContentView(root);
+        // A native cover while the manager boots: the app's name, not the
+        // manager's desktop. `JawnAdmin.opened()` lifts it when the app window
+        // is pinned; a safety timer lifts it even if that never arrives.
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(GROUND);
+        frame.addView(root, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        opening = new TextView(this);
+        opening.setText("Opening " + label + "\u2026");
+        opening.setTextColor(TEXT);
+        opening.setTextSize(16);
+        opening.setGravity(Gravity.CENTER);
+        opening.setBackgroundColor(GROUND);
+        frame.addView(opening, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(frame);
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() { hideOpening(); }
+        }, 8000L);
 
         // pauseTimers() is process-wide, not per view: JawnWebViewActivity
         // pauses the timers when it leaves the screen, and a page that loads
@@ -460,6 +489,7 @@ public class JawnAppActivity extends Activity {
                     + "+sel+' .window_contents{height:100%!important;padding-top:0!important}'"
                     + "+sel+' .window_drawer{top:0!important;height:100%!important}';"
                 + "if(w.parentNode&&w.parentNode!==document.body){document.body.appendChild(w);}"
+                + "try{if(window.JawnAdmin&&JawnAdmin.opened){JawnAdmin.opened();}}catch(e){}"
                 + "w.style.setProperty('position','fixed','important');"
                 + "w.style.setProperty('left','0','important');"
                 + "w.style.setProperty('top','0','important');"
@@ -471,8 +501,8 @@ public class JawnAppActivity extends Activity {
                 + "setTimeout(function(){"
                 + "if(hold())return;"
                 + "var tid=setInterval(function(){"
-                + "if(hold()||++tries>=20){clearInterval(tid);}},300);"
-                + "},500);"
+                + "if(hold()||++tries>=20){clearInterval(tid);}},100);"
+                + "},0);"
             + "})();";
         try {
             web.evaluateJavascript(js, null);
@@ -602,6 +632,13 @@ public class JawnAppActivity extends Activity {
         }
     }
 
+    private void hideOpening() {
+        if (opening == null) return;
+        final TextView cover = opening;
+        opening = null;
+        cover.setVisibility(View.GONE);
+    }
+
     /** "marker" -> "Marker"; a stable title from the app name alone. */
     private static String formatAppName(String app) {
         if (app == null || app.isEmpty()) return "JawnOS";
@@ -625,6 +662,14 @@ public class JawnAppActivity extends Activity {
 
     /** window.JawnAdmin - the start menu's admin gear. */
     public class AdminBridge {
+        @android.webkit.JavascriptInterface
+        public void opened() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() { hideOpening(); }
+            });
+        }
+
         @android.webkit.JavascriptInterface
         public void open() {
             runOnUiThread(new Runnable() {
@@ -670,6 +715,17 @@ public class JawnAppActivity extends Activity {
         public void onPageFinished(WebView view, String url) {
             Log.i("JawnApp", "finished " + url);
             if (stage == STAGE_READY || stage == STAGE_GAVE_UP) return;
+            // Hide the manager's desk before the app window exists, so the
+            // person sees the app's own cover rather than a flash of Manager.
+            if (!appName.isEmpty() && isHouse(url)) {
+                try {
+                    view.evaluateJavascript(
+                        "(function(){var s=document.getElementById('jawnos_single_app_shell');"
+                            + "if(!s){s=document.createElement('style');s.id='jawnos_single_app_shell';"
+                            + "(document.head||document.documentElement).appendChild(s);}"
+                            + "s.textContent=" + JSONObject.quote(CHROME_STYLE) + ";})()", null);
+                } catch (Throwable ignored) { }
+            }
             startPolling();
         }
 

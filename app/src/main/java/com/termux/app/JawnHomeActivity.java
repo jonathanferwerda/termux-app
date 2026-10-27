@@ -30,6 +30,8 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.nfc.NfcAdapter;
+import android.nfc.Tag;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -66,9 +68,11 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
@@ -98,7 +102,7 @@ import javax.net.ssl.X509TrustManager;
  * main-thread crash schedules a restart (at most a handful in a minute) instead
  * of leaving a blank task.
  */
-public class JawnHomeActivity extends Activity {
+public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallback {
 
     private static final String TAG = "JawnHome";
 
@@ -166,6 +170,7 @@ public class JawnHomeActivity extends Activity {
     private int themeMuted = DIM;
     private int themeCard = 0xFF1B1B1B;
     private String themeApplied = "";
+    private NfcAdapter nfcAdapter;
     private boolean statusInFlight;
     private static final long STATUS_REFRESH_MS = 10000L;
     private List<JawnAppEntry> lastStartApps;
@@ -325,6 +330,7 @@ public class JawnHomeActivity extends Activity {
     protected void onResume() {
         super.onResume();
         sAlive = true;
+        nfcResume();
         registerPackageReceiver();
         refreshClock();
         updateRoleBanner();
@@ -339,6 +345,7 @@ public class JawnHomeActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        nfcPause();
         ui.removeCallbacks(clockTick);
         ui.removeCallbacks(statusTick);
         unregisterPackageReceiver();
@@ -936,6 +943,9 @@ public class JawnHomeActivity extends Activity {
                     try {
                         Intent open = new Intent(JawnHomeActivity.this, JawnAppActivity.class);
                         open.putExtra(JawnAppActivity.EXTRA_APP, entry.app);
+                        // One task per app: the Recents card then belongs to the
+                        // app, not to Home, and two open apps are two cards.
+                        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
                         startActivity(open);
                     } catch (Throwable t) {
                         Toast.makeText(JawnHomeActivity.this,
@@ -1208,6 +1218,9 @@ public class JawnHomeActivity extends Activity {
                     try {
                         Intent open = new Intent(JawnHomeActivity.this, JawnAppActivity.class);
                         open.putExtra(JawnAppActivity.EXTRA_APP, entry.app);
+                        // One task per app: the Recents card then belongs to the
+                        // app, not to Home, and two open apps are two cards.
+                        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
                         startActivity(open);
                     } catch (Throwable t) {
                         Toast.makeText(JawnHomeActivity.this,
@@ -1431,6 +1444,102 @@ public class JawnHomeActivity extends Activity {
         } catch (Throwable t) {
             Log.w(TAG, "dock launch failed", t);
             Toast.makeText(this, "Could not open that app.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // --------------------------------------------------------------------- nfc
+
+    /**
+     * A tag tapped on Home reaches the same route the manager's Web NFC shim
+     * posts to, so a start/stop/command tag works from the launcher too. The
+     * launcher holds no WebView of its own; the session cookie the manager view
+     * minted is process-wide, so the tap still travels as a signed-in person.
+     */
+    private void nfcResume() {
+        if (nfcAdapter == null) {
+            try { nfcAdapter = NfcAdapter.getDefaultAdapter(this); } catch (Throwable ignored) { }
+        }
+        if (nfcAdapter == null) return;
+        try {
+            Bundle opts = new Bundle();
+            opts.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250);
+            nfcAdapter.enableReaderMode(this, this,
+                NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_NFC_B
+                    | NfcAdapter.FLAG_READER_NFC_F | NfcAdapter.FLAG_READER_NFC_V
+                    | NfcAdapter.FLAG_READER_NFC_BARCODE, opts);
+        } catch (Throwable ignored) {
+            // no NFC radio, or another app holds it
+        }
+    }
+
+    private void nfcPause() {
+        if (nfcAdapter == null) return;
+        try { nfcAdapter.disableReaderMode(this); } catch (Throwable ignored) { }
+    }
+
+    @Override
+    public void onTagDiscovered(Tag tag) {
+        final JSONObject tap = JawnNfcBridge.launcherTap(tag);
+        if (tap == null) return;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                sendNfcTap(tap);
+            }
+        }, "jawn-home-nfc").start();
+    }
+
+    private void sendNfcTap(JSONObject tap) {
+        String base = managerOrigin();
+        String manager = JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this));
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(base + "/manager/nfc/read").openConnection();
+            trustHouse(conn, base);
+            conn.setConnectTimeout(4000);
+            conn.setReadTimeout(8000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+            String cookie = CookieManager.getInstance().getCookie(manager);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            String body = "message=" + URLEncoder.encode(tap.optString("message", ""), "UTF-8")
+                + "&serial=" + URLEncoder.encode(tap.optString("serial", ""), "UTF-8")
+                + "&last_write=0&timestamp=" + System.currentTimeMillis() + "&benign=";
+            OutputStream out = conn.getOutputStream();
+            try { out.write(body.getBytes("UTF-8")); } finally { out.close(); }
+            int code = conn.getResponseCode();
+            InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            StringBuilder answer = new StringBuilder();
+            if (in != null) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+                try {
+                    String line;
+                    while ((line = reader.readLine()) != null) { answer.append(line); }
+                } finally { reader.close(); }
+            }
+            String status = "";
+            try { status = new JSONObject(answer.toString()).optString("status", ""); } catch (Throwable ignored) { }
+            final String show = status.isEmpty() ? ("NFC: no answer (" + code + ")") : ("NFC: " + status);
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(JawnHomeActivity.this, show, Toast.LENGTH_SHORT).show();
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "nfc tap failed", t);
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(JawnHomeActivity.this,
+                        "NFC could not reach the house.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
         }
     }
 
