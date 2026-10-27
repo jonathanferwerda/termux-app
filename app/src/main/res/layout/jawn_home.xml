@@ -3,6 +3,7 @@
      other work in this change; labels here are either replaced at runtime
      (clock/date/dock/usage) or are the small fixed prompts. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/home_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -197,6 +198,7 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/home_jawnos_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:letterSpacing="0.08"
@@ -218,6 +220,60 @@
                 android:orientation="horizontal" />
         </HorizontalScrollView>
     </LinearLayout>
+
+    <!-- Apps the house is running now: the clothesline, refreshed while the
+         home is on screen. It draws its own visibility. -->
+    <LinearLayout
+        android:id="@+id/home_running_section"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="22dp"
+        android:layout_marginEnd="22dp"
+        android:layout_marginBottom="8dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/home_running_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.08"
+            android:text="Running"
+            android:textAllCaps="true"
+            android:textColor="#FF8E8E8E"
+            android:textSize="11sp" />
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/home_running_row"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+    </LinearLayout>
+
+    <!-- The system apps' shelves. Long-press an app and drop it on a chip to
+         move it; the choice is kept on this device. -->
+    <HorizontalScrollView
+        android:id="@+id/home_categories"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="4dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/home_categories_row"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
 
     <FrameLayout
         android:layout_width="match_parent"

@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
@@ -35,12 +36,17 @@ final class JawnHomeApps {
         final String activityName;
         final String label;
         final Drawable icon;
+        /** The shelf the app starts on: Communication, Games, System,
+         *  Accessories or Other. A person can move it by dragging the tile
+         *  onto another shelf; that choice is kept by the home. */
+        final String category;
 
-        AppEntry(String packageName, String activityName, String label, Drawable icon) {
+        AppEntry(String packageName, String activityName, String label, Drawable icon, String category) {
             this.packageName = packageName;
             this.activityName = activityName;
             this.label = label;
             this.icon = icon;
+            this.category = category;
         }
 
         /** Search matches the visible name and the package, so "com.termux" works. */
@@ -50,6 +56,35 @@ final class JawnHomeApps {
             return label.toLowerCase(Locale.getDefault()).contains(lower)
                 || packageName.toLowerCase(Locale.getDefault()).contains(lower);
         }
+    }
+
+    /**
+     * The shelf an app starts on. Android's own category is the best hint:
+     * games, social/news, and the media/productivity group map straight onto
+     * the home's shelves; an unclassified system package is System, and
+     * everything else is Other. The home lets a person overrule this by
+     * dragging the tile onto another shelf.
+     */
+    static String categoryOf(ActivityInfo ai) {
+        int category = ApplicationInfo.CATEGORY_UNDEFINED;
+        int flags = 0;
+        try {
+            if (ai.applicationInfo != null) {
+                category = ai.applicationInfo.category;
+                flags = ai.applicationInfo.flags;
+            }
+        } catch (Throwable ignored) {
+            // older packages: no category, which is Other/System below
+        }
+        if (category == ApplicationInfo.CATEGORY_GAME) return "Games";
+        if (category == ApplicationInfo.CATEGORY_SOCIAL
+                || category == ApplicationInfo.CATEGORY_NEWS) return "Communication";
+        if (category == ApplicationInfo.CATEGORY_AUDIO
+                || category == ApplicationInfo.CATEGORY_VIDEO
+                || category == ApplicationInfo.CATEGORY_IMAGE
+                || category == ApplicationInfo.CATEGORY_PRODUCTIVITY) return "Accessories";
+        if ((flags & ApplicationInfo.FLAG_SYSTEM) != 0) return "System";
+        return "Other";
     }
 
     /**
@@ -94,7 +129,8 @@ final class JawnHomeApps {
                 // the adapter draws a default when this is null
             }
 
-            entries.add(new AppEntry(ai.packageName, ai.name, label.toString().trim(), icon));
+            entries.add(new AppEntry(ai.packageName, ai.name, label.toString().trim(), icon,
+                categoryOf(ai)));
         }
 
         Collections.sort(entries, new Comparator<AppEntry>() {

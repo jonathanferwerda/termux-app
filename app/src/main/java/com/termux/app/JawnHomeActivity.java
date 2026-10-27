@@ -6,6 +6,8 @@ import android.app.PendingIntent;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipDescription;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
@@ -21,8 +23,10 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -36,6 +40,7 @@ import android.text.TextWatcher;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.DragEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -65,6 +70,8 @@ import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 
@@ -107,7 +114,7 @@ public class JawnHomeActivity extends Activity {
     private static final long HEALTHY_MS = 60L * 1000L;
     private static final long USAGE_REFRESH_MS = 60L * 1000L;
     private static final long JAWN_APPS_REFRESH_MS = 60L * 1000L;
-    private static final int JAWN_APPS_LIMIT = 16;
+    private static final int JAWN_APPS_LIMIT = 40;
 
     private static final int GROUND = 0xFF101010;
     private static final int TEXT = 0xFFF2F2F2;
@@ -146,6 +153,25 @@ public class JawnHomeActivity extends Activity {
     private TextView roleAction;
     private LinearLayout jawnosSection;
     private LinearLayout jawnosRow;
+    private LinearLayout runningSection;
+    private LinearLayout runningRow;
+    private TextView runningLabel;
+    private LinearLayout categoriesRow;
+
+    private static final String CATEGORY_PREFS = "jawn_home_categories";
+    private static final String[] CATEGORIES =
+        { "All", "Communication", "Games", "System", "Accessories", "Other" };
+    private String selectedCategory = "All";
+    private final Map<String, TextView> categoryChips = new LinkedHashMap<>();
+
+    private int themeInk = TEXT;
+    private int themeMuted = DIM;
+    private int themeCard = 0xFF1B1B1B;
+    private String themeApplied = "";
+    private boolean statusInFlight;
+    private static final long STATUS_REFRESH_MS = 10000L;
+    private List<JawnAppEntry> lastStartApps;
+    private List<RunningEntry> lastRunning;
 
     private HomeAdapter adapter;
 
@@ -170,6 +196,15 @@ public class JawnHomeActivity extends Activity {
         @Override
         public void run() {
             refreshClock();
+        }
+    };
+
+    /** The clothesline and the theme are live: poll them while Home is on screen. */
+    private final Runnable statusTick = new Runnable() {
+        @Override
+        public void run() {
+            loadHomeStatus();
+            ui.postDelayed(this, STATUS_REFRESH_MS);
         }
     };
 
@@ -213,6 +248,11 @@ public class JawnHomeActivity extends Activity {
         dock = (LinearLayout) findViewById(R.id.home_dock);
         jawnosSection = (LinearLayout) findViewById(R.id.home_jawnos_section);
         jawnosRow = (LinearLayout) findViewById(R.id.home_jawnos_row);
+        runningSection = (LinearLayout) findViewById(R.id.home_running_section);
+        runningRow = (LinearLayout) findViewById(R.id.home_running_row);
+        runningLabel = (TextView) findViewById(R.id.home_running_label);
+        categoriesRow = (LinearLayout) findViewById(R.id.home_categories_row);
+        buildCategories();
 
         setupPrinterWidget();
 
@@ -234,16 +274,6 @@ public class JawnHomeActivity extends Activity {
                     Toast.makeText(JawnHomeActivity.this,
                         "Could not open " + entry.label, Toast.LENGTH_SHORT).show();
                 }
-            }
-        });
-        appsGrid.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-            @Override
-            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                if (position >= 0 && position < shownApps.size()) {
-                    openAppInfo(shownApps.get(position));
-                    return true;
-                }
-                return false;
             }
         });
 
@@ -298,8 +328,10 @@ public class JawnHomeActivity extends Activity {
         });
 
         buildDock();
+        applyThemeDefaults();
         loadApps();
         loadJawnApps(false);
+        loadHomeStatus();
         refreshClock();
         refreshUsage(false);
         updateRoleBanner();
@@ -320,12 +352,16 @@ public class JawnHomeActivity extends Activity {
         // Jawn may have been started (or finished booting) while Home was
         // behind another app; the throttle keeps this cheap.
         loadJawnApps(false);
+        loadHomeStatus();
+        ui.removeCallbacks(statusTick);
+        ui.postDelayed(statusTick, STATUS_REFRESH_MS);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         ui.removeCallbacks(clockTick);
+        ui.removeCallbacks(statusTick);
         unregisterPackageReceiver();
     }
 
@@ -463,6 +499,376 @@ public class JawnHomeActivity extends Activity {
         sendBroadcast(update);
     }
 
+    // ------------------------------------------- clothesline and live theme
+
+    private void applyThemeDefaults() {
+        applyTheme("#101010", "#f2f2f2", "#8e8e8e", true);
+    }
+
+    private int parseColour(String value, int fallback) {
+        if (value == null) return fallback;
+        String s = value.trim();
+        if (s.isEmpty()) return fallback;
+        if (!s.startsWith("#")) s = "#" + s;
+        try {
+            return Color.parseColor(s);
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    private boolean isDarkColour(int colour) {
+        double lum = (0.2126 * Color.red(colour) + 0.7152 * Color.green(colour)
+            + 0.0722 * Color.blue(colour)) / 255.0;
+        return lum < 0.5;
+    }
+
+    private void tintBackground(View view, int colour) {
+        if (view == null) return;
+        Drawable background = view.getBackground();
+        if (background == null) return;
+        background = background.mutate();
+        background.setTint(colour);
+        view.setBackground(background);
+    }
+
+    /**
+     * The launcher wears the manager's theme: the same background, black ink on
+     * a light desk and white/light-grey on a dark one. The manager writes its
+     * colour to a setting; home_status reports it, and the poll re-applies it
+     * when an app changes the theme.
+     */
+    private void applyTheme(String bgHex, String inkHex, String mutedHex, boolean dark) {
+        int bg = parseColour(bgHex, dark ? GROUND : 0xFFF7F7F7);
+        int ink = parseColour(inkHex, dark ? TEXT : 0xFF111111);
+        int muted = parseColour(mutedHex, dark ? DIM : 0xFF4A4A4A);
+        int card = dark ? 0xFF1B1B1B : 0xFFFFFFFF;
+        String key = bgHex + "|" + inkHex + "|" + mutedHex + "|" + dark;
+        if (key.equals(themeApplied)) return;
+        themeApplied = key;
+        themeInk = ink;
+        themeMuted = muted;
+        themeCard = card;
+
+        View root = findViewById(R.id.home_root);
+        if (root != null) root.setBackgroundColor(bg);
+        if (clockView != null) clockView.setTextColor(ink);
+        if (dateView != null) dateView.setTextColor(muted);
+        if (usageValue != null) usageValue.setTextColor(ink);
+        if (search != null) {
+            search.setTextColor(ink);
+            search.setHintTextColor(muted);
+            tintBackground(search, dark ? 0xFF1B1B1B : 0xFFE9E9E9);
+        }
+        TextView jawnosLabel = (TextView) findViewById(R.id.home_jawnos_label);
+        if (jawnosLabel != null) jawnosLabel.setTextColor(muted);
+        if (runningLabel != null) runningLabel.setTextColor(muted);
+        if (roleText != null) roleText.setTextColor(ink);
+        tintBackground(findViewById(R.id.home_usage_card), card);
+        tintBackground(findViewById(R.id.home_dock), dark ? 0xFF101010 : 0xFFE8E8E8);
+        Window window = getWindow();
+        window.setStatusBarColor(bg);
+        window.setNavigationBarColor(bg);
+        // Dark system-bar icons on a light desk, light icons on a dark one, so
+        // the clock and the navigation buttons stay readable either way.
+        View decor = window.getDecorView();
+        int flags = decor.getSystemUiVisibility();
+        if (dark) {
+            flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= 26) flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        } else {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        decor.setSystemUiVisibility(flags);
+
+        if (adapter != null) adapter.notifyDataSetChanged();
+        buildCategories();
+        buildDock();
+        if (lastStartApps != null) renderJawnApps(lastStartApps);
+        if (lastRunning != null) renderRunning(lastRunning);
+    }
+
+    // ------------------------------------------------- the system app shelves
+
+    private void buildCategories() {
+        if (categoriesRow == null) return;
+        categoriesRow.removeAllViews();
+        categoryChips.clear();
+        int stroke = isDarkColour(themeCard) ? 0x33FFFFFF : 0x33000000;
+        for (final String name : CATEGORIES) {
+            TextView chip = new TextView(this);
+            chip.setText(name);
+            chip.setTextSize(12);
+            chip.setSingleLine(true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(12), dp(6), dp(12), dp(6));
+            boolean selected = name.equals(selectedCategory);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setCornerRadius(dp(15));
+            shape.setColor(selected ? themeInk : themeCard);
+            if (!selected) shape.setStroke(dp(1), stroke);
+            chip.setBackground(shape);
+            chip.setTextColor(selected
+                ? (isDarkColour(themeInk) ? 0xFFFFFFFF : 0xFF111111)
+                : themeMuted);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = dp(6);
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    selectedCategory = name;
+                    buildCategories();
+                    applyFilter(search == null ? "" : search.getText().toString());
+                }
+            });
+            chip.setOnDragListener(categoryDragListener(name, chip));
+            categoriesRow.addView(chip);
+            categoryChips.put(name, chip);
+        }
+    }
+
+    /** A shelf accepts a dragged app and remembers which one landed on it. */
+    private View.OnDragListener categoryDragListener(final String name, final TextView chip) {
+        return new View.OnDragListener() {
+            @Override
+            public boolean onDrag(View v, DragEvent event) {
+                switch (event.getAction()) {
+                    case DragEvent.ACTION_DRAG_STARTED:
+                        return event.getClipDescription() != null
+                            && event.getClipDescription().hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN);
+                    case DragEvent.ACTION_DRAG_ENTERED:
+                        chip.setAlpha(0.55f);
+                        return true;
+                    case DragEvent.ACTION_DRAG_EXITED:
+                        chip.setAlpha(1f);
+                        return true;
+                    case DragEvent.ACTION_DROP:
+                        chip.setAlpha(1f);
+                        if (event.getClipData() != null && event.getClipData().getItemCount() > 0) {
+                            CharSequence pkg = event.getClipData().getItemAt(0).getText();
+                            if (pkg != null && pkg.length() > 0) {
+                                assignCategory(pkg.toString(), name);
+                                Toast.makeText(JawnHomeActivity.this,
+                                    "Moved to " + name, Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                        return true;
+                    case DragEvent.ACTION_DRAG_ENDED:
+                        chip.setAlpha(1f);
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+        };
+    }
+
+    private SharedPreferences categoryPrefs() {
+        return getSharedPreferences(CATEGORY_PREFS, MODE_PRIVATE);
+    }
+
+    private String categoryFor(String packageName, String fallback) {
+        String chosen = categoryPrefs().getString(packageName, "");
+        return (chosen == null || chosen.isEmpty()) ? fallback : chosen;
+    }
+
+    private void assignCategory(String packageName, String category) {
+        if (category == null || category.equals("All")) return;
+        categoryPrefs().edit().putString(packageName, category).apply();
+        applyFilter(search == null ? "" : search.getText().toString());
+    }
+
+    // ------------------------------------------- the clothesline (running apps)
+
+    private static final class RunningEntry {
+        final String app;
+        final String title;
+        final String colour;
+        final Bitmap icon;
+
+        RunningEntry(String app, String title, String colour, Bitmap icon) {
+            this.app = app;
+            this.title = title;
+            this.colour = colour;
+            this.icon = icon;
+        }
+    }
+
+    /**
+     * The clothesline and the theme, read straight from the house's database.
+     *
+     * <p>Both are the person's own view of this machine, and the manager's
+     * session cookie is HttpOnly, so an HTTP poll from here cannot see the app
+     * gate. The app shares Termux's UID and the home already reads
+     * {@code database/jawnos.db} for the usage card; the clothesline and the
+     * desk colour live in the same table, so they are read the same way, with
+     * no session and no manager required.
+     */
+    private void loadHomeStatus() {
+        if (statusInFlight) return;
+        statusInFlight = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<RunningEntry> running = new ArrayList<>();
+                String clothesline = "";
+                String background = "";
+                java.io.File dbFile = new java.io.File(
+                    JawnLauncher.getJawnDirPath(JawnHomeActivity.this), "database/jawnos.db");
+                SQLiteDatabase db = null;
+                Cursor cursor = null;
+                try {
+                    if (dbFile.isFile()) {
+                        db = SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(), null,
+                            SQLiteDatabase.OPEN_READONLY);
+                        cursor = db.rawQuery(
+                            "select value from settings where app = '__president'"
+                                + " and setting = 'clothesline' order by server_time desc limit 1", null);
+                        if (cursor.moveToFirst()) clothesline = cursor.getString(0);
+                        cursor.close();
+                        cursor = db.rawQuery(
+                            "select value from settings where app = 'misc'"
+                                + " and setting = 'manager_background_colour'"
+                                + " order by server_time desc limit 1", null);
+                        if (cursor.moveToFirst()) background = cursor.getString(0);
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "home status read failed", t);
+                } finally {
+                    if (cursor != null) { try { cursor.close(); } catch (Throwable ignored) { } }
+                    if (db != null) { try { db.close(); } catch (Throwable ignored) { } }
+                }
+
+                try {
+                    if (clothesline != null && !clothesline.trim().isEmpty()) {
+                        JSONArray arr = new JSONArray(clothesline);
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject item = arr.optJSONObject(i);
+                            if (item == null) continue;
+                            String app = item.optString("app", "").trim();
+                            if (app.isEmpty()) app = item.optString("name", "").trim();
+                            if (app.isEmpty()) continue;
+                            String title = item.optString("formatted_name", app);
+                            running.add(new RunningEntry(app, title,
+                                item.optString("colour", ""), null));
+                        }
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "clothesline parse failed", t);
+                }
+
+                final String bg = background;
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        statusInFlight = false;
+                        if (isFinishing() || isDestroyed()) return;
+                        int colour = parseColour(bg, -1);
+                        if (colour != -1) {
+                            int ink = contrastInk(colour);
+                            applyTheme(String.format("#%06X", colour & 0xFFFFFF),
+                                ink == 0xFFFFFFFF ? "#ffffff" : "#000000",
+                                ink == 0xFFFFFFFF ? "#c9c9c9" : "#3a3a3a",
+                                ink == 0xFFFFFFFF);
+                        }
+                        renderRunning(running);
+                    }
+                });
+            }
+        }, "jawn-home-status").start();
+    }
+
+    /** Perl's subs::contrast_ink, so the two surfaces agree on light vs dark. */
+    private int contrastInk(int colour) {
+        double[] channel = { Color.red(colour) / 255.0, Color.green(colour) / 255.0,
+            Color.blue(colour) / 255.0 };
+        double[] weight = { 0.2126, 0.7152, 0.0722 };
+        double lum = 0;
+        for (int i = 0; i < 3; i++) {
+            double c = channel[i];
+            c = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+            lum += c * weight[i];
+        }
+        return lum < 0.179 ? 0xFFFFFFFF : 0xFF000000;
+    }
+
+    private void renderRunning(List<RunningEntry> items) {
+        if (runningSection == null || runningRow == null) return;
+        lastRunning = items;
+        runningRow.removeAllViews();
+        if (items == null || items.isEmpty()) {
+            runningSection.setVisibility(View.GONE);
+            return;
+        }
+        for (final RunningEntry entry : items) {
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setGravity(Gravity.CENTER_HORIZONTAL);
+            item.setPadding(dp(4), dp(6), dp(4), dp(6));
+            item.setContentDescription(entry.title + ", running");
+            int selector = selectableBackground();
+            if (selector != 0) item.setBackgroundResource(selector);
+
+            if (entry.icon != null) {
+                ImageView icon = new ImageView(this);
+                icon.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+                icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                icon.setImageDrawable(new BitmapDrawable(getResources(), entry.icon));
+                item.addView(icon);
+            } else {
+                // A person's own app has no icon file: its clothesline colour
+                // is the tile, with the app's initial in contrasting ink.
+                TextView tile = new TextView(this);
+                tile.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+                tile.setGravity(Gravity.CENTER);
+                int colour = parseColour(entry.colour, themeCard);
+                GradientDrawable shape = new GradientDrawable();
+                shape.setShape(GradientDrawable.OVAL);
+                shape.setColor(colour);
+                tile.setBackground(shape);
+                tile.setText(entry.title.isEmpty() ? "?"
+                    : entry.title.substring(0, 1).toUpperCase());
+                tile.setTextSize(18);
+                tile.setTextColor(isDarkColour(colour) ? 0xFFFFFFFF : 0xFF111111);
+                item.addView(tile);
+            }
+
+            TextView label = new TextView(this);
+            label.setText(entry.title);
+            label.setTextColor(themeInk);
+            label.setTextSize(11);
+            label.setGravity(Gravity.CENTER);
+            label.setSingleLine(true);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(68),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(5);
+            label.setLayoutParams(lp);
+            item.addView(label);
+
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        Intent open = new Intent(JawnHomeActivity.this, JawnAppActivity.class);
+                        open.putExtra(JawnAppActivity.EXTRA_APP, entry.app);
+                        startActivity(open);
+                    } catch (Throwable t) {
+                        Toast.makeText(JawnHomeActivity.this,
+                            "Could not open " + entry.title, Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+
+            runningRow.addView(item, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        runningSection.setVisibility(View.VISIBLE);
+    }
+
     // -------------------------------------------------------------- JawnOS row
 
     /**
@@ -527,7 +933,7 @@ public class JawnHomeActivity extends Activity {
         if (base.isEmpty()) return entries;
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(base + "/apps/list").openConnection();
+            conn = (HttpURLConnection) new URL(base + "/apps/start").openConnection();
             trustHouse(conn, base);
             conn.setConnectTimeout(2500);
             conn.setReadTimeout(3500);
@@ -666,6 +1072,7 @@ public class JawnHomeActivity extends Activity {
 
     private void renderJawnApps(List<JawnAppEntry> apps) {
         if (jawnosSection == null || jawnosRow == null) return;
+        lastStartApps = apps;
         jawnosRow.removeAllViews();
         if (apps == null || apps.isEmpty()) {
             jawnosSection.setVisibility(View.GONE);
@@ -703,7 +1110,7 @@ public class JawnHomeActivity extends Activity {
 
             TextView label = new TextView(this);
             label.setText(entry.title);
-            label.setTextColor(TEXT);
+            label.setTextColor(themeInk);
             label.setTextSize(11);
             label.setGravity(Gravity.CENTER);
             label.setSingleLine(true);
@@ -738,6 +1145,10 @@ public class JawnHomeActivity extends Activity {
         shownApps.clear();
         String needle = query == null ? "" : query.trim();
         for (JawnHomeApps.AppEntry entry : allApps) {
+            if (!"All".equals(selectedCategory)
+                && !selectedCategory.equals(categoryFor(entry.packageName, entry.category))) {
+                continue;
+            }
             if (entry.matches(needle)) shownApps.add(entry);
         }
         if (adapter != null) adapter.notifyDataSetChanged();
@@ -747,7 +1158,9 @@ public class JawnHomeActivity extends Activity {
         if (appsLoaded && shownApps.isEmpty()) {
             emptyView.setText(allApps.isEmpty()
                 ? "No apps found on this device."
-                : "No apps match that search.");
+                : (!"All".equals(selectedCategory)
+                    ? "No apps on this shelf yet. Long-press an app and drop it here."
+                    : "No apps match that search."));
             emptyView.setVisibility(View.VISIBLE);
         } else {
             emptyView.setVisibility(View.GONE);
@@ -809,7 +1222,7 @@ public class JawnHomeActivity extends Activity {
                 item.addView(icon);
 
                 label = new TextView(JawnHomeActivity.this);
-                label.setTextColor(TEXT);
+                label.setTextColor(themeInk);
                 label.setTextSize(11);
                 label.setGravity(Gravity.CENTER);
                 label.setSingleLine(true);
@@ -823,7 +1236,21 @@ public class JawnHomeActivity extends Activity {
                 item.setTag(new View[] { icon, label });
             }
 
-            JawnHomeApps.AppEntry entry = shownApps.get(position);
+            final JawnHomeApps.AppEntry entry = shownApps.get(position);
+            item.setLongClickable(true);
+            item.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    ClipData data = ClipData.newPlainText("JawnOS app", entry.packageName);
+                    View.DragShadowBuilder shadow = new View.DragShadowBuilder(v);
+                    try {
+                        v.startDragAndDrop(data, shadow, entry.packageName, 0);
+                    } catch (Throwable t) {
+                        return false;
+                    }
+                    return true;
+                }
+            });
             if (entry.icon != null) {
                 icon.setImageDrawable(entry.icon);
             } else {
@@ -889,7 +1316,7 @@ public class JawnHomeActivity extends Activity {
 
         TextView text = new TextView(this);
         text.setText(label);
-        text.setTextColor(DIM);
+        text.setTextColor(themeMuted);
         text.setTextSize(10);
         text.setGravity(Gravity.CENTER);
         text.setSingleLine(true);
