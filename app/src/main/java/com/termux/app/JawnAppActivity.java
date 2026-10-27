@@ -400,7 +400,16 @@ public class JawnAppActivity extends Activity {
         String js =
             "(function(){"
                 + "var app=" + quotedApp + ";"
-                + "try{appointmentGrabber(app, Date.now());}catch(e){}"
+                // Internet is not an appointment window: its own opener builds
+                // the window from /manager/internet and restores the tab that
+                // was last used. The start menu's toggle is not on this page,
+                // so the request is made here instead.
+                + "try{"
+                + "if(app==='internet'){"
+                + "  $.ajax({url:'/manager/internet',type:'GET',data:{timestamp:Date.now(),user_agent:navigator.userAgent},success:function(r){windowMaker(r);"
+                + "    setTimeout(function(){try{internetTab(localStorage.getItem('internet_tab')||'web');}catch(e){}},100);}});"
+                + "}else{appointmentGrabber(app, Date.now());}"
+                + "}catch(e){}"
                 + "var st=document.getElementById('jawnos_single_app_style');"
                 + "if(!st){st=document.createElement('style');"
                 + "st.id='jawnos_single_app_style';"
