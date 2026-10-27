@@ -95,7 +95,10 @@ public class JawnAppActivity extends Activity {
         "#taskbar,#start_menu,#start_menu_backlog,#clothesline,"
             + "#background,#everything,#header{display:none!important}"
             + ".top_navbar{display:none!important}"
-            + ".window_contents{height:100%!important}"
+            // window_maker pads the contents by the navbar height and shortens
+            // them by it; with the bar gone that padding is the gap at the top.
+            + ".window_contents{height:100%!important;padding-top:0!important}"
+            + ".window_drawer{top:0!important;height:100%!important}"
             + " body{background:#000}";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
