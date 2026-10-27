@@ -10,7 +10,6 @@ import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
 
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -40,13 +39,18 @@ final class JawnHomeApps {
          *  Accessories or Other. A person can move it by dragging the tile
          *  onto another shelf; that choice is kept by the home. */
         final String category;
+        /** True for a ROM package. The System shelf is a movable choice, so
+         *  this flag is what the System apps box counts instead. */
+        final boolean system;
 
-        AppEntry(String packageName, String activityName, String label, Drawable icon, String category) {
+        AppEntry(String packageName, String activityName, String label, Drawable icon,
+                 String category, boolean system) {
             this.packageName = packageName;
             this.activityName = activityName;
             this.label = label;
             this.icon = icon;
             this.category = category;
+            this.system = system;
         }
 
         /** Search matches the visible name and the package, so "com.termux" works. */
@@ -129,8 +133,16 @@ final class JawnHomeApps {
                 // the adapter draws a default when this is null
             }
 
+            boolean system = false;
+            try {
+                system = ai.applicationInfo != null
+                    && (ai.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            } catch (Throwable ignored) {
+                // a package whose info cannot be read is treated as ordinary
+            }
+
             entries.add(new AppEntry(ai.packageName, ai.name, label.toString().trim(), icon,
-                categoryOf(ai)));
+                categoryOf(ai), system));
         }
 
         Collections.sort(entries, new Comparator<AppEntry>() {
@@ -199,25 +211,4 @@ final class JawnHomeApps {
         }
     }
 
-    /** Local midnight, in epoch milliseconds, for the usage summary's `from=`. */
-    static long todayStartMs() {
-        Calendar c = Calendar.getInstance();
-        c.set(Calendar.HOUR_OF_DAY, 0);
-        c.set(Calendar.MINUTE, 0);
-        c.set(Calendar.SECOND, 0);
-        c.set(Calendar.MILLISECOND, 0);
-        return c.getTimeInMillis();
-    }
-
-    /** "2 h 14 min today", "9 min today", or the empty-day placeholder. */
-    static String formatDuration(long ms) {
-        if (ms <= 0) return "No app time recorded yet today";
-        long minutes = ms / 60000L;
-        if (minutes < 1) return "Less than a minute today";
-        long hours = minutes / 60L;
-        long mins = minutes % 60L;
-        if (hours == 0) return mins + " min today";
-        if (mins == 0) return hours + (hours == 1 ? " hour today" : " hours today");
-        return hours + " h " + mins + " min today";
-    }
 }

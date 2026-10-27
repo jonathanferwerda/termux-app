@@ -2,6 +2,7 @@ package com.termux.app;
 
 import android.app.Activity;
 import android.app.AlarmManager;
+import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.app.role.RoleManager;
 import android.content.ActivityNotFoundException;
@@ -14,6 +15,7 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -89,10 +91,8 @@ import javax.net.ssl.X509TrustManager;
  * search filters the grid by label or package.
  *
  * <p>Two pieces of data come from outside the activity, both off the main
- * thread: package labels/icons, and today's app time from the manager's
- * {@code /manager/usage/summary}. That call reuses the WebView's manager
- * session cookie, so it never blocks the first frame. When there is no session
- * or the house is down the card says so and stays a placeholder.
+ * thread: package labels/icons, and the clothesline and desk colour from the
+ * house's own database. When the house is down the home still draws its grid.
  *
  * <p>Home is deliberately hard to strand: back does nothing, and an uncaught
  * main-thread crash schedules a restart (at most a handful in a minute) instead
@@ -112,7 +112,6 @@ public class JawnHomeActivity extends Activity {
     private static final long CRASH_WINDOW_MS = 60L * 1000L;
     private static final int CRASH_LIMIT = 3;
     private static final long HEALTHY_MS = 60L * 1000L;
-    private static final long USAGE_REFRESH_MS = 60L * 1000L;
     private static final long JAWN_APPS_REFRESH_MS = 60L * 1000L;
     private static final int JAWN_APPS_LIMIT = 40;
 
@@ -147,7 +146,6 @@ public class JawnHomeActivity extends Activity {
     private TextView emptyView;
     private TextView clockView;
     private TextView dateView;
-    private TextView usageValue;
     private LinearLayout roleBanner;
     private TextView roleText;
     private TextView roleAction;
@@ -177,8 +175,6 @@ public class JawnHomeActivity extends Activity {
 
     private boolean appsLoaded;
     private boolean roleBannerUsesRoleManager;
-    private boolean usageInFlight;
-    private long usageFetchedAt;
     private boolean jawnAppsInFlight;
     private static final int WIDGET_HOST_ID = 0x4a57;
     private static final int REQ_BIND_WIDGET = 7311;
@@ -238,7 +234,6 @@ public class JawnHomeActivity extends Activity {
 
         clockView = (TextView) findViewById(R.id.home_clock);
         dateView = (TextView) findViewById(R.id.home_date);
-        usageValue = (TextView) findViewById(R.id.home_usage_value);
         roleBanner = (LinearLayout) findViewById(R.id.home_role_banner);
         roleText = (TextView) findViewById(R.id.home_role_text);
         roleAction = (TextView) findViewById(R.id.home_role_action);
@@ -299,20 +294,6 @@ public class JawnHomeActivity extends Activity {
         // The search field must not steal focus (and the keyboard) on launch.
         search.clearFocus();
 
-        View usageCard = findViewById(R.id.home_usage_card);
-        usageCard.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                refreshUsage(true);
-            }
-        });
-        findViewById(R.id.home_usage_refresh).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                refreshUsage(true);
-            }
-        });
-
         roleAction.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -333,7 +314,6 @@ public class JawnHomeActivity extends Activity {
         loadJawnApps(false);
         loadHomeStatus();
         refreshClock();
-        refreshUsage(false);
         updateRoleBanner();
 
         // A run that survives this long is healthy; let the next crash be treated
@@ -348,7 +328,6 @@ public class JawnHomeActivity extends Activity {
         registerPackageReceiver();
         refreshClock();
         updateRoleBanner();
-        refreshUsage(false);
         // Jawn may have been started (or finished booting) while Home was
         // behind another app; the throttle keeps this cheap.
         loadJawnApps(false);
@@ -381,7 +360,6 @@ public class JawnHomeActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         updateRoleBanner();
-        refreshUsage(false);
     }
 
     /**
@@ -458,6 +436,13 @@ public class JawnHomeActivity extends Activity {
     private void setupPrinterWidget() {
         FrameLayout slot = (FrameLayout) findViewById(R.id.home_widget_slot);
         if (slot == null) return;
+        // The card is a tablet's luxury: on a phone the header clock already
+        // tells the time, and the 210dp card left the app grid one icon high.
+        // The tablet keeps the card exactly as it was.
+        if (getResources().getConfiguration().smallestScreenWidthDp < 600) {
+            slot.setVisibility(View.GONE);
+            return;
+        }
         AppWidgetManager manager = AppWidgetManager.getInstance(this);
         widgetHost = new AppWidgetHost(this, WIDGET_HOST_ID);
         widgetHost.startListening();
@@ -554,7 +539,6 @@ public class JawnHomeActivity extends Activity {
         if (root != null) root.setBackgroundColor(bg);
         if (clockView != null) clockView.setTextColor(ink);
         if (dateView != null) dateView.setTextColor(muted);
-        if (usageValue != null) usageValue.setTextColor(ink);
         if (search != null) {
             search.setTextColor(ink);
             search.setHintTextColor(muted);
@@ -564,7 +548,6 @@ public class JawnHomeActivity extends Activity {
         if (jawnosLabel != null) jawnosLabel.setTextColor(muted);
         if (runningLabel != null) runningLabel.setTextColor(muted);
         if (roleText != null) roleText.setTextColor(ink);
-        tintBackground(findViewById(R.id.home_usage_card), card);
         tintBackground(findViewById(R.id.home_dock), dark ? 0xFF101010 : 0xFFE8E8E8);
         Window window = getWindow();
         window.setStatusBarColor(bg);
@@ -619,6 +602,13 @@ public class JawnHomeActivity extends Activity {
             chip.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    // The System shelf is a person's own grouping, so its chip
+                    // would otherwise filter on a choice rather than on what IS
+                    // a system app. It opens the box of every ROM app instead.
+                    if ("System".equals(name)) {
+                        showSystemAppsDialog();
+                        return;
+                    }
                     selectedCategory = name;
                     buildCategories();
                     applyFilter(search == null ? "" : search.getText().toString());
@@ -666,6 +656,98 @@ public class JawnHomeActivity extends Activity {
         };
     }
 
+    /**
+     * The System apps box. The System chip used to filter the grid by a shelf a
+     * person may have emptied by moving every tile elsewhere, which read as "no
+     * apps". The box lists every ROM package with a launcher icon, whatever
+     * shelf it starts on.
+     */
+    private void showSystemAppsDialog() {
+        final List<JawnHomeApps.AppEntry> system = new ArrayList<>();
+        for (JawnHomeApps.AppEntry entry : allApps) {
+            if (entry.system) system.add(entry);
+        }
+        if (system.isEmpty()) {
+            Toast.makeText(this, "No system apps on this device.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final SystemAppAdapter adapter = new SystemAppAdapter(system);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("System apps")
+            .setAdapter(adapter, new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface d, int which) {
+                    JawnHomeApps.AppEntry entry = system.get(which);
+                    if (!JawnHomeApps.launch(JawnHomeActivity.this, entry)) {
+                        Toast.makeText(JawnHomeActivity.this,
+                            "Could not open " + entry.label, Toast.LENGTH_SHORT).show();
+                    }
+                    d.dismiss();
+                }
+            })
+            .setNegativeButton("Close", null)
+            .create();
+        dialog.show();
+    }
+
+    /** One row in the System apps box: the app's icon and its name. */
+    private final class SystemAppAdapter extends BaseAdapter {
+        private final List<JawnHomeApps.AppEntry> entries;
+
+        SystemAppAdapter(List<JawnHomeApps.AppEntry> entries) {
+            this.entries = entries;
+        }
+
+        @Override
+        public int getCount() { return entries.size(); }
+
+        @Override
+        public Object getItem(int position) { return entries.get(position); }
+
+        @Override
+        public long getItemId(int position) { return entries.get(position).packageName.hashCode(); }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            LinearLayout row;
+            ImageView icon;
+            TextView label;
+            if (convertView instanceof LinearLayout && convertView.getTag() instanceof View[]) {
+                row = (LinearLayout) convertView;
+                View[] parts = (View[]) convertView.getTag();
+                icon = (ImageView) parts[0];
+                label = (TextView) parts[1];
+            } else {
+                row = new LinearLayout(JawnHomeActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(20), dp(9), dp(20), dp(9));
+
+                icon = new ImageView(JawnHomeActivity.this);
+                icon.setLayoutParams(new LinearLayout.LayoutParams(dp(40), dp(40)));
+                icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                row.addView(icon);
+
+                label = new TextView(JawnHomeActivity.this);
+                label.setTextColor(themeInk);
+                label.setTextSize(16);
+                label.setSingleLine(true);
+                label.setEllipsize(TextUtils.TruncateAt.END);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+                lp.leftMargin = dp(16);
+                row.addView(label, lp);
+
+                row.setTag(new View[] { icon, label });
+            }
+            JawnHomeApps.AppEntry entry = entries.get(position);
+            if (entry.icon != null) icon.setImageDrawable(entry.icon);
+            else icon.setImageResource(android.R.drawable.sym_def_app_icon);
+            label.setText(entry.label);
+            return row;
+        }
+    }
+
     private SharedPreferences categoryPrefs() {
         return getSharedPreferences(CATEGORY_PREFS, MODE_PRIVATE);
     }
@@ -702,10 +784,9 @@ public class JawnHomeActivity extends Activity {
      *
      * <p>Both are the person's own view of this machine, and the manager's
      * session cookie is HttpOnly, so an HTTP poll from here cannot see the app
-     * gate. The app shares Termux's UID and the home already reads
-     * {@code database/jawnos.db} for the usage card; the clothesline and the
-     * desk colour live in the same table, so they are read the same way, with
-     * no session and no manager required.
+     * gate. The app shares Termux's UID, so the clothesline and the desk colour
+     * are read straight from the house's settings table, with no session and no
+     * manager required.
      */
     private void loadHomeStatus() {
         if (statusInFlight) return;
@@ -1350,87 +1431,6 @@ public class JawnHomeActivity extends Activity {
         } catch (Throwable t) {
             Log.w(TAG, "dock launch failed", t);
             Toast.makeText(this, "Could not open that app.", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    // ---------------------------------------------------------------- usage
-
-    /**
-     * Today's time, from the manager's usage summary. Site time is the
-     *  only kind Android can record today: the browser reports it. App time
-     *  (UsageStatsManager) is the separate permission path in the contract.
-     *
-     * <p>The request rides the app's own manager session (the CookieManager
-     * cookie the web view already holds), so no new credential is minted. It is
-     * a background GET with short timeouts and never touches the UI thread.
-     *
-     * <p>Local UsageStatsManager is the next step: granting PACKAGE_USAGE_STATS
-     * from Settings -> Special access would let this card work offline and
-     * without the house, but that is a separate permission path and out of
-     * scope for this slice (docs/internet-contract.md section 6).
-     */
-    private void refreshUsage(boolean force) {
-        if (usageInFlight) return;
-        long now = System.currentTimeMillis();
-        if (!force && now - usageFetchedAt < USAGE_REFRESH_MS) return;
-
-        usageInFlight = true;
-        usageFetchedAt = now;
-        usageValue.setText("Checking...");
-
-        final long from = JawnHomeApps.todayStartMs();
-        final long to = now;
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final long result = fetchTodayMs(from, to);
-                ui.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        usageInFlight = false;
-                        usageFetchedAt = System.currentTimeMillis();
-                        if (isFinishing() || isDestroyed()) return;
-                        if (result < 0) {
-                            usageValue.setText("Time is unavailable right now.");
-                        } else {
-                            usageValue.setText(JawnHomeApps.formatDuration(result));
-                        }
-                    }
-                });
-            }
-        }, "jawn-home-usage").start();
-    }
-
-    /**
-     * Today's site time, read straight from the house's own database.
-     *
-     * <p>The app and Termux share a UID, so the home screen can read
-     * {@code database/jawnos.db} without a session or the manager running. That
-     * matters: the manager session cookie is HttpOnly, so an ordinary HTTP
-     * request from this activity cannot see it. App time (UsageStatsManager) is
-     * the separate permission path in the contract.
-     */
-    private long fetchTodayMs(long from, long to) {
-        java.io.File dbFile = new java.io.File(JawnLauncher.getJawnDirPath(this), "database/jawnos.db");
-        if (!dbFile.isFile()) return -1;
-        SQLiteDatabase db = null;
-        Cursor cursor = null;
-        try {
-            db = SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
-            cursor = db.rawQuery(
-                "select coalesce(sum(max(0, cast(ended_at as integer) - cast(started_at as integer)"
-                    + " - cast(coalesce(nullif(idle_ms, ''), '0') as integer))), 0) as total"
-                    + " from usage_sessions where kind = 'site'"
-                    + " and cast(ended_at as integer) >= ? and cast(started_at as integer) <= ?",
-                new String[] { String.valueOf(from), String.valueOf(to) });
-            return cursor.moveToFirst() ? cursor.getLong(0) : 0;
-        } catch (Throwable t) {
-            Log.w(TAG, "usage read failed", t);
-            return -1;
-        } finally {
-            if (cursor != null) { try { cursor.close(); } catch (Throwable ignored) { } }
-            if (db != null) { try { db.close(); } catch (Throwable ignored) { } }
         }
     }
 

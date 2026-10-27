@@ -93,7 +93,7 @@ public class JawnAppActivity extends Activity {
 
     private static final String CHROME_STYLE =
         "#taskbar,#start_menu,#start_menu_backlog,#clothesline,"
-            + "#background,#everything,#header{display:none!important}"
+            + "#background,#everything,#header,#pseudonym_home{display:none!important}"
             + ".top_navbar{display:none!important}"
             // window_maker pads the contents by the navbar height and shortens
             // them by it; with the bar gone that padding is the gap at the top.
@@ -416,7 +416,7 @@ public class JawnAppActivity extends Activity {
                 // matching icon is pressed. An app with no icon there (a
                 // person's own app) is an appointment window instead.
                 + "try{"
-                + "var special={box_office:'ticketmaker',budget:'budget',gallery:'image_toggle',configure:'main_logo'};"
+                + "var special={box_office:'ticketmaker',budget:'budget',gallery:'image_toggle',configure:'main_logo',search:'search_app_toggle'};"
                 + "var go=function(){"
                 + "  var box=document.getElementById('jawnos_hidden_start_menu');"
                 + "  if(!box)return false;"
@@ -445,7 +445,20 @@ public class JawnAppActivity extends Activity {
                 + "for(var i=0;i<all.length;i++){"
                 + "if(all[i].getAttribute('app')===app){w=all[i];break;}}"
                 + "if(!w)return false;"
-                + "st.textContent=" + JSONObject.quote(CHROME_STYLE) + ";"
+                // The manager lays a phone window out at 71-80% and lifts it below
+                // the reserved line; its maximizer can run again after this
+                // script (a resize, a second window), and an inline pin loses
+                // that race. A rule with !important wins every later inline
+                // style, so the one window stays the whole screen.
+                + "var sel='.wind[app='+JSON.stringify(app)+']';"
+                + "st.textContent=" + JSONObject.quote(CHROME_STYLE)
+                    + "+sel+'{position:fixed!important;left:0!important;top:0!important;"
+                    + "width:100%!important;height:100%!important;max-width:100%!important;"
+                    + "max-height:100%!important;margin:0!important;z-index:99999!important;"
+                    + "display:block!important;border-radius:0!important;box-shadow:none!important}'"
+                    + "+sel+'::after{display:none!important}'"
+                    + "+sel+' .window_contents{height:100%!important;padding-top:0!important}'"
+                    + "+sel+' .window_drawer{top:0!important;height:100%!important}';"
                 + "if(w.parentNode&&w.parentNode!==document.body){document.body.appendChild(w);}"
                 + "w.style.setProperty('position','fixed','important');"
                 + "w.style.setProperty('left','0','important');"
@@ -519,6 +532,36 @@ public class JawnAppActivity extends Activity {
             boolean ok = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
             if (pendingLocationStart && ok) JawnLocationService.start(this, 0, -1);
             pendingLocationStart = false;
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (web == null) {
+            super.onBackPressed();
+            return;
+        }
+        // Let the app walk its own history first (a Gallery photo, then its
+        // album, then the albums page), then the WebView's history, and only
+        // then leave the app.
+        final String quotedApp = JSONObject.quote(appName);
+        try {
+            web.evaluateJavascript(
+                "(function(){try{return typeof jawnosAppBack==='function'"
+                    + "?!!jawnosAppBack(" + quotedApp + "):false;}catch(e){return false;}})()",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String value) {
+                        if ("true".equals(value)) return;
+                        if (web != null && web.canGoBack()) {
+                            web.goBack();
+                            return;
+                        }
+                        finish();
+                    }
+                });
+        } catch (Throwable t) {
+            finish();
         }
     }
 

@@ -124,57 +124,6 @@
             android:textSize="12sp" />
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/home_usage_card"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="22dp"
-        android:layout_marginEnd="22dp"
-        android:layout_marginBottom="10dp"
-        android:background="@drawable/jawn_home_card"
-        android:clickable="true"
-        android:focusable="true"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:padding="16dp">
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/home_usage_title"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:letterSpacing="0.08"
-                android:text="Today"
-                android:textAllCaps="true"
-                android:textColor="#FF8E8E8E"
-                android:textSize="11sp" />
-
-            <TextView
-                android:id="@+id/home_usage_value"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="Checking..."
-                android:textColor="#FFF2F2F2"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/home_usage_refresh"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="Refresh"
-            android:textColor="#FF8E8E8E"
-            android:textSize="11sp" />
-    </LinearLayout>
-
     <!-- The printer card: a real AppWidgetHost slot, so the clockface the
          manager's own JavaScript draws lives on the home screen. It stays
          gone until the host has bound the JawnOS provider. -->
