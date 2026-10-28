@@ -207,8 +207,9 @@ public class JawnAppActivity extends Activity {
         titleParams.leftMargin = dp(4);
         bar.addView(titleView, titleParams);
 
-        // The app view is the app: its own window's title bar and this native
-        // one both go, and Android's Back gesture/button leaves the app.
+        // This native bar goes: the window keeps its own title bar (the app's
+        // icon and name, kept by CHROME_STYLE), and Android's Back gesture or
+        // button leaves the app.
         bar.setVisibility(View.GONE);
         root.addView(bar, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
