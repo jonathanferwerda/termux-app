@@ -63,6 +63,8 @@ import java.net.URI;
 public class JawnAppActivity extends Activity {
 
     public static final String EXTRA_APP = "app";
+    /** Words the Home search hands to the manager Search app. */
+    public static final String EXTRA_QUERY = "query";
 
     private static final int STAGE_STARTED = 0;
     private static final int STAGE_READY = 1;
@@ -112,6 +114,7 @@ public class JawnAppActivity extends Activity {
     private TextView titleView;
     private TextView opening;
     private String appName = "";
+    private String query = "";
     private String houseHost = "";
     private int stage = STAGE_STARTED;
     private boolean ticketTried;
@@ -146,6 +149,9 @@ public class JawnAppActivity extends Activity {
         appName = intent == null ? "" : intent.getStringExtra(EXTRA_APP);
         if (appName == null) appName = "";
         appName = appName.trim();
+        query = intent == null ? "" : intent.getStringExtra(EXTRA_QUERY);
+        if (query == null) query = "";
+        query = query.trim();
         String label = formatAppName(appName);
         setTitle(label);
         // The Recents card is the app, with its own name and colour, rather
@@ -669,7 +675,19 @@ public class JawnAppActivity extends Activity {
         public void opened() {
             runOnUiThread(new Runnable() {
                 @Override
-                public void run() { hideOpening(); }
+                public void run() {
+                    hideOpening();
+                    // Home's search hand-off: the Search app is open now, so
+                    // put the words in its field and let its own input handler
+                    // run the query (its Apps tab finds the house's apps and
+                    // appointments, not just the installed packages).
+                    if (query.length() > 0 && "search".equals(appName)) {
+                        runJs("(function(){var i=document.getElementById('search_app_input');"
+                            + "if(!i){return;}i.value=" + JSONObject.quote(query) + ";"
+                            + "i.dispatchEvent(new Event('input',{bubbles:true}));"
+                            + "try{i.focus();}catch(e){}})()");
+                    }
+                }
             });
         }
 

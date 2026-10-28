@@ -467,7 +467,8 @@
             android:label="@string/application_name"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
-            android:theme="@style/Theme.Termux.JawnDashboard">
+            android:theme="@style/Theme.Termux.JawnDashboard"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />

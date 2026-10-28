@@ -292,7 +292,9 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         search.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView v, int actionId, android.view.KeyEvent event) {
+                String query = v == null || v.getText() == null ? "" : v.getText().toString().trim();
                 hideKeyboard();
+                if (query.length() > 0) { openJawnSearch(query); }
                 return true;
             }
         });
@@ -330,6 +332,11 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     protected void onResume() {
         super.onResume();
         sAlive = true;
+        // Coming back from Recents or another app restores the search field's
+        // focus and with it the keyboard. Home is a launcher: keep both down
+        // until the person taps the field themselves.
+        if (search != null) { search.clearFocus(); }
+        hideKeyboard();
         nfcResume();
         registerPackageReceiver();
         refreshClock();
@@ -1254,7 +1261,9 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 ? "No apps found on this device."
                 : (!"All".equals(selectedCategory)
                     ? "No apps on this shelf yet. Long-press an app and drop it here."
-                    : "No apps match that search."));
+                    : (needle.length() > 0
+                        ? "No system apps match. Press Enter to search JawnOS."
+                        : "No apps match that search.")));
             emptyView.setVisibility(View.VISIBLE);
         } else {
             emptyView.setVisibility(View.GONE);
@@ -1727,6 +1736,21 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             unregisterReceiver(packageChanges);
         } catch (Throwable ignored) {
             // already gone
+        }
+    }
+
+    /** Hand the words to the manager's Search app: its Apps tab finds the
+     *  house's apps and appointments, which the installed-package grid cannot. */
+    private void openJawnSearch(String query) {
+        try {
+            Intent open = new Intent(this, JawnAppActivity.class);
+            open.putExtra(JawnAppActivity.EXTRA_APP, "search");
+            open.putExtra(JawnAppActivity.EXTRA_QUERY, query);
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            startActivity(open);
+        } catch (Throwable t) {
+            Log.w(TAG, "search app failed", t);
+            Toast.makeText(this, "Could not open Search", Toast.LENGTH_SHORT).show();
         }
     }
 

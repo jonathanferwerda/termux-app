@@ -27,12 +27,14 @@ import android.widget.TextView;
  */
 public class JawnImeService extends InputMethodService {
 
-    private static final int GROUND = 0xFF101010;
-    private static final int KEY = 0xFF1B1B1B;
-    private static final int SPECIAL = 0xFF2C2C34;
+    // The manager's dock, not the old black IME: a light panel, white keys
+    // with a soft edge, grey specials and the same yellow return/shift accent.
+    private static final int GROUND = 0xFFF2F3F5;
+    private static final int KEY = 0xFFFFFFFF;
+    private static final int SPECIAL = 0xFFE4E7EB;
     private static final int ACCENT = 0xFFE8C547;
-    private static final int INK = 0xFFF2F2F2;
-    private static final int MUTED = 0xFFB8B8C0;
+    private static final int INK = 0xFF161616;
+    private static final int MUTED = 0xFF5A5A5A;
 
     private static final String[] LETTER_ROWS = { "qwertyuiop", "asdfghjkl" };
     private static final String LETTER_LAST = "zxcvbnm";
@@ -139,6 +141,7 @@ public class JawnImeService extends InputMethodService {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(colour);
         bg.setCornerRadius(dp(8));
+        bg.setStroke(dp(1), 0xFFD5D9DE);
         v.setBackground(bg);
         v.setPadding(0, dp(11), 0, dp(11));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
