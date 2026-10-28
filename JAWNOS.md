@@ -751,11 +751,15 @@ work and a full-width build has crashed it (2026-10-10).
     page instead. Only the manager host, `127.0.0.1` and `localhost` may load;
     its self-signed certificate is accepted for those hosts only. A load error
     or a four-second timeout falls back to `assets/ime/keyboard.html`, so a
-    keyboard is still there when the house is unreachable.
+    keyboard is still there when the house is unreachable. That fallback is
+    retried on the next field (unless there was no session at all), so a load
+    that raced the manager's own restart does not leave the plain keyboard in
+    place.
 68. `soft_keyboard.js` reports the dock's height through `JawnIme.resize()`; the
     service sizes the input-method window to it plus the system navigation bar
     (the conversion row and the layout chooser grow the window, up to 75% of
-    the screen height) and tells the page the nav strip with `imeInset()`, so
-    the last key row is never under the gesture bar. The page also pins
-    `window.scrollTo(0, 0)`, because an input method's WebView can otherwise be
-    scrolled by the focus machinery and the keys stop matching the taps.
+    the screen height) and gives the WebView the height above that strip, so
+    the last key row - and the bundled fallback keyboard - is never under the
+    gesture bar. The page also pins `window.scrollTo(0, 0)`, because an input
+    method's WebView can otherwise be scrolled by the focus machinery and the
+    keys stop matching the taps.
