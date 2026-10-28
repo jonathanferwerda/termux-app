@@ -763,3 +763,55 @@ work and a full-width build has crashed it (2026-10-10).
     gesture bar. The page also pins `window.scrollTo(0, 0)`, because an input
     method's WebView can otherwise be scrolled by the focus machinery and the
     keys stop matching the taps.
+
+## Deltas round 33 (the vault, the microphone, and a quiet keyboard)
+
+69. The input method's window no longer adds the navigation bar itself. Android
+    already wraps a WRAP_CONTENT IME window around the view and adds that strip;
+    doing it twice left the blank band below the space bar (about two key rows
+    on a phone in three-button navigation). The WebView is now exactly the
+    dock's height and the system owns the strip.
+70. The microphone is offered in the input method, not only the dock. The
+    keyboard page is the manager's own origin, so its dictation uses the same
+    `getUserMedia` + `/manager/dictate` pipeline; the service grants capture to
+    the manager's origin in `WebChromeClient.onPermissionRequest` (the app
+    already holds RECORD_AUDIO). A phrase joins the focused Android editor
+    through `softKbInsert`, the same bridge the keys use.
+71. The top bar no longer prints the layout's name. The page chips, the vault,
+    the layout chooser, the microphone and the hide key are the bar; the chosen
+    layout is still highlighted in the chooser.
+72. A vault for the keyboard: the `credentials` table (created by
+    `app_schema_ensure`, so existing houses gain it on the next start) holds the
+    non-secret scope (`app`, `origin`, `kind`, `label`, `hints`, `has_user`,
+    `has_password`) and an encrypted `payload` (`subs::note_encrypter` with the
+    house key). The routes are `/manager/credentials/{status,save,fill,forget}`;
+    they refuse while the house is padlocked (`padlock_locked_now`), and an entry
+    with an `origin` is only offered to that site while one without it is only
+    offered to that app package. A browser package may not save a password
+    without a site: the input method cannot see the address bar, and a
+    package-wide Chrome password would be offered on every site.
+73. The bar's key fills the focused field from a match; the lock (password) or
+    disk (any other field) opens the save drawer. The drawer is typed into with
+    the keyboard's own keys (`softKbInsert` writes the page's input, never the
+    app's editor), so no second keyboard is raised. The Manager dock fills every
+    field in the same form from a saved entry; the input method fills the field
+    it has.
+74. `JawnAutofillService` is the other half: Android hands it the whole screen's
+    form and a web page's domain, so one dataset fills the username and password
+    together in Chrome and other apps (and Android's save prompt files a new
+    password with the real site). It talks to the manager over loopback with the
+    app's session cookie (minting one from the saved ticket when needed), trusts
+    the house certificate for that host only, and never logs a secret. The
+    dashboard's Keyboard card has "Choose JawnOS autofill" for the one-time
+    enable.
+75. The vault rows carry `server_time`, so `sync_table_list` includes the table
+    automatically: the ordinary v3 row sync, `remote_upgrade` and remote backups
+    carry it between the machines of the house. The payload stays sealed with the
+    house key end to end; the metadata is what makes the match.
+
+76. The keyboard page sits behind the manager app gate. A ticket approves the
+    login but not the app window, so on a house with app access enforced the
+    input method falls back to its bundled keyboard until the JawnOS app itself
+    has signed in. The app 12-hour session lives in the same cookie jar the
+    input method reads, so opening the app once restores the manager dock; the
+    fallback keeps typing possible in the meantime.

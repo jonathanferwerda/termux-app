@@ -123,6 +123,7 @@ public class JawnDashboardActivity extends Activity {
                 toast("No keyboard picker on this device");
             }
         });
+        fullButton(keyboard, "Choose JawnOS autofill", false, () -> openAutofillSettings());
 
         // ---- bluetooth ----
         LinearLayout ble = card(root, "Bluetooth");
@@ -514,6 +515,18 @@ public class JawnDashboardActivity extends Activity {
             startActivity(i);
         } catch (Throwable t) {
             toast("JawnOS API app is not installed");
+        }
+    }
+
+    /** Ask Android to make JawnOS Autofill the screen reader of forms. */
+    private void openAutofillSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+            toast("Choose JawnOS Autofill");
+        } catch (Throwable t) {
+            toast("Autofill settings are unavailable");
         }
     }
 

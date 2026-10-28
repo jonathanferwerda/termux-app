@@ -256,6 +256,23 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- The same vault, as Android's autofill service: it sees a form's
+             fields and web domain, so one dataset fills the username and
+             password together. Android requires the person to enable it once;
+             the dashboard's Keyboard card opens that screen. -->
+        <service
+            android:name=".app.JawnAutofillService"
+            android:label="JawnOS Autofill"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
         <!-- The phone app's caller id: with the Call screening role granted,
              Android hands each incoming call's number to this service (a plain
              phone-state listener no longer gets it on Android 12+), and the

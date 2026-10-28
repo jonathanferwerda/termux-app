@@ -24,6 +24,7 @@ import android.widget.FrameLayout;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -115,15 +116,31 @@ public class JawnImeService extends InputMethodService {
         FrameLayout host = new FrameLayout(this);
         frame = host;
         host.setBackgroundColor(Color.rgb(242, 243, 245));
-        host.setMinimumHeight(keyboardHeight() + navigationBarHeight());
+        host.setMinimumHeight(keyboardHeight());
         host.setLayoutParams(new ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight() + navigationBarHeight()));
-        // the system's navigation bar is drawn over the foot of the window; the
-        // page gets the height above it, so the last key row is never behind it
+            ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight()));
+        // the system wraps the window around this view and adds the navigation
+        // bar itself; the page owns only the keys' height
         host.addView(view, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight(), Gravity.TOP));
 
         view.addJavascriptInterface(new Bridge(), "JawnIme");
+        // The page is the manager's own, so its microphone asks for the same
+        // capture the dock uses. Only the manager's own origin may have it.
+        view.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final android.webkit.PermissionRequest request) {
+                Uri origin = request.getOrigin();
+                if (origin == null || !allowedHost(origin.getHost())) { request.deny(); return; }
+                for (String resource : request.getResources()) {
+                    if (android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                        request.grant(request.getResources());
+                        return;
+                    }
+                }
+                request.deny();
+            }
+        });
         view.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView v, String url) {
@@ -287,6 +304,47 @@ public class JawnImeService extends InputMethodService {
         view.evaluateJavascript(
             "window.imeConfigure && imeConfigure(" + (numeric ? "true" : "false") + ","
                 + JSONObject.quote(context) + "," + text + ");", null);
+        view.evaluateJavascript(
+            "window.imeField && imeField(" + fieldMetaJson(getCurrentInputEditorInfo()) + ");", null);
+    }
+
+    /**
+     * The field's facts for the vault: the app package, whether it is a password
+     * (or web) field, and the hints Android published. A browser's address bar
+     * is not visible to an input method, so a web password is saved with a site
+     * the person names; the Autofill service is what reads the real web domain.
+     */
+    private String fieldMetaJson(EditorInfo info) {
+        org.json.JSONObject meta = new org.json.JSONObject();
+        try {
+            String pkg = (info == null || info.packageName == null) ? "" : info.packageName;
+            int type = info == null ? 0 : info.inputType;
+            int variation = type & InputType.TYPE_MASK_VARIATION;
+            boolean password = variation == InputType.TYPE_TEXT_VARIATION_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+                || variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+            boolean web = variation == InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS;
+            meta.put("app", pkg);
+            meta.put("password", password);
+            meta.put("web", web);
+            String hintText = (info == null || info.hintText == null) ? "" : info.hintText.toString();
+            String fieldName = (info == null || info.fieldName == null) ? "" : info.fieldName;
+            meta.put("field", fieldName.length() > 0 ? fieldName : (info == null ? "" : String.valueOf(info.fieldId)));
+            meta.put("hint", hintText);
+            JSONArray hints = new JSONArray();
+            if (hintText.length() > 0) { hints.put(hintText.toLowerCase()); }
+            if (fieldName.length() > 0) { hints.put(fieldName.toLowerCase()); }
+            String privateOptions = (info == null || info.privateImeOptions == null) ? "" : info.privateImeOptions.toLowerCase();
+            if (privateOptions.length() > 0) { hints.put(privateOptions); }
+            if (password) { hints.put("password"); }
+            if (variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
+                || variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS) { hints.put("username"); }
+            meta.put("hints", hints);
+        } catch (Throwable ignored) { }
+        return meta.toString();
     }
 
     /**
@@ -324,11 +382,6 @@ public class JawnImeService extends InputMethodService {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    private int navigationBarHeight() {
-        int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
-        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
-    }
-
     /** About the height of the manager's dock, but never more than half a short screen. */
     private int keyboardHeight() {
         DisplayMetrics dm = getResources().getDisplayMetrics();
@@ -346,12 +399,10 @@ public class JawnImeService extends InputMethodService {
     private void resize(int heightCss) {
         if (frame == null) { return; }
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        int nav = navigationBarHeight();
         int px = (int) (heightCss * dm.density + 0.5f);
         // the layout chooser is the tallest panel; allow it most of the screen
         int ceiling = (int) (dm.heightPixels * 0.75f);
-        final int content = Math.max(dp(170), Math.min(px, ceiling));
-        final int height = content + nav;
+        final int height = Math.max(dp(170), Math.min(px, ceiling));
         final ViewGroup.LayoutParams lp = frame.getLayoutParams();
         if (lp != null && lp.height == height) { return; }
         ui.post(new Runnable() {
@@ -366,13 +417,11 @@ public class JawnImeService extends InputMethodService {
                 if (web != null) {
                     ViewGroup.LayoutParams wp = web.getLayoutParams();
                     if (wp != null) {
-                        wp.height = content;
+                        wp.height = height;
                         web.setLayoutParams(wp);
                     }
                 }
                 frame.requestLayout();
-                try { getWindow().getWindow().setLayout(
-                    WindowManager.LayoutParams.MATCH_PARENT, height); } catch (Throwable ignored) { }
             }
         });
     }
