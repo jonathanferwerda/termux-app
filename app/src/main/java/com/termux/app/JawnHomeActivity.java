@@ -25,10 +25,12 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
@@ -65,7 +67,10 @@ import com.termux.R;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -1187,15 +1192,76 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             InputStream in = conn.getInputStream();
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
             try {
-                return BitmapFactory.decodeStream(in);
+                byte[] chunk = new byte[8192];
+                int n;
+                while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
             } finally {
                 try { in.close(); } catch (Throwable ignored) { }
             }
+            return uprightIcon(buf.toByteArray());
         } catch (Throwable t) {
             return null;
         } finally {
             if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    /** A photo is stored in its own frame and carries an EXIF orientation tag
+     *  instead; BitmapFactory ignores that, so a portrait picture showed up on
+     *  its side in the row. Rotate (and mirror) it, then the tile is upright.
+     *  Decoding is sampled down first: a launcher tile cannot show more than a
+     *  couple of hundred pixels and a camera picture is several megapixels. */
+    private Bitmap uprightIcon(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try {
+            ExifInterface exif = new ExifInterface(new BufferedInputStream(
+                new ByteArrayInputStream(bytes)));
+            orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL);
+        } catch (Throwable ignored) {
+            // no EXIF (a PNG, or a rasterised set glyph): the pixels are it
+        }
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        int sample = 1;
+        while (bounds.outWidth / (sample * 2) >= 256
+                && bounds.outHeight / (sample * 2) >= 256) {
+            sample *= 2;
+        }
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts);
+        if (bitmap == null) return null;
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1); break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180); break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setScale(1, -1); break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90); matrix.postScale(-1, 1); break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90); break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90); matrix.postScale(-1, 1); break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90); break;
+            default:
+                return bitmap;
+        }
+        try {
+            Bitmap upright = Bitmap.createBitmap(bitmap, 0, 0,
+                bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            if (upright != bitmap) bitmap.recycle();
+            return upright;
+        } catch (Throwable t) {
+            return bitmap;
         }
     }
 

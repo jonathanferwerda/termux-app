@@ -98,11 +98,13 @@ public class JawnAppActivity extends Activity {
     private static final String CHROME_STYLE =
         "#taskbar,#start_menu,#start_menu_backlog,#clothesline,"
             + "#background,#everything,#header,#pseudonym_home{display:none!important}"
-            + ".top_navbar{display:none!important}"
-            // window_maker pads the contents by the navbar height and shortens
-            // them by it; with the bar gone that padding is the gap at the top.
-            + ".window_contents{height:100%!important;padding-top:0!important}"
-            + ".window_drawer{top:0!important;height:100%!important}"
+            // The window keeps its own title bar: it is the app's identity, its
+            // icon and name. window_maker's inline height and padding already
+            // reserve the bar's height in the contents and the drawer.
+            // Its window buttons stay out of the single-app view: closing the
+            // only window would leave the app on a desktop it hides, and
+            // Android's Back is the way out of here anyway.
+            + ".top_navbar .navbar_buttons{display:none!important}"
             // the dock is the keyboard here; the pinned window's 99999 would
             // otherwise draw over it and the field would focus with no keys
             + "#jawn_soft_keyboard{z-index:100000!important}"
@@ -495,8 +497,10 @@ public class JawnAppActivity extends Activity {
                     + "max-height:100%!important;margin:0!important;z-index:99999!important;"
                     + "display:block!important;border-radius:0!important;box-shadow:none!important}'"
                     + "+sel+'::after{display:none!important}'"
-                    + "+sel+' .window_contents{height:100%!important;padding-top:0!important}'"
-                    + "+sel+' .window_drawer{top:0!important;height:100%!important}';"
+                    // the pinned window is the whole screen, so its title bar
+                    // is square with it; the contents and drawer keep the
+                    // height and padding window_maker gave them
+                    + "+sel+' .top_navbar{border-radius:0!important}';"
                 + "if(w.parentNode&&w.parentNode!==document.body){document.body.appendChild(w);}"
                 + "try{if(window.JawnAdmin&&JawnAdmin.opened){JawnAdmin.opened();}}catch(e){}"
                 + "w.style.setProperty('position','fixed','important');"

@@ -836,3 +836,15 @@ work and a full-width build has crashed it (2026-10-10).
     cannot decode the icon sets' SVG, and the row previously mixed hand-drawn
     PNGs with a logo placeholder wherever an SVG failed. An app with no icon
     at all still falls back to the initial-in-a-colour-circle tile.
+
+80. The launcher's pictures are upright. A camera photo keeps its pixels in
+    the frame they were stored in and carries an EXIF orientation tag instead;
+    BitmapFactory ignores that tag, so a portrait picture sat on its side in
+    the clothesline. `fetchJawnIcon` now reads the answer into memory, applies
+    the tag's rotation (and any mirror) with `android.media.ExifInterface` and
+    a Matrix, and decodes at a quarter size first - a 46dp tile cannot show
+    more than a couple of hundred pixels. The single-app view also keeps the
+    window's own title bar now: it is the app's icon and name, the thing that
+    tells one custom app from another. Its window buttons are left out -
+    closing the only window would strand the view on the desktop it hides, and
+    Android's Back is the way out.
