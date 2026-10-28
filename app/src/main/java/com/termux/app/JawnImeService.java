@@ -10,6 +10,7 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Gravity;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -62,6 +63,7 @@ public class JawnImeService extends InputMethodService {
     private String houseHost = "";
     private boolean minting = false;
     private boolean fallbackActive = false;
+    private boolean fallbackRetry = false;
     private boolean pageLoaded = false;
 
     private final Runnable loadTimeout = new Runnable() {
@@ -116,11 +118,10 @@ public class JawnImeService extends InputMethodService {
         host.setMinimumHeight(keyboardHeight() + navigationBarHeight());
         host.setLayoutParams(new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight() + navigationBarHeight()));
-        // the system's navigation bar is drawn over the foot of the window; a
-        // bottom inset keeps the page (and the bundled fallback keyboard) above it
-        host.setPadding(0, 0, 0, navigationBarHeight());
+        // the system's navigation bar is drawn over the foot of the window; the
+        // page gets the height above it, so the last key row is never behind it
         host.addView(view, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight(), Gravity.TOP));
 
         view.addJavascriptInterface(new Bridge(), "JawnIme");
         view.setWebViewClient(new WebViewClient() {
@@ -211,6 +212,14 @@ public class JawnImeService extends InputMethodService {
         numeric = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE;
         context = contextFor(info);
         if (web != null) {
+            // a load that raced the manager's own restart falls back; try the
+            // keyboard page again on the next field rather than staying plain
+            if (fallbackActive && fallbackRetry) {
+                fallbackActive = false;
+                fallbackRetry = false;
+                pageLoaded = false;
+                loadStart();
+            }
             web.onResume();
             web.resumeTimers();
             configure(web);
@@ -263,6 +272,7 @@ public class JawnImeService extends InputMethodService {
     private void loadFallback(String why) {
         if (fallbackActive || web == null) { return; }
         fallbackActive = true;
+        fallbackRetry = !"no session".equals(why);
         pageLoaded = false;
         ui.removeCallbacks(loadTimeout);
         Log.w(TAG, "using the bundled keyboard: " + why);
@@ -340,8 +350,8 @@ public class JawnImeService extends InputMethodService {
         int px = (int) (heightCss * dm.density + 0.5f);
         // the layout chooser is the tallest panel; allow it most of the screen
         int ceiling = (int) (dm.heightPixels * 0.75f);
-        final int height = Math.max(dp(170), Math.min(px, ceiling)) + nav;
-        final int inset = nav;
+        final int content = Math.max(dp(170), Math.min(px, ceiling));
+        final int height = content + nav;
         final ViewGroup.LayoutParams lp = frame.getLayoutParams();
         if (lp != null && lp.height == height) { return; }
         ui.post(new Runnable() {
@@ -353,7 +363,13 @@ public class JawnImeService extends InputMethodService {
                     frame.setLayoutParams(params);
                 }
                 frame.setMinimumHeight(dp(170));
-                frame.setPadding(0, 0, 0, inset);
+                if (web != null) {
+                    ViewGroup.LayoutParams wp = web.getLayoutParams();
+                    if (wp != null) {
+                        wp.height = content;
+                        web.setLayoutParams(wp);
+                    }
+                }
                 frame.requestLayout();
                 try { getWindow().getWindow().setLayout(
                     WindowManager.LayoutParams.MATCH_PARENT, height); } catch (Throwable ignored) { }
