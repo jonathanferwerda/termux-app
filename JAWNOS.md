@@ -724,3 +724,38 @@ work and a full-width build has crashed it (2026-10-10).
 64. The manager dock still serves JawnOS app views (field-aware time chips,
     units, conversions). This IME is the keyboard for every other Android app
     and for views that raise a native editor.
+
+## Deltas round 32 (the input method is the manager's own keyboard)
+
+65. The IME is no longer a simplified copy. `JawnImeService` loads
+    `https://<manager host>:<working_port>/manager/keyboard/ime`, a page served
+    by the manager that includes the very same `soft_keyboard` fragment and
+    `soft_keyboard.js` the dock uses. So the layouts (Samsung / iOS / Gboard /
+    the language keyboards), shift, the calculator and its history, the symbol
+    page, the magnified key, hold-to-delete and the unit/currency conversion row
+    are the same code, with the same units and live rates — not a parallel
+    implementation that can drift.
+66. `window.jawnSoftIme` is set before `soft_keyboard.js` parses, and
+    `window.JawnIme` is the bridge. In that mode the keys call
+    `send` / `backspace` / `deleteBack` / `enter` / `replaceAll` on the
+    `InputConnection` instead of a DOM field; the service reports
+    `getTextBeforeCursor` back through `imeText()` after every edit, which is
+    what the conversion and recommendation rows read. `imeConfigure(numeric,
+    context, text)` opens the calculator for number/phone editors (seeding it
+    with the field's own text) and names the context a hint or a datetime editor
+    reveals.
+67. The keyboard page needs the manager, so it uses the app's own session:
+    `JawnImeService` checks the shared `CookieManager` for `president=`, and
+    without one loads the saved ticket (`.shots/ticket.txt`) to mint it,
+    intercepting that page's redirect to `/manager` and going to the keyboard
+    page instead. Only the manager host, `127.0.0.1` and `localhost` may load;
+    its self-signed certificate is accepted for those hosts only. A load error
+    or a four-second timeout falls back to `assets/ime/keyboard.html`, so a
+    keyboard is still there when the house is unreachable.
+68. `soft_keyboard.js` reports the dock's height through `JawnIme.resize()`; the
+    service sizes the input-method window to it plus the system navigation bar
+    (the conversion row and the layout chooser grow the window, up to 75% of
+    the screen height) and tells the page the nav strip with `imeInset()`, so
+    the last key row is never under the gesture bar. The page also pins
+    `window.scrollTo(0, 0)`, because an input method's WebView can otherwise be
+    scrolled by the focus machinery and the keys stop matching the taps.
