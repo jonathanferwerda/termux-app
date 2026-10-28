@@ -102,6 +102,7 @@ public class JawnAutofillService extends AutofillService {
         int variation;
         boolean password;
         boolean user;
+        boolean web;
     }
 
     private static class Screen {
@@ -142,6 +143,7 @@ public class JawnAutofillService extends AutofillService {
                 field.variation = inputType & InputType.TYPE_MASK_VARIATION;
                 field.password = isPassword(field);
                 field.user = isUser(field);
+                field.web = domain.length() > 0;
                 AutofillValue current = node.getAutofillValue();
                 if (current != null && current.isText()) {
                     field.value = current.getTextValue() == null ? "" : current.getTextValue().toString();
@@ -189,7 +191,15 @@ public class JawnAutofillService extends AutofillService {
     private FillResponse build(Screen screen) {
         Set<String> hints = new LinkedHashSet<>();
         boolean password = false;
+        // A WebView page's structure also contains the browser's own toolbar
+        // (address bar, back, reload). Those native fields have no web domain;
+        // filling them would put a password in the address bar. When the screen
+        // names a web domain, only the page's own fields take part.
+        List<Field> active = new ArrayList<>();
         for (Field f : screen.fields) {
+            if (screen.domain.length() == 0 || f.web) { active.add(f); }
+        }
+        for (Field f : active) {
             if (f.password) { password = true; hints.add("password"); }
             if (f.user) { hints.add("username"); }
             if (f.hint.length() > 0) { hints.add(f.hint.toLowerCase()); }
@@ -208,10 +218,9 @@ public class JawnAutofillService extends AutofillService {
             JSONObject answer = new JSONObject(status);
             if (answer.optInt("locked", 0) == 1 || answer.optInt("ok", 0) != 1) { return null; }
             JSONArray matches = answer.optJSONArray("matches");
-            if (matches == null || matches.length() == 0) { return null; }
             FillResponse.Builder response = new FillResponse.Builder();
             int added = 0;
-            for (int i = 0; i < matches.length() && added < 3; i++) {
+            for (int i = 0; matches != null && i < matches.length() && added < 3; i++) {
                 JSONObject match = matches.optJSONObject(i);
                 if (match == null) { continue; }
                 String uuid = match.optString("uuid", "");
@@ -230,7 +239,7 @@ public class JawnAutofillService extends AutofillService {
                     screen.domain.length() > 0 ? screen.domain : screen.pkg);
                 Dataset.Builder dataset = new Dataset.Builder(presentation);
                 boolean filledOne = false;
-                for (Field f : screen.fields) {
+                for (Field f : active) {
                     String put = null;
                     if (f.password) { put = secret; }
                     else if (f.user) { put = username; }
@@ -242,7 +251,7 @@ public class JawnAutofillService extends AutofillService {
                             }
                         }
                     }
-                    if ((put == null || put.length() == 0) && screen.fields.size() == 1) { put = value; }
+                    if ((put == null || put.length() == 0) && active.size() == 1) { put = value; }
                     if (put != null && put.length() > 0) {
                         dataset.setValue(f.id, AutofillValue.forText(put));
                         filledOne = true;
@@ -253,15 +262,26 @@ public class JawnAutofillService extends AutofillService {
                     added++;
                 }
             }
-            if (added == 0) { return null; }
             // Ask Android for its save prompt when a password field is submitted.
+            // A response may carry SaveInfo alone: that is what lets a WebView app
+            // file a password for a site the vault has not seen yet. Chrome keeps
+            // its own password manager, so this half is exercised by an app whose
+            // WebView uses the system autofill framework.
             List<AutofillId> passwordIds = new ArrayList<>();
-            for (Field f : screen.fields) { if (f.password) { passwordIds.add(f.id); } }
+            List<AutofillId> usernameIds = new ArrayList<>();
+            for (Field f : active) {
+                if (f.password) { passwordIds.add(f.id); }
+                else if (f.user) { usernameIds.add(f.id); }
+            }
             if (!passwordIds.isEmpty()) {
                 SaveInfo.Builder save = new SaveInfo.Builder(
                     SaveInfo.SAVE_DATA_TYPE_PASSWORD, passwordIds.toArray(new AutofillId[0]));
+                if (!usernameIds.isEmpty()) {
+                    save.setOptionalIds(usernameIds.toArray(new AutofillId[0]));
+                }
                 response.setSaveInfo(save.build());
             }
+            if (added == 0 && passwordIds.isEmpty()) { return null; }
             return response.build();
         } catch (Throwable t) {
             return null;
@@ -291,6 +311,7 @@ public class JawnAutofillService extends AutofillService {
                     String password = "";
                     Set<String> hints = new LinkedHashSet<>();
                     for (Field f : screen.fields) {
+                        if (screen.domain.length() > 0 && !f.web) { continue; }
                         if (f.password) { password = f.value; hints.add("password"); }
                         if (f.user) { username = f.value; hints.add("username"); }
                         if (f.hint.length() > 0) { hints.add(f.hint.toLowerCase()); }

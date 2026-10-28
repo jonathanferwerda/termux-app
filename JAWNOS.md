@@ -815,3 +815,14 @@ work and a full-width build has crashed it (2026-10-10).
     has signed in. The app 12-hour session lives in the same cookie jar the
     input method reads, so opening the app once restores the manager dock; the
     fallback keeps typing possible in the meantime.
+
+77. The autofill response now carries SaveInfo even when the vault has no
+    matching entry. The fill request used to return before setting it, so a
+    new password could only be saved through the keyboard sheet; the system
+    save prompt now appears for a WebView app submit (Chrome keeps its own
+    password manager and never asks the service).
+78. When a screen names a web domain, the service only fills fields that
+    belong to that page. A browser toolbar (address bar, back, reload) is
+    native, has no web domain, and was treated as a form field; one dataset
+    put the password in the address bar. The page fields inherit the domain
+    and are the only ones offered or saved.
