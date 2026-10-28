@@ -116,6 +116,9 @@ public class JawnImeService extends InputMethodService {
         host.setMinimumHeight(keyboardHeight() + navigationBarHeight());
         host.setLayoutParams(new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight() + navigationBarHeight()));
+        // the system's navigation bar is drawn over the foot of the window; a
+        // bottom inset keeps the page (and the bundled fallback keyboard) above it
+        host.setPadding(0, 0, 0, navigationBarHeight());
         host.addView(view, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -274,7 +277,6 @@ public class JawnImeService extends InputMethodService {
         view.evaluateJavascript(
             "window.imeConfigure && imeConfigure(" + (numeric ? "true" : "false") + ","
                 + JSONObject.quote(context) + "," + text + ");", null);
-        sendInset(view);
     }
 
     /**
@@ -339,6 +341,7 @@ public class JawnImeService extends InputMethodService {
         // the layout chooser is the tallest panel; allow it most of the screen
         int ceiling = (int) (dm.heightPixels * 0.75f);
         final int height = Math.max(dp(170), Math.min(px, ceiling)) + nav;
+        final int inset = nav;
         final ViewGroup.LayoutParams lp = frame.getLayoutParams();
         if (lp != null && lp.height == height) { return; }
         ui.post(new Runnable() {
@@ -350,20 +353,12 @@ public class JawnImeService extends InputMethodService {
                     frame.setLayoutParams(params);
                 }
                 frame.setMinimumHeight(dp(170));
+                frame.setPadding(0, 0, 0, inset);
                 frame.requestLayout();
-                sendInset(web);
                 try { getWindow().getWindow().setLayout(
                     WindowManager.LayoutParams.MATCH_PARENT, height); } catch (Throwable ignored) { }
             }
         });
-    }
-
-    /** Tell the page how much of its foot the navigation bar covers. */
-    private void sendInset(WebView view) {
-        if (view == null) { return; }
-        int nav = navigationBarHeight();
-        float css = nav / getResources().getDisplayMetrics().density;
-        view.evaluateJavascript("window.imeInset && imeInset(" + css + ");", null);
     }
 
     /** window.JawnIme: the page's keys land in the editor. */
