@@ -76,6 +76,7 @@ import java.net.URLEncoder;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
@@ -175,6 +176,11 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     private static final long STATUS_REFRESH_MS = 10000L;
     private List<JawnAppEntry> lastStartApps;
     private List<RunningEntry> lastRunning;
+    // The clothesline is polled every ten seconds but its picture changes
+    // only when the icon set or a main image does, so keep each for a minute.
+    private static final long RUNNING_ICON_REFRESH_MS = 60L * 1000L;
+    private final Map<String, Bitmap> runningIcons = new HashMap<>();
+    private final Map<String, Long> runningIconAt = new HashMap<>();
 
     private HomeAdapter adapter;
 
@@ -799,8 +805,8 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
      * <p>Both are the person's own view of this machine, and the manager's
      * session cookie is HttpOnly, so an HTTP poll from here cannot see the app
      * gate. The app shares Termux's UID, so the clothesline and the desk colour
-     * are read straight from the house's settings table, with no session and no
-     * manager required.
+     * are read straight from the house's settings table. Only the pictures come
+     * over HTTP, from the public /apps/icon route.
      */
     private void loadHomeStatus() {
         if (statusInFlight) return;
@@ -809,6 +815,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             @Override
             public void run() {
                 final List<RunningEntry> running = new ArrayList<>();
+                final String base = managerOrigin();
                 String clothesline = "";
                 String background = "";
                 java.io.File dbFile = new java.io.File(
@@ -847,8 +854,9 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                             if (app.isEmpty()) app = item.optString("name", "").trim();
                             if (app.isEmpty()) continue;
                             String title = item.optString("formatted_name", app);
+                            Bitmap icon = base.isEmpty() ? null : runningIcon(base, app);
                             running.add(new RunningEntry(app, title,
-                                item.optString("colour", ""), null));
+                                item.optString("colour", ""), icon));
                         }
                     }
                 } catch (Throwable t) {
@@ -914,8 +922,9 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 icon.setImageDrawable(new BitmapDrawable(getResources(), entry.icon));
                 item.addView(icon);
             } else {
-                // A person's own app has no icon file: its clothesline colour
-                // is the tile, with the app's initial in contrasting ink.
+                // No icon could be fetched (the house is down, or a person's
+                // own app has no main image): its clothesline colour is the
+                // tile, with the app's initial in contrasting ink.
                 TextView tile = new TextView(this);
                 tile.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
                 tile.setGravity(Gravity.CENTER);
@@ -1128,6 +1137,22 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         }
     }
 
+    /** The clothesline's icon through the JawnOS row's route: main_icon_maker's
+     *  choice (a main image, else the active icon set), rasterised by the
+     *  manager because BitmapFactory cannot decode the sets' SVG. */
+    private Bitmap runningIcon(String base, String app) {
+        long now = System.currentTimeMillis();
+        Long at = runningIconAt.get(app);
+        if (at != null && now - at < RUNNING_ICON_REFRESH_MS) {
+            return runningIcons.get(app);
+        }
+        Bitmap icon = fetchJawnIcon(base, "/apps/icon?app=" + Uri.encode(app));
+        runningIconAt.put(app, now);
+        if (icon != null) runningIcons.put(app, icon);
+        else runningIcons.remove(app);
+        return icon;
+    }
+
     private Bitmap fetchJawnIcon(String base, String iconPath) {
         HttpURLConnection conn = null;
         try {
@@ -1137,7 +1162,13 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             } else {
                 // Icon paths can contain spaces (e.g. "/images/make believe/…");
                 // escape the bytes a URL cannot carry, keeping the separators.
-                urlText = base + (!iconPath.startsWith("/") ? "/" : "") + Uri.encode(Uri.decode(iconPath), "/");
+                // A query (the /apps/icon?app=… route) is already escaped and
+                // must not have its ? and = turned into path bytes.
+                int q = iconPath.indexOf('?');
+                String pathPart = q >= 0 ? iconPath.substring(0, q) : iconPath;
+                String queryPart = q >= 0 ? iconPath.substring(q) : "";
+                urlText = base + (!pathPart.startsWith("/") ? "/" : "")
+                    + Uri.encode(Uri.decode(pathPart), "/") + queryPart;
             }
             conn = (HttpURLConnection) new URL(urlText).openConnection();
             trustHouse(conn, urlText);

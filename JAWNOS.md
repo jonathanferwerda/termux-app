@@ -826,3 +826,13 @@ work and a full-width build has crashed it (2026-10-10).
     native, has no web domain, and was treated as a form field; one dataset
     put the password in the address bar. The page fields inherit the domain
     and are the only ones offered or saved.
+
+79. Home's clothesline now carries icons. It reads the clothesline rows from
+    the settings table, then fetches each app's picture from `/apps/icon`, the
+    same choice `main_icon_maker` makes for the start menu and taskbar (the
+    person's main image, else the active icon set's glyph), cached for a minute
+    so the ten-second poll does not refetch. The JawnOS row's `/apps/start`
+    icons use the same route: it serves a PNG because Android's BitmapFactory
+    cannot decode the icon sets' SVG, and the row previously mixed hand-drawn
+    PNGs with a logo placeholder wherever an SVG failed. An app with no icon
+    at all still falls back to the initial-in-a-colour-circle tile.
