@@ -703,3 +703,24 @@ work and a full-width build has crashed it (2026-10-10).
     `{error}`. Manifest adds `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` and
     `CHANGE_NETWORK_STATE` (`ACCESS_NETWORK_STATE` and the location permissions
     were already there).
+
+## Deltas round 31 (the keyboard is a web page)
+
+62. `JawnImeService` is now an HTML keyboard, not a native view tree: a
+    `WebView` loads `assets/ime/keyboard.html` — the manager's light panel,
+    white keys with a soft edge, grey specials and the yellow return — and a
+    `JawnIme` JavaScript bridge commits each key through the
+    `InputConnection` (`send`, `backspace`, `enter`, `hide`). The abc / 123 /
+    #+= chips switch pages; `imeConfigure(numeric)` opens the number page for
+    number and phone fields; back hides the keyboard.
+63. An input method's window does not measure like an activity's. The service
+    wraps `onCreateInputView`'s result in `WRAP_CONTENT`, so a WebView left to
+    itself measures its content (whose `height:100%` has nothing to resolve)
+    and collapses to a strip. The keyboard therefore returns a `FrameLayout`
+    with `setMinimumHeight` plus an exact-height child; that fixes both the
+    window (300dp, capped at 55% of the short side) and the page's viewport
+    (880x300 CSS px at density 1.5). The service window also gets
+    `FLAG_HARDWARE_ACCELERATED`, which a WebView needs.
+64. The manager dock still serves JawnOS app views (field-aware time chips,
+    units, conversions). This IME is the keyboard for every other Android app
+    and for views that raise a native editor.

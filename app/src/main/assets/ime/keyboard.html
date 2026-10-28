@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>JawnOS Keyboard</title>
+<style>
+	:root {
+		--panel: #F2F3F5;
+		--key: #FFFFFF;
+		--special: #E4E7EB;
+		--line: #D5D9DE;
+		--ink: #161616;
+		--muted: #5A5A5A;
+		--accent: #E8C547;
+		--active: #4F8CFF;
+	}
+	html, body { height: 100%; margin: 0; padding: 0; background: var(--panel); }
+	body {
+		font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+		color: var(--ink);
+		-webkit-user-select: none; user-select: none;
+		-webkit-tap-highlight-color: transparent;
+		overflow: hidden;
+	}
+	#kb { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 5px; padding: 6px 8px 8px; }
+	#top { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; height: 30px; }
+	.chip {
+		flex: 0 0 auto; height: 28px; padding: 0 12px;
+		border: 1px solid var(--line); border-radius: 8px;
+		background: var(--key); color: var(--muted);
+		font: inherit; font-size: 12px; line-height: 1;
+		touch-action: manipulation;
+	}
+	.chip.active { background: var(--active); border-color: var(--active); color: #fff; }
+	.chip.hide { margin-left: auto; width: 42px; padding: 0; font-size: 16px; }
+	#rows { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 5px; }
+	.row { flex: 1 1 0; min-height: 0; display: flex; gap: 4px; }
+	.key {
+		flex: 1 1 0; min-width: 0; padding: 0;
+		border: 1px solid var(--line); border-radius: 8px;
+		background: var(--key); color: var(--ink);
+		font: inherit; font-size: 16px; line-height: 1;
+		touch-action: manipulation;
+	}
+	.key:active { background: #E7EEFB; }
+	.key.mod { flex: 0 0 52px; font-size: 12px; color: var(--muted); }
+	.key.shift { flex: 0 0 52px; font-size: 17px; }
+	.key.space { flex: 3 1 0; font-size: 13px; color: var(--muted); }
+	.key.enter { flex: 1.4 1 0; background: var(--accent); border-color: #D6B33A; color: #161616; font-size: 18px; }
+	.key.active { background: var(--active); border-color: var(--active); color: #fff; }
+	.key.special { background: var(--special); color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="kb">
+	<div id="top">
+		<button type="button" class="chip" data-page="abc">abc</button>
+		<button type="button" class="chip" data-page="num">123</button>
+		<button type="button" class="chip" data-page="sym">#+=</button>
+		<button type="button" class="chip hide" id="hide" aria-label="Hide keyboard">⌄</button>
+	</div>
+	<div id="rows"></div>
+</div>
+<script>
+(function () {
+	"use strict";
+
+	var PAGE_LETTERS = [
+		["q","w","e","r","t","y","u","i","o","p"],
+		["a","s","d","f","g","h","j","k","l"],
+		["⇧","z","x","c","v","b","n","m","⌫"],
+		["123",",","space",".","⏎"]
+	];
+	var PAGE_NUM = [
+		["1","2","3","4","5","6","7","8","9","0"],
+		["-","/",":",";","(",")","$","&","@","\""],
+		["#+=",",","%","!","?","⌫"],
+		["abc","space","⏎"]
+	];
+	var PAGE_SYM = [
+		["[","]","{","}","#","%","^","*","+","="],
+		["_","\\","|","~","<",">","€","£","¥","•"],
+		["123",",",".","!","?","⌫"],
+		["abc","space","⏎"]
+	];
+
+	var page = "abc";
+	var shift = false;
+
+	function send(text) {
+		if (window.JawnIme && typeof window.JawnIme.send === "function") { window.JawnIme.send(text); }
+	}
+	function backspace() {
+		if (window.JawnIme && typeof window.JawnIme.backspace === "function") { window.JawnIme.backspace(); }
+	}
+	function enter() {
+		if (window.JawnIme && typeof window.JawnIme.enter === "function") { window.JawnIme.enter(); }
+	}
+
+	function key(def, cls) {
+		var b = document.createElement("button");
+		b.type = "button";
+		b.className = "key" + (cls ? " " + cls : "");
+		var label = def;
+		if (page === "abc" && shift && /^[a-z]$/.test(def)) { label = def.toUpperCase(); }
+		b.textContent = label;
+		if (def === "⇧" && shift) { b.classList.add("active"); }
+		b.addEventListener("click", function (ev) {
+			ev.preventDefault();
+			press(def);
+		});
+		return b;
+	}
+
+	function press(def) {
+		if (def === "⇧") { shift = !shift; render(); return; }
+		if (def === "⌫") { backspace(); return; }
+		if (def === "⏎") { enter(); return; }
+		if (def === "space") { send(" "); return; }
+		if (def === "abc") { page = "abc"; shift = false; render(); return; }
+		if (def === "123") { page = "num"; render(); return; }
+		if (def === "#+=") { page = "sym"; render(); return; }
+		var text = def;
+		if (page === "abc" && shift && /^[a-z]$/.test(def)) {
+			text = def.toUpperCase();
+			shift = false;
+			render();
+		}
+		send(text);
+	}
+
+	function render() {
+		var rows = document.getElementById("rows");
+		rows.innerHTML = "";
+		var data = page === "abc" ? PAGE_LETTERS : (page === "num" ? PAGE_NUM : PAGE_SYM);
+		for (var r = 0; r < data.length; r++) {
+			var row = document.createElement("div");
+			row.className = "row";
+			var rowData = data[r];
+			for (var i = 0; i < rowData.length; i++) {
+				var def = rowData[i];
+				var cls = "";
+				if (def === "⇧") { cls = "shift"; }
+				else if (def === "⌫") { cls = "mod"; }
+				else if (def === "space") { cls = "space"; }
+				else if (def === "⏎") { cls = "enter"; }
+				else if (def === "⇧" || def === "123" || def === "abc" || def === "#+=") { cls = "mod"; }
+				row.appendChild(key(def, cls));
+			}
+			rows.appendChild(row);
+		}
+		var chips = document.querySelectorAll(".chip[data-page]");
+		for (var c = 0; c < chips.length; c++) {
+			var p = chips[c].getAttribute("data-page");
+			var active = (p === "abc" && page === "abc") || (p === "num" && page === "num") || (p === "sym" && page === "sym");
+			chips[c].classList.toggle("active", active);
+		}
+	}
+
+	document.getElementById("hide").addEventListener("click", function (ev) {
+		ev.preventDefault();
+		if (window.JawnIme && typeof window.JawnIme.hide === "function") { window.JawnIme.hide(); }
+	});
+
+	var pageChips = document.querySelectorAll(".chip[data-page]");
+	for (var c = 0; c < pageChips.length; c++) {
+		pageChips[c].addEventListener("click", function (ev) {
+			ev.preventDefault();
+			var p = this.getAttribute("data-page");
+			press(p === "num" ? "123" : (p === "sym" ? "#+=" : p));
+		});
+	}
+
+	window.imeConfigure = function (numeric) {
+		page = numeric ? "num" : "abc";
+		shift = false;
+		render();
+	};
+
+	render();
+})();
+</script>
+</body>
+</html>
