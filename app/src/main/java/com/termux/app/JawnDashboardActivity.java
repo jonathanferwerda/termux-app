@@ -407,7 +407,7 @@ public class JawnDashboardActivity extends Activity {
                 public void run() {
                     final boolean jawn = JawnLauncher.jawnIsUp(self);
                     final boolean ble = JawnLauncher.bleIsUp();
-                    final boolean master = JawnLauncher.jawnMasterAlive();
+                    final boolean master = JawnLauncher.jawnMasterAlive(self);
                     ui.post(new Runnable() { public void run() { render(jawn, ble, master); } });
                 }
             }).start();

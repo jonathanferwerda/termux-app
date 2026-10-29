@@ -889,3 +889,17 @@ work and a full-width build has crashed it (2026-10-10).
     a theme started while the phone slept is on the face at wake). The face
     shows the theme's name when an appointment owns it, and both surfaces take
     the background, the ink contrast and the accent from the same bundle.
+
+85. One master per machine, and the app checks it before starting one.
+    `JawnLauncher.startJawn` stands down when `~/.president/pid` names a live
+    jawn process (the command line is verified, so a pid recycled after a
+    reboot cannot pass for a master), with `pgrep -f 'perl [.]/jawn'` as the
+    fallback; `JawnDashboardActivity`'s self test asks the same question. A
+    restart is exempt: it has already killed the tree and its launcher waits
+    the killer out. A phone thawing from a freeze can lose the 400 ms port
+    probe, and the view then started a second tree - the two wiped
+    `~/.president` and fought over the ports for a minute or two, which is the
+    black screen after picking the phone up. `./jawn` now stands down the same
+    way when the pid file's master is alive but too frozen to answer the watch
+    query in three seconds, so even an older APK cannot start a second tree
+    over a master that is merely asleep.

@@ -113,7 +113,7 @@ public class JawnLauncher {
      *  user asked it to keep running. Returns the report the dashboard shows. */
     public static String selfTest(Context context) {
         boolean jawn = jawnIsUp(context);
-        boolean master = jawnMasterAlive();
+        boolean master = jawnMasterAlive(context);
         boolean ble = bleIsUp();
         boolean want = shouldKeepRunning(context);
         StringBuilder r = new StringBuilder();
@@ -185,14 +185,61 @@ public class JawnLauncher {
 
     /** True if the jawn *master* process is alive, even while the tree is booting.
      *  The port is down during a restart, so the dashboard can say "restarting"
-     *  rather than "not running" while the new tree comes up. */
-    public static boolean jawnMasterAlive() {
+     *  rather than "not running" while the new tree comes up.
+     *
+     *  The pid file is checked first: it names the boot master, and a live
+     *  process whose command line still names jawn is a tree even when the port
+     *  probe fails while the phone thaws from a freeze (a 400 ms connect to a
+     *  swapped-in Perl worker can lose). pgrep is the fallback. */
+    public static boolean jawnMasterAlive(Context context) {
+        if (masterPid(context) > 0) return true;
         try {
             Process p = new ProcessBuilder("sh", "-c", "pgrep -f 'perl [.]/jawn' >/dev/null").start();
             p.waitFor();
             return p.exitValue() == 0;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /** The pid in {@code ~/.president/pid} when it still names a live jawn
+     *  process, else 0. The command line is checked so a pid recycled after a
+     *  reboot (or a stale file) never passes for a running master. */
+    private static int masterPid(Context context) {
+        try {
+            File f = new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), "pid");
+            if (!f.isFile()) return 0;
+            StringBuilder sb = new StringBuilder();
+            BufferedReader r = new BufferedReader(new FileReader(f));
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line);
+            r.close();
+            String s = sb.toString().replaceAll("\\s+", "");
+            if (!s.matches("[0-9]+")) return 0;
+            int pid = Integer.parseInt(s);
+            return pid > 0 && procIsJawn(pid) ? pid : 0;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** True when /proc/<pid>'s command line still names a jawn program. The app
+     *  and the tree share one uid, so the tree's own processes are readable. */
+    private static boolean procIsJawn(int pid) {
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(new File("/proc/" + pid + "/cmdline"));
+            byte[] buf = new byte[512];
+            int read = in.read(buf);
+            if (read <= 0) return false;
+            String cmd = new String(buf, 0, read, "UTF-8").replace('\0', ' ');
+            return cmd.contains("President.pl") || cmd.contains("Manager.pl")
+                || cmd.contains("Websocket.pl") || cmd.contains("teletype.pl")
+                || cmd.contains("watch.pl");
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (in != null) try { in.close(); } catch (Throwable ignored) { }
         }
     }
 
@@ -210,17 +257,17 @@ public class JawnLauncher {
      *  session finally run. The boot path has always used a background task and
      *  runs headless, so use that here too. */
     public static void startJawn(Context context) {
-        startJawn(context, true);
+        startJawn(context, true, false);
     }
 
     /** Start jawn as a background task (boot autostart): the foreground service
      *  and the dot still run, but no console session is created, so jawn's
      *  output does not pop up in the console after a reboot. */
     public static void startJawnBackground(Context context) {
-        startJawn(context, true);
+        startJawn(context, true, false);
     }
 
-    private static void startJawn(Context context, boolean background) {
+    private static void startJawn(Context context, boolean background, boolean afterKill) {
         setKeepRunning(context, true);
         // A Stop scheduled a service stop to fire once its killer has had its
         // few seconds. If the user starts again inside that window, cancel it,
@@ -228,6 +275,17 @@ public class JawnLauncher {
         if (pendingStop != null) {
             MAIN.removeCallbacks(pendingStop);
             pendingStop = null;
+        }
+
+        // One master per machine. A second tree wipes ~/.president under the
+        // first, both take the ports and they cycle - which is the "black
+        // screen for a minute or two" after picking the phone up. The live
+        // master's own watchdog recovers a dead tree, so a start is only owed
+        // when no master is alive at all. A restart has already killed it, and
+        // its launcher waits the killer out, so that one is exempt.
+        if (!afterKill && jawnMasterAlive(context)) {
+            JawnLog.append("start: a jawn master is already alive; not starting another");
+            return;
         }
 
         String dir = getJawnDirPath(context);
@@ -278,7 +336,7 @@ public class JawnLauncher {
     public static void restartJawn(final Context context) {
         stopJawnTree(context);
         MAIN.postDelayed(new Runnable() {
-            public void run() { startJawn(context); }
+            public void run() { startJawn(context, true, true); }
         }, 800);
     }
 
