@@ -59,6 +59,7 @@ public class JawnDashboardActivity extends Activity {
     private CheckBox autostart;
     private CheckBox bleWithJawn;
     private CheckBox systemBars;
+    private CheckBox lockScreen;
     private boolean resumed = false;
     private TextView tailnetStatus;
     private static final int REQ_VPN = 0x4A41;
@@ -166,6 +167,12 @@ public class JawnDashboardActivity extends Activity {
         systemBars.setButtonTintList(ColorStateList.valueOf(ACCENT));
         systemBars.setChecked(JawnLauncher.areSystemBarsShown(this));
         settings.addView(systemBars);
+        lockScreen = new CheckBox(this);
+        lockScreen.setText("JawnOS lock screen (one unlock, over the Android lock)");
+        lockScreen.setTextColor(TEXT);
+        lockScreen.setButtonTintList(ColorStateList.valueOf(ACCENT));
+        lockScreen.setChecked(JawnLockScreen.isEnabled(this));
+        settings.addView(lockScreen);
         fullButton(settings, "Save settings", false, () -> { saveSettings(); toast("Saved"); });
 
         // ---- app ----
@@ -491,7 +498,9 @@ public class JawnDashboardActivity extends Activity {
             .putBoolean(JawnLauncher.KEY_AUTOSTART, autostart.isChecked())
             .putBoolean(JawnLauncher.KEY_BLE_WITH_JAWN, bleWithJawn.isChecked())
             .putBoolean(JawnLauncher.KEY_SYSTEM_BARS, systemBars.isChecked())
+            .putBoolean(JawnLockScreen.KEY, lockScreen.isChecked())
             .apply();
+        JawnLockScreen.apply(this);
     }
 
     /** The full screen view in the app's own WebView - the home screen icon's

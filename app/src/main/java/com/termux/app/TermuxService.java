@@ -210,10 +210,14 @@ public final class TermuxService extends Service implements TermuxTask.TermuxTas
         setupNotificationChannel();
         startForeground(TermuxConstants.TERMUX_APP_NOTIFICATION_ID, buildNotification());
         JawnDot.show(this);
+        // The lock screen face listens for screen-on while the app's runtime is
+        // alive, and is registered only while the dashboard's switch is on.
+        JawnLockScreen.apply(this);
     }
 
     /** Make service leave foreground mode. */
     private void runStopForeground() {
+        JawnLockScreen.release();
         stopForeground(true);
     }
 

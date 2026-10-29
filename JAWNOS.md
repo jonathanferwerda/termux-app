@@ -863,3 +863,16 @@ work and a full-width build has crashed it (2026-10-10).
     after the upgrade. Home now asks again 700ms after resume and on window
     focus, and the WebView bridge does the same, so a launcher tap reaches
     `/manager/nfc/read` again.
+
+83. The JawnOS lock screen is option A: the face is drawn over the phone's own
+    keyguard and the unlock is handed straight to Android with
+    `KeyguardManager.requestDismissKeyguard`, so the person's PIN, pattern or
+    fingerprint is the one and only unlock. An app cannot replace the system
+    keyguard, and this does not pretend to - the face is JawnOS, the lock stays
+    the phone's. `JawnLockActivity` is started by `JawnLockScreen` on screen-on
+    while the keyguard is locked (the service registers the listener only while
+    the panel's **JawnOS lock screen** switch is on; the overlay permission is
+    what lets the screen-on start from the background). A secure keyguard gets
+    its prompt after 450ms; a swipe-only one waits for a tap. `ACTION_USER_PRESENT`
+    finishes the face if the phone unlocked by its own sensor, so there is never
+    a second gate. Back is swallowed; Home is the system's.

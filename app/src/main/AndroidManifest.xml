@@ -555,6 +555,20 @@
             android:turnScreenOn="true"
             tools:targetApi="27" />
 
+        <!-- The JawnOS lock screen face. Option A: drawn over the phone's own
+             keyguard, with the unlock handed straight to Android's credential
+             prompt, so there is one unlock rather than a second gate. Reached
+             only from the app's screen-on listener. -->
+        <activity
+            android:name=".app.JawnLockActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|uiMode|keyboard|keyboardHidden|navigation"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Termux.JawnLock"
+            tools:targetApi="27" />
+
         <!-- The Clock's exact wake and its lock-screen alarm notification.
              jawn broadcasts to these actions; one is the AlarmManager wake
              itself. Exported because jawn's process broadcasts from the
