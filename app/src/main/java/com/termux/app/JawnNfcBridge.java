@@ -48,6 +48,15 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     private volatile boolean scanning = false;
     private volatile boolean foreground = false;
     private volatile NdefMessage pendingWrite = null;
+    private final android.os.Handler handler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    // A write nobody is waiting for any more must not swallow the next tag
+    // that happens to be tapped; the page cancels earlier, this is the backstop.
+    private final Runnable writeExpiry = () -> {
+        if (pendingWrite == null) return;
+        pendingWrite = null;
+        emit("write", "{\"ok\":false,\"error\":\"no tag\"}");
+    };
 
     public JawnNfcBridge(Activity activity, Poster poster) {
         this.activity = activity;
@@ -89,7 +98,23 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
         } catch (Exception e) {
             return "error:" + e.getMessage();
         }
-        activity.runOnUiThread(this::enableReaderMode);
+        handler.removeCallbacks(writeExpiry);
+        handler.postDelayed(writeExpiry, 45000);
+        activity.runOnUiThread(() -> {
+            // Reader mode reports a tag once per presence. A write armed while
+            // the tag is already resting on the reader never sees it again, so
+            // the tag has to be lifted and re-tapped - the "scan it over and
+            // over" symptom. Restarting reader mode rediscovers a present tag.
+            disableReaderMode();
+            handler.postDelayed(this::enableReaderMode, 60);
+        });
+        return "ok";
+    }
+
+    @JavascriptInterface
+    public String cancelWrite() {
+        pendingWrite = null;
+        handler.removeCallbacks(writeExpiry);
         return "ok";
     }
 
@@ -129,8 +154,9 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     public void onTagDiscovered(Tag tag) {
         // NDEF I/O can block; keep it off the main/reader thread.
         new Thread(() -> {
-            if (pendingWrite != null) {
-                NdefMessage msg = pendingWrite;
+            NdefMessage msg = pendingWrite;
+            if (msg != null) {
+                handler.removeCallbacks(writeExpiry);
                 pendingWrite = null;
                 String result = writeTag(tag, msg);
                 if (result.startsWith("error")) {
