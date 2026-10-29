@@ -458,7 +458,17 @@ public class JawnImeService extends InputMethodService {
                     if (selected != null && selected.length() > 0) {
                         ic.commitText("", 1);
                     } else {
-                        ic.deleteSurroundingText(Math.max(1, count), 0);
+                        // A normal backspace removes a whole character: deleting
+                        // one UTF-16 unit from a surrogate pair (an emoji, or a
+                        // letter outside the BMP) leaves half of it behind.
+                        int delete = Math.max(1, count);
+                        CharSequence before = ic.getTextBeforeCursor(2, 0);
+                        if (before != null && before.length() == 2
+                                && Character.isHighSurrogate(before.charAt(0))
+                                && Character.isLowSurrogate(before.charAt(1))) {
+                            delete = 2;
+                        }
+                        ic.deleteSurroundingText(delete, 0);
                     }
                     syncText();
                 }

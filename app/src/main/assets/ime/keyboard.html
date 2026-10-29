@@ -106,8 +106,38 @@
 		if (page === "abc" && shift && /^[a-z]$/.test(def)) { label = def.toUpperCase(); }
 		b.textContent = label;
 		if (def === "⇧" && shift) { b.classList.add("active"); }
+		// A normal backspace repeats while the key is held, starting after a
+		// short pause and speeding up. The click that follows the same gesture
+		// must not delete a second time.
+		var handledByPointer = false;
+		if (def === "⌫") {
+			var delay = null;
+			var repeat = null;
+			var stopRepeat = function () {
+				if (delay !== null) { clearTimeout(delay); delay = null; }
+				if (repeat !== null) { clearTimeout(repeat); repeat = null; }
+			};
+			b.addEventListener("pointerdown", function (ev) {
+				if (ev.button !== undefined && ev.button !== 0) { return; }
+				ev.preventDefault();
+				handledByPointer = true;
+				stopRepeat();
+				backspace();
+				var started = Date.now();
+				var tick = function () {
+					backspace();
+					var age = Date.now() - started;
+					repeat = setTimeout(tick, age > 1600 ? 45 : (age > 700 ? 75 : 105));
+				};
+				delay = setTimeout(tick, 420);
+			});
+			b.addEventListener("pointerup", stopRepeat);
+			b.addEventListener("pointercancel", stopRepeat);
+			b.addEventListener("pointerleave", stopRepeat);
+		}
 		b.addEventListener("click", function (ev) {
 			ev.preventDefault();
+			if (handledByPointer) { handledByPointer = false; return; }
 			press(def);
 		});
 		return b;

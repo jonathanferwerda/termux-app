@@ -848,3 +848,18 @@ work and a full-width build has crashed it (2026-10-10).
     tells one custom app from another. Its window buttons are left out -
     closing the only window would strand the view on the desktop it hides, and
     Android's Back is the way out.
+
+81. The keyboard's backspace behaves like a normal one. Holding it deletes
+    repeatedly (a short pause, then an accelerating repeat) instead of once per
+    tap, and the click that ends the gesture no longer deletes a second time.
+    It also removes a whole character: one UTF-16 unit of a surrogate pair is
+    half an emoji, so the service reads the two units before the cursor and
+    deletes both.
+
+82. Reader mode is re-armed after the window settles. Android 17's NFC service
+    answers `enableReaderMode` with "Caller is not in foreground" while the
+    calling activity is not yet counted as the foreground one - which is
+    exactly when `onResume` runs. Home's tap handling had silently stopped
+    after the upgrade. Home now asks again 700ms after resume and on window
+    focus, and the WebView bridge does the same, so a launcher tap reaches
+    `/manager/nfc/read` again.

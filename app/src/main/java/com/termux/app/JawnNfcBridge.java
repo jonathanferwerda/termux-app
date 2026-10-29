@@ -57,6 +57,12 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
         pendingWrite = null;
         emit("write", "{\"ok\":false,\"error\":\"no tag\"}");
     };
+    // The NFC service refuses an enable that arrives before its window is the
+    // foreground one ("Caller is not in foreground"), which is exactly the
+    // moment onResume runs. A second attempt after the window settles lands.
+    private final Runnable readerRearm = () -> {
+        if (foreground) enableReaderMode();
+    };
 
     public JawnNfcBridge(Activity activity, Poster poster) {
         this.activity = activity;
@@ -126,10 +132,13 @@ public class JawnNfcBridge implements NfcAdapter.ReaderCallback {
     public void onResume() {
         foreground = true;
         enableReaderMode();
+        handler.removeCallbacks(readerRearm);
+        handler.postDelayed(readerRearm, 700);
     }
 
     public void onPause() {
         foreground = false;
+        handler.removeCallbacks(readerRearm);
         disableReaderMode();
     }
 

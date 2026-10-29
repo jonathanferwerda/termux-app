@@ -177,6 +177,16 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     private int themeCard = 0xFF1B1B1B;
     private String themeApplied = "";
     private NfcAdapter nfcAdapter;
+    private boolean nfcActive;
+    // A reader-mode enable can arrive before Android's NFC service counts this
+    // window as the foreground one; that call is refused, so ask again once the
+    // window has settled.
+    private final Runnable nfcRearm = new Runnable() {
+        @Override
+        public void run() {
+            if (nfcActive) nfcEnableReader();
+        }
+    };
     private boolean statusInFlight;
     private static final long STATUS_REFRESH_MS = 10000L;
     private List<JawnAppEntry> lastStartApps;
@@ -348,6 +358,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         // until the person taps the field themselves.
         if (search != null) { search.clearFocus(); }
         hideKeyboard();
+        nfcActive = true;
         nfcResume();
         registerPackageReceiver();
         refreshClock();
@@ -363,6 +374,8 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     @Override
     protected void onPause() {
         super.onPause();
+        nfcActive = false;
+        ui.removeCallbacks(nfcRearm);
         nfcPause();
         ui.removeCallbacks(clockTick);
         ui.removeCallbacks(statusTick);
@@ -1572,7 +1585,15 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
      * launcher holds no WebView of its own; the session cookie the manager view
      * minted is process-wide, so the tap still travels as a signed-in person.
      */
+    // Home is the foreground app again: read a tap as soon as the NFC service
+    // will accept the request, and once more after the window settles.
     private void nfcResume() {
+        nfcEnableReader();
+        ui.removeCallbacks(nfcRearm);
+        ui.postDelayed(nfcRearm, 700);
+    }
+
+    private void nfcEnableReader() {
         if (nfcAdapter == null) {
             try { nfcAdapter = NfcAdapter.getDefaultAdapter(this); } catch (Throwable ignored) { }
         }
@@ -1590,8 +1611,15 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     }
 
     private void nfcPause() {
+        ui.removeCallbacks(nfcRearm);
         if (nfcAdapter == null) return;
         try { nfcAdapter.disableReaderMode(this); } catch (Throwable ignored) { }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && nfcActive) nfcResume();
     }
 
     @Override
