@@ -878,3 +878,14 @@ work and a full-width build has crashed it (2026-10-10).
     fingerprint on the sensor) is the one unlock. `ACTION_USER_PRESENT` finishes
     the face if the phone unlocked by its own sensor, so there is never a second
     gate. Back is swallowed; Home is the system's.
+
+84. The launcher and the lock screen wear the desk's theme. A running
+    start/record appointment's theme (bed, resting, ...) wins over the Misc
+    appearance theme; `appointment_theme_push` records the effective bundle in
+    `~/.president/native_theme.json`, and again at boot. It is a FILE, not a
+    settings row: a theme is this device's own, and a shared row let the newest
+    sync win on every machine. `JawnTheme` reads it for `JawnHomeActivity` (on
+    its ten-second status poll) and for `JawnLockActivity` (on every resume, so
+    a theme started while the phone slept is on the face at wake). The face
+    shows the theme's name when an appointment owns it, and both surfaces take
+    the background, the ink contrast and the accent from the same bundle.

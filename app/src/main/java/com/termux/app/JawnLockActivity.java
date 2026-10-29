@@ -8,10 +8,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.text.format.DateFormat;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -33,6 +35,9 @@ public class JawnLockActivity extends Activity {
 
     private TextView clock;
     private TextView date;
+    private TextView themeLabel;
+    private LinearLayout face;
+    private TextView hint;
     private boolean closing;
     private BroadcastReceiver present;
     private KeyguardManager keyguard;
@@ -55,6 +60,10 @@ public class JawnLockActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshClock();
+        // The activity survives a screen-off, so the theme is re-read every
+        // time the face is shown: a start/stop appointment may have moved it
+        // while the phone slept.
+        applyTheme(JawnTheme.current(this));
         // Started by a screen-on that raced the person's own unlock, or left
         // over after the keyguard went away: do not become a second gate.
         if (keyguard != null && !keyguard.isKeyguardLocked()) close();
@@ -81,6 +90,14 @@ public class JawnLockActivity extends Activity {
         } else {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
         }
+        // Let the face run under the camera cutout, so a light theme has no
+        // black band where the status bar would be.
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attrs);
+        }
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -92,6 +109,7 @@ public class JawnLockActivity extends Activity {
 
     private void buildFace() {
         LinearLayout root = new LinearLayout(this);
+        face = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
         root.setPadding(dp(28), dp(28), dp(28), dp(48));
@@ -123,7 +141,18 @@ public class JawnLockActivity extends Activity {
         dateLp.topMargin = dp(6);
         root.addView(date, dateLp);
 
-        TextView hint = new TextView(this);
+        themeLabel = new TextView(this);
+        themeLabel.setTextColor(0xFFE8C547);
+        themeLabel.setTextSize(13);
+        themeLabel.setLetterSpacing(0.08f);
+        themeLabel.setGravity(Gravity.CENTER);
+        themeLabel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams themeLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        themeLp.topMargin = dp(12);
+        root.addView(themeLabel, themeLp);
+
+        hint = new TextView(this);
         hint.setText("Tap to unlock");
         hint.setTextColor(0x8AFFFFFF);
         hint.setTextSize(15);
@@ -136,6 +165,31 @@ public class JawnLockActivity extends Activity {
 
         setContentView(root);
         refreshClock();
+    }
+
+    /** Paint the face with the theme the manager recorded for native surfaces. */
+    private void applyTheme(JawnTheme theme) {
+        if (theme == null) return;
+        if (face != null) face.setBackgroundColor(theme.background);
+        if (clock != null) clock.setTextColor(theme.ink);
+        if (date != null) date.setTextColor(theme.muted);
+        if (hint != null) hint.setTextColor(theme.accent);
+        if (themeLabel != null) {
+            String label = theme.name == null ? "" : theme.name.replace('_', ' ').trim();
+            if (theme.appointment && !label.isEmpty()) {
+                label = Character.toUpperCase(label.charAt(0)) + label.substring(1);
+                themeLabel.setText(label);
+                themeLabel.setTextColor(theme.accent);
+                themeLabel.setVisibility(View.VISIBLE);
+            } else {
+                themeLabel.setVisibility(View.GONE);
+            }
+        }
+        Window window = getWindow();
+        window.setStatusBarColor(theme.background);
+        window.setNavigationBarColor(theme.background);
+        // The cutout area is painted by the window background, not the layout.
+        window.setBackgroundDrawable(new ColorDrawable(theme.background));
     }
 
     private void refreshClock() {

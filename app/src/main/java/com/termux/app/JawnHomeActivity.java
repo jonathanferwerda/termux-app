@@ -610,6 +610,14 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         if (lastRunning != null) renderRunning(lastRunning);
     }
 
+    /** The same paint, from the bundle the manager recorded for native surfaces. */
+    private void applyTheme(JawnTheme theme) {
+        if (theme == null) return;
+        applyTheme(String.format("#%06X", theme.background & 0xFFFFFF),
+            String.format("#%06X", theme.ink & 0xFFFFFF),
+            String.format("#%06X", theme.muted & 0xFFFFFF), theme.dark);
+    }
+
     // ------------------------------------------------- the system app shelves
 
     private void buildCategories() {
@@ -882,18 +890,26 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 }
 
                 final String bg = background;
+                // The active appointment theme wins; the Misc colour is only the
+                // fallback for a house that has never recorded the bundle.
+                final JawnTheme themed = JawnTheme.fromFile(JawnHomeActivity.this);
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         statusInFlight = false;
                         if (isFinishing() || isDestroyed()) return;
-                        int colour = parseColour(bg, -1);
-                        if (colour != -1) {
-                            int ink = contrastInk(colour);
-                            applyTheme(String.format("#%06X", colour & 0xFFFFFF),
-                                ink == 0xFFFFFFFF ? "#ffffff" : "#000000",
-                                ink == 0xFFFFFFFF ? "#c9c9c9" : "#3a3a3a",
-                                ink == 0xFFFFFFFF);
+                        if (themed != null) {
+                            applyTheme(themed);
+                        }
+                        else {
+                            int colour = parseColour(bg, -1);
+                            if (colour != -1) {
+                                int ink = contrastInk(colour);
+                                applyTheme(String.format("#%06X", colour & 0xFFFFFF),
+                                    ink == 0xFFFFFFFF ? "#ffffff" : "#000000",
+                                    ink == 0xFFFFFFFF ? "#c9c9c9" : "#3a3a3a",
+                                    ink == 0xFFFFFFFF);
+                            }
                         }
                         renderRunning(running);
                     }
