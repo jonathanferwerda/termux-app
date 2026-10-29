@@ -872,7 +872,9 @@ work and a full-width build has crashed it (2026-10-10).
     the phone's. `JawnLockActivity` is started by `JawnLockScreen` on screen-on
     while the keyguard is locked (the service registers the listener only while
     the panel's **JawnOS lock screen** switch is on; the overlay permission is
-    what lets the screen-on start from the background). A secure keyguard gets
-    its prompt after 450ms; a swipe-only one waits for a tap. `ACTION_USER_PRESENT`
-    finishes the face if the phone unlocked by its own sensor, so there is never
-    a second gate. Back is swallowed; Home is the system's.
+    what lets the screen-on start from the background). The face waits for a tap:
+    raising the credential prompt automatically buried it under the system
+    bouncer, which is the OneUI screen the face exists to replace. A tap (or a
+    fingerprint on the sensor) is the one unlock. `ACTION_USER_PRESENT` finishes
+    the face if the phone unlocked by its own sensor, so there is never a second
+    gate. Back is swallowed; Home is the system's.

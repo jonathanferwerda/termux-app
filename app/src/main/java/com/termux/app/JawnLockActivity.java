@@ -44,14 +44,11 @@ public class JawnLockActivity extends Activity {
         lockScreenWindow();
         buildFace();
         listenForPresent();
-        // A secure keyguard gets its prompt straight away (the face is behind
-        // it). A swipe-only keyguard has nothing to ask, so leave the face up
-        // until the person taps it.
-        if (keyguard != null && keyguard.isKeyguardSecure()) {
-            getWindow().getDecorView().postDelayed(new Runnable() {
-                public void run() { unlock(); }
-            }, 450);
-        }
+        // The face stays up until the person acts. The unlock is one gesture
+        // away: a tap calls the phone's own credential prompt, and a fingerprint
+        // on the sensor arrives as ACTION_USER_PRESENT. Raising that prompt
+        // straight away would bury the face under the system bouncer, which is
+        // the OneUI screen this face is meant to replace.
     }
 
     @Override
@@ -127,10 +124,10 @@ public class JawnLockActivity extends Activity {
         root.addView(date, dateLp);
 
         TextView hint = new TextView(this);
-        hint.setText("JawnOS");
-        hint.setTextColor(0x66FFFFFF);
-        hint.setTextSize(13);
-        hint.setLetterSpacing(0.18f);
+        hint.setText("Tap to unlock");
+        hint.setTextColor(0x8AFFFFFF);
+        hint.setTextSize(15);
+        hint.setLetterSpacing(0.06f);
         hint.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
