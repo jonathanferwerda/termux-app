@@ -968,3 +968,10 @@ work and a full-width build has crashed it (2026-10-10).
     `1`/`0` (a JSON number), and `JSONObject.optBoolean` only reads a real JSON
     boolean, so `silent`, `ongoing`, `dry_run`, `on`, `flush` and the other
     flags were all being read as false. `flag()` accepts Boolean/Number/String.
+
+94. Native media, share and open on the M1 bridge: `media.player`
+    (MediaPlayer, play/stop one clip at a time — jawn's Piper WAV and
+    notification sounds), `share.send` (ACTION_SEND with a FileProvider URI and
+    optional text; accepts termux-share's mime-as-action shape) and `open.url`
+    (ACTION_VIEW for a URL or a FileProvider file path). The tree prefers them
+    and keeps termux-media-player/share/open as fallbacks.

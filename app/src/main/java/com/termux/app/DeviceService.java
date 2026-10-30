@@ -9,6 +9,8 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -56,6 +58,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import androidx.core.content.FileProvider;
 
 import com.termux.R;
 
@@ -120,6 +124,7 @@ public class DeviceService extends Service {
         if (clients != null) clients.shutdownNow();
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}
         try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Throwable ignored) {}
+        releaseMedia();
         Log.i(LOG_TAG, "device bridge stopped");
         super.onDestroy();
     }
@@ -274,6 +279,18 @@ public class DeviceService extends Service {
             else if ("telephony.deviceinfo".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", telephonyInfo());
+            }
+            else if ("media.player".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", media(request.optJSONObject("args")));
+            }
+            else if ("share.send".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", share(request.optJSONObject("args")));
+            }
+            else if ("open.url".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", open(request.optJSONObject("args")));
             }
             else {
                 reply.put("ok", false);
@@ -540,6 +557,117 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    // --- media, share, open ------------------------------------------------
+
+    private MediaPlayer mediaPlayer;
+
+    /** One player for jawn's clips (Piper's WAV, notification sounds). */
+    private synchronized JSONObject media(JSONObject args) throws Exception {
+        String action = args == null ? "play" : args.optString("action", "play");
+        JSONObject result = new JSONObject();
+        if ("stop".equals(action)) {
+            releaseMedia();
+            result.put("playing", false);
+            return result;
+        }
+        if (!"play".equals(action)) throw new IllegalArgumentException("unknown action");
+
+        String path = args.optString("path", "");
+        if (path.isEmpty()) throw new IllegalArgumentException("no path");
+        releaseMedia();
+        mediaPlayer = new MediaPlayer();
+        mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build());
+        mediaPlayer.setDataSource(path);
+        mediaPlayer.prepare();
+        mediaPlayer.start();
+        result.put("playing", true);
+        result.put("duration_ms", mediaPlayer.getDuration());
+        return result;
+    }
+
+    private synchronized void releaseMedia() {
+        if (mediaPlayer == null) return;
+        try { mediaPlayer.stop(); } catch (Throwable ignored) {}
+        try { mediaPlayer.release(); } catch (Throwable ignored) {}
+        mediaPlayer = null;
+    }
+
+    private static final String FILE_AUTHORITY_SUFFIX = ".jawnupdates";
+
+    private Uri sharedUri(java.io.File file) {
+        return FileProvider.getUriForFile(this, getPackageName() + FILE_AUTHORITY_SUFFIX, file);
+    }
+
+    /**
+     * share.send: ACTION_SEND with a file (a FileProvider URI, so targetSdk-28
+     * file:// exposure is never involved) and/or text. The old caller passed the
+     * mime as termux-share's -a action, so accept either shape.
+     */
+    private JSONObject share(JSONObject args) throws Exception {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        String type = args == null ? "" : args.optString("type", "");
+        String path = args == null ? "" : args.optString("path", "");
+        String text = args == null ? "" : args.optString("text", "");
+        if (type.startsWith("android.intent.action.")) {
+            send.setAction(type);
+            type = "";
+        }
+        if (!path.isEmpty()) {
+            java.io.File file = new java.io.File(path);
+            if (!file.exists()) throw new IllegalArgumentException("no such file");
+            Uri uri = sharedUri(file);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (type.isEmpty()) {
+                String found = getContentResolver().getType(uri);
+                if (found != null) type = found;
+            }
+        }
+        if (!text.isEmpty()) {
+            if (path.isEmpty()) send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT, text);
+        }
+        send.setType(type.isEmpty() ? "*/*" : type);
+        send.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(Intent.createChooser(send, null));
+        JSONObject result = new JSONObject();
+        result.put("shared", true);
+        return result;
+    }
+
+    /** open.url: ACTION_VIEW for a URL, or a path through the FileProvider. */
+    private JSONObject open(JSONObject args) throws Exception {
+        String url = args == null ? "" : args.optString("url", "");
+        String path = args == null ? "" : args.optString("path", "");
+        Intent view;
+        if (!url.isEmpty()) {
+            view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        }
+        else if (!path.isEmpty()) {
+            java.io.File file = new java.io.File(path);
+            if (!file.exists()) throw new IllegalArgumentException("no such file");
+            Uri uri = sharedUri(file);
+            String type = getContentResolver().getType(uri);
+            view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, type == null ? "*/*" : type);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
+        else {
+            throw new IllegalArgumentException("no url or path");
+        }
+        view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (view.resolveActivity(getPackageManager()) == null) {
+            throw new IllegalStateException("no handler");
+        }
+        startActivity(view);
+        JSONObject result = new JSONObject();
+        result.put("opened", true);
+        return result;
     }
 
     // --- location, speech, telephony ---------------------------------------
