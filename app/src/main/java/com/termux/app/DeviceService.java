@@ -11,6 +11,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.media.MediaRecorder;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -26,7 +27,9 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.database.Cursor;
+import android.os.Bundle;
 import android.os.PowerManager;
+import android.service.notification.StatusBarNotification;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
 import android.telephony.TelephonyManager;
@@ -125,6 +128,7 @@ public class DeviceService extends Service {
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}
         try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Throwable ignored) {}
         releaseMedia();
+        stopRecording();
         Log.i(LOG_TAG, "device bridge stopped");
         super.onDestroy();
     }
@@ -291,6 +295,14 @@ public class DeviceService extends Service {
             else if ("open.url".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", open(request.optJSONObject("args")));
+            }
+            else if ("notification.list".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", notificationList());
+            }
+            else if ("media.record".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", record(request.optJSONObject("args")));
             }
             else {
                 reply.put("ok", false);
@@ -557,6 +569,81 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    /** termux-notification-list's shape, from the listener's active set. */
+    private JSONObject notificationList() throws Exception {
+        StatusBarNotification[] active = JawnNotificationListener.active();
+        if (active == null) throw new IllegalStateException("notification access not granted");
+        JSONArray list = new JSONArray();
+        for (StatusBarNotification sbn : active) {
+            Notification notification = sbn.getNotification();
+            Bundle extras = notification == null ? null : notification.extras;
+            CharSequence title = extras == null ? null : extras.getCharSequence(Notification.EXTRA_TITLE);
+            CharSequence text = extras == null ? null : extras.getCharSequence(Notification.EXTRA_TEXT);
+            JSONObject item = new JSONObject();
+            item.put("id", sbn.getId());
+            item.put("tag", sbn.getTag() == null ? "" : sbn.getTag());
+            item.put("package", sbn.getPackageName());
+            item.put("title", title == null ? "" : title.toString());
+            item.put("text", text == null ? "" : text.toString());
+            item.put("content", text == null ? "" : text.toString());
+            item.put("when", sbn.getPostTime());
+            item.put("ongoing", sbn.isOngoing());
+            list.put(item);
+        }
+        JSONObject result = new JSONObject();
+        result.put("notifications", list);
+        return result;
+    }
+
+    private MediaRecorder recorder;
+    private String recordPath;
+
+    /**
+     * media.record: MediaRecorder to the caller's path (MPEG-4/AAC in what the
+     * tree names .mp3 — the same container termux-microphone-record writes).
+     * Start returns at once; stop reports the bytes written.
+     */
+    private synchronized JSONObject record(JSONObject args) throws Exception {
+        String action = args == null ? "start" : args.optString("action", "start");
+        JSONObject result = new JSONObject();
+        if ("stop".equals(action)) {
+            stopRecording();
+            result.put("recording", false);
+            if (recordPath != null) {
+                java.io.File file = new java.io.File(recordPath);
+                result.put("bytes", file.exists() ? file.length() : 0);
+                recordPath = null;
+            }
+            return result;
+        }
+        if (!"start".equals(action)) throw new IllegalArgumentException("unknown action");
+
+        String path = args.optString("path", "");
+        if (path.isEmpty()) throw new IllegalArgumentException("no path");
+        stopRecording();
+
+        MediaRecorder fresh = new MediaRecorder();
+        fresh.setAudioSource(MediaRecorder.AudioSource.MIC);
+        fresh.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+        fresh.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        fresh.setAudioEncodingBitRate(64000);
+        fresh.setAudioSamplingRate(44100);
+        fresh.setOutputFile(path);
+        fresh.prepare();
+        fresh.start();
+        recorder = fresh;
+        recordPath = path;
+        result.put("recording", true);
+        return result;
+    }
+
+    private synchronized void stopRecording() {
+        if (recorder == null) return;
+        try { recorder.stop(); } catch (Throwable t) { Log.w(LOG_TAG, "recorder stop", t); }
+        try { recorder.release(); } catch (Throwable ignored) {}
+        recorder = null;
     }
 
     // --- media, share, open ------------------------------------------------

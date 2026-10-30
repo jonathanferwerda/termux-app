@@ -982,3 +982,11 @@ work and a full-width build has crashed it (2026-10-10).
     spelling, which `<files-path>` (built from getFilesDir()'s
     `/data/user/0/...`) did not match, so `share.send` failed with "Failed to
     find configured root".
+
+96. Native notification list and microphone recording: `JawnNotificationListener`
+    (a NotificationListenerService, connected only after the person grants
+    Notification access) plus `notification.list` on the bridge, and
+    `media.record` (MediaRecorder, MPEG-4/AAC to the caller's path, start/stop).
+    DeviceService now declares dataSync|microphone|camera service types. The tree
+    prefers both and keeps termux-notification-list/microphone-record as
+    fallbacks.
