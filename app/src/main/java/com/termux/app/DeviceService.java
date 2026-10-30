@@ -5,8 +5,12 @@ import android.app.PendingIntent;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.BatteryManager;
@@ -14,6 +18,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.media.AudioManager;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -95,6 +101,7 @@ public class DeviceService extends Service {
         running = false;
         try { if (serverSocket != null) serverSocket.close(); } catch (Throwable ignored) {}
         if (clients != null) clients.shutdownNow();
+        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}
         Log.i(LOG_TAG, "device bridge stopped");
         super.onDestroy();
     }
@@ -186,6 +193,37 @@ public class DeviceService extends Service {
                 notificationRemove(args == null ? "" : args.optString("id", ""));
                 reply.put("ok", true);
                 reply.put("result", new JSONObject());
+            }
+            else if ("clipboard.get".equals(method)) {
+                JSONObject result = new JSONObject();
+                result.put("text", clipboardGet());
+                reply.put("ok", true);
+                reply.put("result", result);
+            }
+            else if ("clipboard.set".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                clipboardSet(args == null ? "" : args.optString("text", ""));
+                reply.put("ok", true);
+                reply.put("result", new JSONObject());
+            }
+            else if ("audio.volume".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", volume(request.optJSONObject("args")));
+            }
+            else if ("hardware.torch".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                boolean on = args != null && args.optBoolean("on", false);
+                JSONObject result = new JSONObject();
+                result.put("on", torch(on));
+                reply.put("ok", true);
+                reply.put("result", result);
+            }
+            else if ("power.wake_lock".equals(method) || "power.wake_unlock".equals(method)) {
+                boolean held = wakeLock("power.wake_lock".equals(method));
+                JSONObject result = new JSONObject();
+                result.put("held", held);
+                reply.put("ok", true);
+                reply.put("result", result);
             }
             else {
                 reply.put("ok", false);
@@ -452,6 +490,141 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    // --- clipboard, volume, torch, wake lock ------------------------------
+
+    private String clipboardGet() {
+        try {
+            ClipboardManager manager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (manager == null || !manager.hasPrimaryClip()) return "";
+            ClipData clip = manager.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence text = clip.getItemAt(0).coerceToText(this);
+            return text == null ? "" : text.toString();
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "clipboard read failed", t);
+            return "";
+        }
+    }
+
+    private void clipboardSet(String text) {
+        try {
+            ClipboardManager manager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (manager != null) {
+                manager.setPrimaryClip(ClipData.newPlainText("jawn", text == null ? "" : text));
+            }
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "clipboard write failed", t);
+        }
+    }
+
+    /** The termux-volume shape: every stream as {stream, volume, max_volume, muted}. */
+    private JSONObject volume(JSONObject args) throws Exception {
+        JSONObject result = new JSONObject();
+        JSONArray streams = new JSONArray();
+        AudioManager manager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        result.put("streams", streams);
+        if (manager == null) return result;
+
+        if (args != null && args.has("stream") && args.has("volume")) {
+            int id = streamId(args.optString("stream", ""));
+            if (id >= 0) {
+                int max = manager.getStreamMaxVolume(id);
+                int level = Math.max(0, Math.min(max, args.optInt("volume", 0)));
+                manager.setStreamVolume(id, level, 0);
+            }
+        }
+
+        int[] ids = {
+            AudioManager.STREAM_VOICE_CALL, AudioManager.STREAM_SYSTEM,
+            AudioManager.STREAM_RING, AudioManager.STREAM_MUSIC,
+            AudioManager.STREAM_ALARM, AudioManager.STREAM_NOTIFICATION
+        };
+        for (int id : ids) {
+            JSONObject stream = new JSONObject();
+            stream.put("stream", streamName(id));
+            stream.put("volume", manager.getStreamVolume(id));
+            stream.put("max_volume", manager.getStreamMaxVolume(id));
+            stream.put("muted", Build.VERSION.SDK_INT >= 23 && manager.isStreamMute(id));
+            streams.put(stream);
+        }
+        return result;
+    }
+
+    private static int streamId(String name) {
+        String key = name == null ? "" : name.trim().toLowerCase(java.util.Locale.US);
+        switch (key) {
+            case "call": case "voice_call": case "in_call": return AudioManager.STREAM_VOICE_CALL;
+            case "system": return AudioManager.STREAM_SYSTEM;
+            case "ring": case "ringer": return AudioManager.STREAM_RING;
+            case "music": case "media": return AudioManager.STREAM_MUSIC;
+            case "alarm": return AudioManager.STREAM_ALARM;
+            case "notification": case "notifications": return AudioManager.STREAM_NOTIFICATION;
+            default: return -1;
+        }
+    }
+
+    private static String streamName(int id) {
+        switch (id) {
+            case AudioManager.STREAM_VOICE_CALL: return "call";
+            case AudioManager.STREAM_SYSTEM: return "system";
+            case AudioManager.STREAM_RING: return "ring";
+            case AudioManager.STREAM_MUSIC: return "music";
+            case AudioManager.STREAM_ALARM: return "alarm";
+            case AudioManager.STREAM_NOTIFICATION: return "notification";
+            default: return String.valueOf(id);
+        }
+    }
+
+    /** The first camera with a flash unit owns the torch; the id is cached. */
+    private String torchCameraId;
+
+    private boolean torch(boolean on) {
+        try {
+            CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
+            if (manager == null) return false;
+            if (torchCameraId == null) {
+                for (String id : manager.getCameraIdList()) {
+                    Boolean flash = manager.getCameraCharacteristics(id)
+                        .get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                    if (flash != null && flash) {
+                        torchCameraId = id;
+                        break;
+                    }
+                }
+            }
+            if (torchCameraId == null) return false;
+            manager.setTorchMode(torchCameraId, on);
+            return on;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "torch failed", t);
+            return false;
+        }
+    }
+
+    private PowerManager.WakeLock wakeLock;
+
+    /** One partial wake lock, named so it is attributable in dumpsys power. */
+    private synchronized boolean wakeLock(boolean on) {
+        try {
+            PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+            if (manager == null) return false;
+            if (on) {
+                if (wakeLock == null) {
+                    wakeLock = manager.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK, "jawnos:device-bridge");
+                    wakeLock.setReferenceCounted(false);
+                }
+                if (!wakeLock.isHeld()) wakeLock.acquire();
+                return true;
+            }
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+            return false;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "wake lock failed", t);
+            return false;
+        }
     }
 
     // --- token and notification ------------------------------------------

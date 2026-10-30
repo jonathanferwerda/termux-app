@@ -936,3 +936,10 @@ work and a full-width build has crashed it (2026-10-10).
     `notification.remove` and `toast.show`. The tree's `notification_sender`
     asks the bridge first and keeps the broadcast receiver and termux-notification
     as fallbacks.
+
+89. Native clipboard, volume, torch and wake lock on the M1 bridge:
+    `clipboard.get` / `clipboard.set` (ClipboardManager), `audio.volume`
+    (AudioManager; the six termux streams, set and read), `hardware.torch`
+    (CameraManager, the first camera with a flash), and `power.wake_lock` /
+    `power.wake_unlock` (one named PARTIAL_WAKE_LOCK, released on destroy). The
+    tree prefers them and keeps the termux commands as fallbacks.
