@@ -943,3 +943,10 @@ work and a full-width build has crashed it (2026-10-10).
     (CameraManager, the first camera with a flash), and `power.wake_lock` /
     `power.wake_unlock` (one named PARTIAL_WAKE_LOCK, released on destroy). The
     tree prefers them and keeps the termux commands as fallbacks.
+
+90. Native SMS, call log and contacts on the M1 bridge: `sms.send`
+    (SmsManager, multipart, with a dry_run that reports the parts without
+    sending), `sms.list` (Telephony.Sms, newest N), `telephony.call_log`
+    (CallLog.Calls, duration as H:MM:SS/M:SS), and `contact.list`
+    (ContactsContract, capped). The tree prefers them and keeps the termux
+    commands as fallbacks.

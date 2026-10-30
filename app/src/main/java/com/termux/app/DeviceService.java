@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.ClipData;
+import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -18,7 +19,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.database.Cursor;
 import android.os.PowerManager;
+import android.provider.CallLog;
+import android.provider.ContactsContract;
+import android.provider.Telephony;
+import android.telephony.SmsManager;
 import android.media.AudioManager;
 import android.util.Log;
 import android.widget.Toast;
@@ -37,6 +43,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -224,6 +231,22 @@ public class DeviceService extends Service {
                 result.put("held", held);
                 reply.put("ok", true);
                 reply.put("result", result);
+            }
+            else if ("sms.send".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", smsSend(request.optJSONObject("args")));
+            }
+            else if ("sms.list".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", smsList(request.optJSONObject("args")));
+            }
+            else if ("telephony.call_log".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", callLog(request.optJSONObject("args")));
+            }
+            else if ("contact.list".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", contacts(request.optJSONObject("args")));
             }
             else {
                 reply.put("ok", false);
@@ -490,6 +513,159 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    // --- SMS, call log, contacts ------------------------------------------
+
+    /**
+     * SmsManager sends multipart itself. A dry_run answers how many parts the
+     * message would become without touching the radio, so a test (or a
+     * preview) can prove the path without sending anything.
+     */
+    private JSONObject smsSend(JSONObject args) throws Exception {
+        String number = args == null ? "" : args.optString("number", "").trim();
+        String message = args == null ? "" : args.optString("message", "");
+        boolean dryRun = args != null && args.optBoolean("dry_run", false);
+        JSONObject result = new JSONObject();
+        if (number.isEmpty()) throw new IllegalArgumentException("no number");
+        SmsManager manager = Build.VERSION.SDK_INT >= 31
+            ? getSystemService(SmsManager.class)
+            : SmsManager.getDefault();
+        if (manager == null) throw new IllegalStateException("no SmsManager");
+        ArrayList<String> parts = manager.divideMessage(message);
+        result.put("parts", parts == null ? 0 : parts.size());
+        result.put("dry_run", dryRun);
+        if (!dryRun) {
+            manager.sendMultipartTextMessage(number, null, parts, null, null);
+        }
+        result.put("sent", !dryRun);
+        return result;
+    }
+
+    /** The last N messages in the termux-sms-list shape ({type, number, body, received}). */
+    private JSONObject smsList(JSONObject args) throws Exception {
+        int limit = limit(args, 10);
+        ContentResolver resolver = getContentResolver();
+        String[] columns = {
+            Telephony.Sms._ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY,
+            Telephony.Sms.DATE, Telephony.Sms.TYPE
+        };
+        JSONArray messages = new JSONArray();
+        try (Cursor cursor = resolver.query(Telephony.Sms.CONTENT_URI, columns, null, null,
+                Telephony.Sms.DATE + " DESC LIMIT " + limit)) {
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    JSONObject message = new JSONObject();
+                    String address = cursor.getString(1);
+                    String body = cursor.getString(2);
+                    message.put("number", address == null ? "" : address);
+                    message.put("body", body == null ? "" : body);
+                    message.put("received", cursor.getLong(3));
+                    message.put("type", smsType(cursor.getInt(4)));
+                    messages.put(message);
+                }
+            }
+        }
+        JSONObject result = new JSONObject();
+        result.put("messages", messages);
+        return result;
+    }
+
+    /** The last N calls in the termux-call-log shape ({name, phone_number, date, duration}). */
+    private JSONObject callLog(JSONObject args) throws Exception {
+        int limit = limit(args, 30);
+        ContentResolver resolver = getContentResolver();
+        String[] columns = {
+            CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME,
+            CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.TYPE
+        };
+        JSONArray calls = new JSONArray();
+        try (Cursor cursor = resolver.query(CallLog.Calls.CONTENT_URI, columns, null, null,
+                CallLog.Calls.DATE + " DESC LIMIT " + limit)) {
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    JSONObject call = new JSONObject();
+                    String number = cursor.getString(0);
+                    String name = cursor.getString(1);
+                    call.put("phone_number", number == null ? "" : number);
+                    call.put("name", name == null ? "" : name);
+                    call.put("date", cursor.getLong(2));
+                    call.put("duration", callDuration(cursor.getLong(3)));
+                    call.put("type", callType(cursor.getInt(4)));
+                    calls.put(call);
+                }
+            }
+        }
+        JSONObject result = new JSONObject();
+        result.put("calls", calls);
+        return result;
+    }
+
+    /** Every phone number in the contacts, capped, as [{name, number}]. */
+    private JSONObject contacts(JSONObject args) throws Exception {
+        int limit = limit(args, 2000);
+        ContentResolver resolver = getContentResolver();
+        String[] columns = {
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            ContactsContract.CommonDataKinds.Phone.NUMBER
+        };
+        JSONArray list = new JSONArray();
+        try (Cursor cursor = resolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI, columns, null, null,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC LIMIT " + limit)) {
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    String name = cursor.getString(0);
+                    String number = cursor.getString(1);
+                    if (number == null || number.isEmpty()) continue;
+                    JSONObject contact = new JSONObject();
+                    contact.put("name", name == null ? "" : name);
+                    contact.put("number", number);
+                    list.put(contact);
+                }
+            }
+        }
+        JSONObject result = new JSONObject();
+        result.put("contacts", list);
+        return result;
+    }
+
+    private static int limit(JSONObject args, int fallback) {
+        int limit = args == null ? fallback : args.optInt("limit", fallback);
+        return Math.max(1, Math.min(5000, limit));
+    }
+
+    private static String smsType(int type) {
+        switch (type) {
+            case Telephony.Sms.MESSAGE_TYPE_INBOX: return "inbox";
+            case Telephony.Sms.MESSAGE_TYPE_SENT: return "sent";
+            case Telephony.Sms.MESSAGE_TYPE_DRAFT: return "draft";
+            case Telephony.Sms.MESSAGE_TYPE_OUTBOX: return "outbox";
+            case Telephony.Sms.MESSAGE_TYPE_FAILED: return "failed";
+            case Telephony.Sms.MESSAGE_TYPE_QUEUED: return "queued";
+            default: return "unknown";
+        }
+    }
+
+    private static String callType(int type) {
+        switch (type) {
+            case CallLog.Calls.INCOMING_TYPE: return "incoming";
+            case CallLog.Calls.OUTGOING_TYPE: return "outgoing";
+            case CallLog.Calls.MISSED_TYPE: return "missed";
+            case CallLog.Calls.REJECTED_TYPE: return "rejected";
+            case CallLog.Calls.BLOCKED_TYPE: return "blocked";
+            case CallLog.Calls.VOICEMAIL_TYPE: return "voicemail";
+            default: return "unknown";
+        }
+    }
+
+    /** Seconds -> "H:MM:SS" or "M:SS", the shape the tree already splits on ':'. */
+    private static String callDuration(long seconds) {
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+        if (hours > 0) return String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, secs);
+        return String.format(java.util.Locale.US, "%d:%02d", minutes, secs);
     }
 
     // --- clipboard, volume, torch, wake lock ------------------------------
