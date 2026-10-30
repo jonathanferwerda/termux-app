@@ -963,3 +963,8 @@ work and a full-width build has crashed it (2026-10-10).
     and `telephony.deviceinfo` (TelephonyManager: phone type, SIM state,
     network type). The tree prefers them and keeps the termux commands as
     fallbacks.
+
+93. Boolean bridge arguments are read with a tolerant flag reader. Perl sends
+    `1`/`0` (a JSON number), and `JSONObject.optBoolean` only reads a real JSON
+    boolean, so `silent`, `ongoing`, `dry_run`, `on`, `flush` and the other
+    flags were all being read as false. `flag()` accepts Boolean/Number/String.

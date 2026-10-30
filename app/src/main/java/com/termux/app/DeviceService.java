@@ -196,7 +196,7 @@ public class DeviceService extends Service {
             else if ("toast.show".equals(method)) {
                 JSONObject args = request.optJSONObject("args");
                 String message = args == null ? "" : args.optString("message", "");
-                boolean longToast = args != null && args.optBoolean("long", false);
+                boolean longToast = args != null && flag(args, "long", false);
                 toast(message, longToast);
                 reply.put("ok", true);
                 reply.put("result", new JSONObject());
@@ -230,7 +230,7 @@ public class DeviceService extends Service {
             }
             else if ("hardware.torch".equals(method)) {
                 JSONObject args = request.optJSONObject("args");
-                boolean on = args != null && args.optBoolean("on", false);
+                boolean on = args != null && flag(args, "on", false);
                 JSONObject result = new JSONObject();
                 result.put("on", torch(on));
                 reply.put("ok", true);
@@ -395,8 +395,8 @@ public class DeviceService extends Service {
         int id = Math.abs(tag.hashCode());
         String title = args.optString("title", "JawnOS");
         String text = args.optString("text", args.optString("message", ""));
-        boolean silent = args.optBoolean("silent", false);
-        boolean ongoing = args.optBoolean("ongoing", false);
+        boolean silent = flag(args, "silent", false);
+        boolean ongoing = flag(args, "ongoing", false);
 
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
             | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
@@ -413,10 +413,10 @@ public class DeviceService extends Service {
                .setContentText(text)
                .setSmallIcon(smallIcon(args.optString("small_icon", "")))
                .setContentIntent(contentIntent)
-               .setAutoCancel(!ongoing && args.optBoolean("auto_cancel", true))
+               .setAutoCancel(!ongoing && flag(args, "auto_cancel", true))
                .setShowWhen(true);
-        if (ongoing || args.optBoolean("ongoing", false)) builder.setOngoing(true);
-        if (silent || args.optBoolean("only_alert_once", false)) builder.setOnlyAlertOnce(true);
+        if (ongoing || flag(args, "ongoing", false)) builder.setOngoing(true);
+        if (silent || flag(args, "only_alert_once", false)) builder.setOnlyAlertOnce(true);
 
         String subText = args.optString("sub_text", "");
         if (!subText.isEmpty()) builder.setSubText(subText);
@@ -430,7 +430,7 @@ public class DeviceService extends Service {
         JSONObject progress = args.optJSONObject("progress");
         if (progress != null) {
             builder.setProgress(progress.optInt("max", 100),
-                progress.optInt("current", 0), progress.optBoolean("indeterminate", false));
+                progress.optInt("current", 0), flag(progress, "indeterminate", false));
         }
 
         if (!silent && args.has("vibrate")) {
@@ -638,7 +638,7 @@ public class DeviceService extends Service {
             }
         }
 
-        int mode = args.optBoolean("flush", true) ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+        int mode = flag(args, "flush", true) ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
         int rc = tts.speak(text, mode, null, "jawn-" + System.currentTimeMillis());
         if (rc != TextToSpeech.SUCCESS) throw new IllegalStateException("speak failed: " + rc);
 
@@ -655,7 +655,7 @@ public class DeviceService extends Service {
         Intent call = new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)));
         call.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         JSONObject result = new JSONObject();
-        if (args.optBoolean("dry_run", false)) {
+        if (flag(args, "dry_run", false)) {
             result.put("would_dial", call.resolveActivity(getPackageManager()) != null);
             result.put("dry_run", true);
             return result;
@@ -748,7 +748,7 @@ public class DeviceService extends Service {
     private JSONObject smsSend(JSONObject args) throws Exception {
         String number = args == null ? "" : args.optString("number", "").trim();
         String message = args == null ? "" : args.optString("message", "");
-        boolean dryRun = args != null && args.optBoolean("dry_run", false);
+        boolean dryRun = args != null && flag(args, "dry_run", false);
         JSONObject result = new JSONObject();
         if (number.isEmpty()) throw new IllegalArgumentException("no number");
         SmsManager manager = Build.VERSION.SDK_INT >= 31
@@ -851,6 +851,23 @@ public class DeviceService extends Service {
         JSONObject result = new JSONObject();
         result.put("contacts", list);
         return result;
+    }
+
+    /**
+     * Perl sends a boolean as 1/0 (a JSON number), and callers may send true or
+     * "true"; JSONObject.optBoolean reads only a real JSON boolean, so every
+     * flag goes through here instead.
+     */
+    private static boolean flag(JSONObject args, String key, boolean fallback) {
+        if (args == null || !args.has(key)) return fallback;
+        Object value = args.opt(key);
+        if (value instanceof Boolean) return (Boolean) value;
+        if (value instanceof Number) return ((Number) value).doubleValue() != 0;
+        if (value instanceof String) {
+            String text = ((String) value).trim();
+            return "1".equals(text) || "true".equalsIgnoreCase(text) || "yes".equalsIgnoreCase(text);
+        }
+        return fallback;
     }
 
     private static int limit(JSONObject args, int fallback) {
