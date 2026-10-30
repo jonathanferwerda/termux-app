@@ -64,6 +64,13 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- M2: the BLE bridge (JawnBleService) moved here from the API app. This
+         tree compiles against API 30, so BLUETOOTH_SCAN cannot carry
+         neverForLocation (API 31); it rides the location grant it already has. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
@@ -545,13 +552,30 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!-- M2 supervisor: forks jawn itself (perl ./jawn) with one pipe into
+        <!-- Requests the device permissions the utilities need, in the app's own
+             name (M2: the API app used to own this screen). Reachable from the
+             dashboard and from the tree, which runs under this uid, so it is
+             not exported. -->
+        <activity
+            android:name=".app.JawnPermissionsActivity"
+            android:exported="false"
+            android:label="JawnOS permissions" />
+
+        <!-- The M2 supervisor: forks jawn itself (perl ./jawn) with one pipe into
              ~/manager.log, keeps one master alive, and replaces Termux's login
              session for the tree. Not exported. -->
         <service
             android:name=".app.SessionService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- The BLE bridge (was com.termux.api.JawnBleService): loopback JSON on
+             127.0.0.1:45999, the v2 multi-link NUS daemon scripts/jawn-bt
+             speaks to. Not exported; loopback and the shared uid are the gate. -->
+        <service
+            android:name=".app.JawnBleService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- The M1 device bridge: loopback JSON for the termux-* commands the
              app answers itself. Not exported; the token in $HOME/.jawn gates it. -->

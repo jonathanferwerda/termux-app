@@ -533,12 +533,10 @@ public class JawnDashboardActivity extends Activity {
     /** Launch the JawnOS API app's grant-all screen (it owns the device permissions). */
     private void grantDevicePermissions() {
         try {
-            Intent i = new Intent();
-            i.setClassName("com.termux.api", "com.termux.api.JawnGrantAllActivity");
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
+            startActivity(new Intent(self, JawnPermissionsActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Throwable t) {
-            toast("JawnOS API app is not installed");
+            toast("Could not open the permission screen");
         }
     }
 

@@ -151,26 +151,42 @@ public class JawnLauncher {
         return prefs(context).getBoolean(KEY_SYSTEM_BARS, false);
     }
 
-    /** Start (or nudge) the JawnOS API app's BLE bridge; safe if it already runs. */
+    /** Start (or nudge) the app's own BLE bridge (M2: it used to be the API
+     *  app's service). Safe if it already runs. */
     public static void startBle(Context context) {
+        stopLegacyBle(context);
         try {
-            Intent i = new Intent();
-            i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
+            Intent i = new Intent(context, JawnBleService.class);
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
             else context.startService(i);
         } catch (Throwable t) {
-            // JawnOS API app not installed
+            JawnLog.append("BLE bridge start failed: " + t);
         }
     }
 
     public static void stopBle(Context context) {
+        try {
+            Intent i = new Intent(context, JawnBleService.class);
+            i.setAction(JawnBleService.ACTION_STOP);
+            context.startService(i);
+        } catch (Throwable t) {
+            JawnLog.append("BLE bridge stop failed: " + t);
+        }
+        stopLegacyBle(context);
+    }
+
+    /** Silence the API app's copy of the daemon. Both bind 127.0.0.1:45999, so a
+     *  legacy one left running would keep the new bridge from listening. The
+     *  package may not be installed (or not visible); either way this is best
+     *  effort. */
+    public static void stopLegacyBle(Context context) {
         try {
             Intent i = new Intent();
             i.setClassName("com.termux.api", "com.termux.api.JawnBleService");
             i.setAction("com.termux.api.action.JAWN_BLE_STOP");
             context.startService(i);
         } catch (Throwable t) {
-            // JawnOS API app not installed
+            // API app not installed
         }
     }
 

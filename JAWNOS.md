@@ -1017,3 +1017,21 @@ work and a full-width build has crashed it (2026-10-10).
     `#!/usr/bin/perl` line, which on a device only works through termux-exec's
     `LD_PRELOAD`. This is what lets the supervisor run the tree without
     termux-exec, on the phone and on the desktop alike.
+
+100. M2 — the BLE bridge is the app's own now. `JawnBleService` moved from
+     `com.termux.api` to `com.termux.app` unchanged (same v2 multi-link NUS
+     protocol on 127.0.0.1:45999, same "jawn-bt" prefs), so the tree and
+     `scripts/jawn-bt` only needed the component name in their start command.
+     The manifest gains BLUETOOTH, BLUETOOTH_ADMIN, BLUETOOTH_SCAN and
+     BLUETOOTH_CONNECT (SCAN cannot carry neverForLocation at compileSdk 30, so
+     it rides the location grant), and the service is
+     `foregroundServiceType="connectedDevice"`. `JawnLauncher.startBle` sends the
+     API app's daemon its stop action first: both bind the same loopback port, so
+     a legacy one left running would keep the new bridge from listening.
+101. M2 — `JawnPermissionsActivity` (from the API app's `JawnGrantAllActivity`)
+     requests the device runtime permissions in the app's own name, including
+     BLUETOOTH_SCAN/CONNECT on API 31+. The dashboard's "Device" button and the
+     tree's configure page (`am start -n com.termux/.app.JawnPermissionsActivity`,
+     allowed from the tree because it runs under this uid) both use it. With that
+     and the native BLE bridge, nothing in the tree calls `com.termux.api`; the
+     API app is now only a rollback.
