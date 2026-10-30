@@ -146,101 +146,23 @@ final class TermuxInstaller {
                         return;
                     }
 
-                    Logger.logInfo(LOG_TAG, "Extracting bootstrap zip to prefix staging directory \"" + TERMUX_STAGING_PREFIX_DIR_PATH + "\".");
+                    Logger.logInfo(LOG_TAG, "Unpacking the JawnOS runtime into \"" + TERMUX_PREFIX_DIR_PATH + "\".");
 
-                    final byte[] buffer = new byte[8096];
-                    final List<Pair<String, String>> symlinks = new ArrayList<>(50);
-
-                    final byte[] zipBytes = loadZipBytes();
-                    try (ZipInputStream zipInput = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
-                        ZipEntry zipEntry;
-                        while ((zipEntry = zipInput.getNextEntry()) != null) {
-                            if (zipEntry.getName().equals("SYMLINKS.txt")) {
-                                BufferedReader symlinksReader = new BufferedReader(new InputStreamReader(zipInput));
-                                String line;
-                                while ((line = symlinksReader.readLine()) != null) {
-                                    String[] parts = line.split("←");
-                                    if (parts.length != 2)
-                                        throw new RuntimeException("Malformed symlink line: " + line);
-                                    String oldPath = parts[0];
-                                    String newPath = TERMUX_STAGING_PREFIX_DIR_PATH + "/" + parts[1];
-                                    symlinks.add(Pair.create(oldPath, newPath));
-
-                                    error = ensureDirectoryExists(new File(newPath).getParentFile());
-                                    if (error != null) {
-                                        showBootstrapErrorDialog(activity, whenDone, Error.getErrorMarkdownString(error));
-                                        return;
-                                    }
+                    // M3: the runtime archive replaces the Termux bootstrap. It
+                    // carries its own perl and the tools the diet kept, and the
+                    // manifest in assets pins its checksum. Nothing is installed
+                    // after this, and there is no package manager to run.
+                    JawnRuntime.install(activity, new JawnRuntime.Progress() {
+                        public void step(final String what) {
+                            activity.runOnUiThread(new Runnable() {
+                                public void run() {
+                                    try { progress.setMessage(what); } catch (RuntimeException ignored) { }
                                 }
-                            } else {
-                                String zipEntryName = zipEntry.getName();
-                                File targetFile = new File(TERMUX_STAGING_PREFIX_DIR_PATH, zipEntryName);
-                                boolean isDirectory = zipEntry.isDirectory();
-
-                                error = ensureDirectoryExists(isDirectory ? targetFile : targetFile.getParentFile());
-                                if (error != null) {
-                                    showBootstrapErrorDialog(activity, whenDone, Error.getErrorMarkdownString(error));
-                                    return;
-                                }
-
-                                if (!isDirectory) {
-                                    try (FileOutputStream outStream = new FileOutputStream(targetFile)) {
-                                        int readBytes;
-                                        while ((readBytes = zipInput.read(buffer)) != -1)
-                                            outStream.write(buffer, 0, readBytes);
-                                    }
-                                    if (zipEntryName.startsWith("bin/") || zipEntryName.startsWith("libexec") ||
-                                        zipEntryName.startsWith("lib/apt/apt-helper") || zipEntryName.startsWith("lib/apt/methods") ||
-                                        zipEntryName.equals("etc/termux/bootstrap/termux-bootstrap-second-stage.sh")) {
-                                        //noinspection OctalInteger
-                                        Os.chmod(targetFile.getAbsolutePath(), 0700);
-                                    }
-                                }
-                            }
+                            });
                         }
-                    }
+                    });
 
-                    if (symlinks.isEmpty())
-                        throw new RuntimeException("No SYMLINKS.txt encountered");
-                    for (Pair<String, String> symlink : symlinks) {
-                        Os.symlink(symlink.first, symlink.second);
-                    }
-
-                    Logger.logInfo(LOG_TAG, "Moving termux prefix staging to prefix directory.");
-
-                    if (!TERMUX_STAGING_PREFIX_DIR.renameTo(TERMUX_PREFIX_DIR)) {
-                        throw new RuntimeException("Moving termux prefix staging to prefix directory failed");
-                    }
-
-                    // Run Termux bootstrap second stage.
-                    String termuxBootstrapSecondStageFile = TERMUX_PREFIX_DIR_PATH + "/etc/termux/bootstrap/termux-bootstrap-second-stage.sh";
-                    if (!FileUtils.fileExists(termuxBootstrapSecondStageFile, false)) {
-                        Logger.logInfo(LOG_TAG, "Not running Termux bootstrap second stage since script not found at \"" + termuxBootstrapSecondStageFile + "\" path.");
-                    } else {
-                        if (!FileUtils.fileExists(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/bash", true)) {
-                            Logger.logInfo(LOG_TAG, "Not running Termux bootstrap second stage since bash not found.");
-                        }
-                        Logger.logInfo(LOG_TAG, "Running Termux bootstrap second stage.");
-
-                        ExecutionCommand executionCommand = new ExecutionCommand(-1,
-                            termuxBootstrapSecondStageFile, null, null,
-                            null, true, false);
-                        executionCommand.commandLabel = "Termux Bootstrap Second Stage Command";
-                        executionCommand.backgroundCustomLogLevel = Logger.LOG_LEVEL_NORMAL;
-                        TermuxTask termuxTask = TermuxTask.execute(activity, executionCommand, null, new TermuxShellEnvironmentClient(), true);
-                        if (termuxTask == null || !executionCommand.isSuccessful() || executionCommand.resultData.exitCode != 0) {
-                            // Generate debug report before deleting broken prefix directory to get `stat` info at time of failure.
-                            showBootstrapErrorDialog(activity, whenDone, MarkdownUtils.getMarkdownCodeForString(executionCommand.toString(), true));
-
-                            // Delete prefix directory as otherwise when app is restarted, the broken prefix directory would be used and logged into.
-                            error = FileUtils.deleteFile("termux prefix directory", TERMUX_PREFIX_DIR_PATH, true);
-                            if (error != null)
-                                Logger.logErrorExtended(LOG_TAG, error.toString());
-                            return;
-                        }
-                    }
-
-                    Logger.logInfo(LOG_TAG, "Bootstrap packages installed successfully.");
+                    Logger.logInfo(LOG_TAG, "JawnOS runtime installed successfully.");
                     activity.runOnUiThread(whenDone);
 
                 } catch (final Exception e) {
@@ -354,12 +276,5 @@ final class TermuxInstaller {
         return FileUtils.createDirectoryFile(directory.getAbsolutePath());
     }
 
-    public static byte[] loadZipBytes() {
-        // Only load the shared library when necessary to save memory usage.
-        System.loadLibrary("termux-bootstrap");
-        return getZip();
-    }
-
-    public static native byte[] getZip();
 
 }

@@ -1045,3 +1045,17 @@ work and a full-width build has crashed it (2026-10-10).
      unchanged and Termux's perl remains the fallback. Proven on the tablet:
      `/proc/<master>/exe` was `…/.jawnos/runtime/bin/perl`, status `good`, port
      3000 answering, every worker up.
+
+103. M3b — the app installs its own runtime instead of the Termux bootstrap.
+     `JawnRuntime` reads `assets/jawnrt.json` (each ABI's file + sha256, baked at
+     build time), downloads the archive from the release if the cache copy is
+     missing or wrong, verifies the hash, then unpacks it into `$PREFIX`. The
+     unpacker parses the zip's central directory for the Unix mode
+     (`ZipEntry` hides the external attributes) and recreates symlinks (stored
+     as an entry whose body is the target, with `S_IFLNK` set). It then writes
+     `$PREFIX/etc/jawnos-runtime.json`, which makes `jawnos_deps.pl --install`
+     a no-op. `TermuxInstaller`'s bootstrap extraction, the bootstrap download
+     task, `src/main/cpp/` and `libtermux-bootstrap.so` are gone: the APK went
+     from 46.9 MB to 18.2 MB. Proven on an x86_64 emulator (Android 16) from a
+     wiped install: the runtime downloaded, verified and unpacked in ~22 s, and
+     `$PREFIX/bin/perl` was executable with `bin/awk` a working symlink.
