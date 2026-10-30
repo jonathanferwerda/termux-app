@@ -634,7 +634,11 @@ public class DeviceService extends Service {
         }
         send.setType(type.isEmpty() ? "*/*" : type);
         send.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(Intent.createChooser(send, null));
+        // A service is not an Activity: the flag belongs on the chooser too,
+        // not only on the intent the chooser wraps.
+        Intent chooser = Intent.createChooser(send, null);
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(chooser);
         JSONObject result = new JSONObject();
         result.put("shared", true);
         return result;
