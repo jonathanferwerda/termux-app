@@ -10,20 +10,27 @@ import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.media.AudioAttributes;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.content.IntentFilter;
+import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.ImageFormat;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.database.Cursor;
@@ -55,7 +62,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -303,6 +312,14 @@ public class DeviceService extends Service {
             else if ("media.record".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", record(request.optJSONObject("args")));
+            }
+            else if ("camera.photo".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", cameraPhoto(request.optJSONObject("args")));
+            }
+            else if ("auth.fingerprint".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", fingerprint(request.optJSONObject("args")));
             }
             else {
                 reply.put("ok", false);
@@ -569,6 +586,146 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    // --- camera, biometric -----------------------------------------------
+
+    /**
+     * One JPEG from the requested camera, headless: Camera2 + ImageReader, no
+     * preview surface. The tree's `-c` index (0 back, 1 front) is matched
+     * against the camera id list. Camera permission is already granted; the
+     * service declares the camera foreground type.
+     */
+    private JSONObject cameraPhoto(JSONObject args) throws Exception {
+        String path = args == null ? "" : args.optString("path", "");
+        if (path.isEmpty()) throw new IllegalArgumentException("no path");
+        String wanted = String.valueOf(args == null ? 0 : args.optInt("camera", 0));
+
+        CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
+        if (manager == null) throw new IllegalStateException("no camera manager");
+        String[] ids = manager.getCameraIdList();
+        if (ids == null || ids.length == 0) throw new IllegalStateException("no camera");
+        String id = ids[0];
+        for (String candidate : ids) {
+            if (candidate.equals(wanted)) { id = candidate; break; }
+        }
+
+        HandlerThread thread = new HandlerThread("jawn-camera");
+        thread.start();
+        final Handler handler = new Handler(thread.getLooper());
+        ImageReader reader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 1);
+        final CountDownLatch opened = new CountDownLatch(1);
+        final CountDownLatch captured = new CountDownLatch(1);
+        final CameraDevice[] device = new CameraDevice[1];
+        final boolean[] saved = new boolean[1];
+        final String[] failure = new String[1];
+
+        reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+            @Override public void onImageAvailable(ImageReader source) {
+                Image image = source.acquireNextImage();
+                if (image == null) { captured.countDown(); return; }
+                try {
+                    ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                    byte[] bytes = new byte[buffer.remaining()];
+                    buffer.get(bytes);
+                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(path)) {
+                        out.write(bytes);
+                    }
+                    saved[0] = true;
+                } catch (Throwable t) {
+                    failure[0] = String.valueOf(t.getMessage());
+                } finally {
+                    image.close();
+                    captured.countDown();
+                }
+            }
+        }, handler);
+
+        try {
+            manager.openCamera(id, new CameraDevice.StateCallback() {
+                @Override public void onOpened(CameraDevice camera) {
+                    device[0] = camera;
+                    opened.countDown();
+                }
+                @Override public void onDisconnected(CameraDevice camera) {
+                    camera.close();
+                    opened.countDown();
+                }
+                @Override public void onError(CameraDevice camera, int error) {
+                    camera.close();
+                    failure[0] = "camera open error " + error;
+                    opened.countDown();
+                }
+            }, handler);
+            if (!opened.await(10, TimeUnit.SECONDS) || device[0] == null) {
+                throw new IllegalStateException(failure[0] == null ? "camera open timed out" : failure[0]);
+            }
+            final CaptureRequest.Builder builder =
+                device[0].createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            builder.addTarget(reader.getSurface());
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            device[0].createCaptureSession(Collections.singletonList(reader.getSurface()),
+                new CameraCaptureSession.StateCallback() {
+                    @Override public void onConfigured(CameraCaptureSession session) {
+                        try {
+                            session.capture(builder.build(), null, handler);
+                        } catch (Throwable t) {
+                            failure[0] = String.valueOf(t.getMessage());
+                            captured.countDown();
+                        }
+                    }
+                    @Override public void onConfigureFailed(CameraCaptureSession session) {
+                        failure[0] = "capture session failed";
+                        captured.countDown();
+                    }
+                }, handler);
+            if (!captured.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("capture timed out");
+            if (!saved[0]) throw new IllegalStateException(failure[0] == null ? "capture failed" : failure[0]);
+        } finally {
+            try { if (device[0] != null) device[0].close(); } catch (Throwable ignored) {}
+            try { reader.close(); } catch (Throwable ignored) {}
+            thread.quitSafely();
+        }
+
+        JSONObject result = new JSONObject();
+        result.put("path", path);
+        result.put("camera", id);
+        java.io.File file = new java.io.File(path);
+        result.put("bytes", file.exists() ? file.length() : 0);
+        return result;
+    }
+
+    private static final Object authLock = new Object();
+    private static JSONObject authResult;
+
+    /** Startup of the prompt Activity; its answer arrives through deliverAuth. */
+    private JSONObject fingerprint(JSONObject args) throws Exception {
+        if (Build.VERSION.SDK_INT < 28) throw new IllegalStateException("biometric prompt needs API 28");
+        String reason = args == null ? "Unlock JawnOS" : args.optString("reason", "Unlock JawnOS");
+        synchronized (authLock) { authResult = null; }
+
+        Intent intent = new Intent(this, JawnBridgeAuthActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra("reason", reason);
+        startActivity(intent);
+
+        long deadline = System.currentTimeMillis() + 60000;
+        synchronized (authLock) {
+            while (authResult == null && System.currentTimeMillis() < deadline) {
+                authLock.wait(500);
+            }
+            JSONObject result = authResult;
+            authResult = null;
+            if (result == null) throw new IllegalStateException("no answer from the prompt");
+            return result;
+        }
+    }
+
+    static void deliverAuth(JSONObject result) {
+        synchronized (authLock) {
+            authResult = result;
+            authLock.notifyAll();
+        }
     }
 
     /** termux-notification-list's shape, from the listener's active set. */

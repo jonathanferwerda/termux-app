@@ -536,6 +536,15 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- The M1 device bridge's Activity half: BiometricPrompt is an Activity
+             flow, so the service starts this translucent one and takes the
+             answer back in-process. -->
+        <activity
+            android:name=".app.JawnBridgeAuthActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- The M1 device bridge: loopback JSON for the termux-* commands the
              app answers itself. Not exported; the token in $HOME/.jawn gates it. -->
         <service

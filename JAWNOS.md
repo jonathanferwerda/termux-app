@@ -990,3 +990,10 @@ work and a full-width build has crashed it (2026-10-10).
     DeviceService now declares dataSync|microphone|camera service types. The tree
     prefers both and keeps termux-notification-list/microphone-record as
     fallbacks.
+
+97. The last two M1 methods: `camera.photo` (headless Camera2 + ImageReader,
+    no preview surface, JPEG to the caller's path) and `auth.fingerprint`
+    (BiometricPrompt cannot run in a Service, so `JawnBridgeAuthActivity` is a
+    translucent Activity that asks and hands the answer back to DeviceService
+    in-process; the answer carries termux-fingerprint's auth_result, so a
+    cancellation is final rather than a second prompt).
