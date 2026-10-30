@@ -9,6 +9,9 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.content.IntentFilter;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
@@ -16,11 +19,15 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.BatteryManager;
 import android.os.Build;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.database.Cursor;
 import android.os.PowerManager;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
+import android.telephony.TelephonyManager;
 import android.provider.CallLog;
 import android.provider.ContactsContract;
 import android.provider.Telephony;
@@ -44,6 +51,9 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -109,6 +119,7 @@ public class DeviceService extends Service {
         try { if (serverSocket != null) serverSocket.close(); } catch (Throwable ignored) {}
         if (clients != null) clients.shutdownNow();
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}
+        try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Throwable ignored) {}
         Log.i(LOG_TAG, "device bridge stopped");
         super.onDestroy();
     }
@@ -247,6 +258,22 @@ public class DeviceService extends Service {
             else if ("contact.list".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", contacts(request.optJSONObject("args")));
+            }
+            else if ("location.current".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", location(request.optJSONObject("args")));
+            }
+            else if ("speech.speak".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", speech(request.optJSONObject("args")));
+            }
+            else if ("telephony.dial".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", dial(request.optJSONObject("args")));
+            }
+            else if ("telephony.deviceinfo".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", telephonyInfo());
             }
             else {
                 reply.put("ok", false);
@@ -513,6 +540,202 @@ public class DeviceService extends Service {
         quiet.setSound(null, null);
         quiet.enableVibration(false);
         manager.createNotificationChannel(quiet);
+    }
+
+    // --- location, speech, telephony ---------------------------------------
+
+    /**
+     * One GPS fix, bounded. The app's JawnLocationService is the primary source
+     * (jawn reads its file); this is the fallback for a phone whose service has
+     * not run yet, and the timeout keeps a cold GPS from holding the worker.
+     */
+    private JSONObject location(JSONObject args) throws Exception {
+        String provider = args == null ? "gps" : args.optString("provider", "gps");
+        if ("network".equals(provider)) provider = LocationManager.NETWORK_PROVIDER;
+        else provider = LocationManager.GPS_PROVIDER;
+        int timeout = args == null ? 15000 : Math.max(1000, Math.min(60000, args.optInt("timeout_ms", 15000)));
+
+        LocationManager manager = (LocationManager) getSystemService(LOCATION_SERVICE);
+        if (manager == null) throw new IllegalStateException("no location manager");
+        if (!manager.isProviderEnabled(provider)) {
+            throw new IllegalStateException(provider + " disabled");
+        }
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final Location[] fix = new Location[1];
+        LocationListener listener = new LocationListener() {
+            @Override public void onLocationChanged(Location location) {
+                synchronized (fix) { if (fix[0] == null) fix[0] = location; }
+                latch.countDown();
+            }
+            @Override public void onProviderEnabled(String name) {}
+            @Override public void onProviderDisabled(String name) { latch.countDown(); }
+            @Override public void onStatusChanged(String name, int status, android.os.Bundle extras) {}
+        };
+        try {
+            manager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
+            latch.await(timeout, TimeUnit.MILLISECONDS);
+        } finally {
+            manager.removeUpdates(listener);
+        }
+
+        Location found = fix[0];
+        if (found == null) found = manager.getLastKnownLocation(provider);
+        if (found == null) throw new IllegalStateException("no fix");
+
+        JSONObject result = new JSONObject();
+        result.put("provider", LocationManager.GPS_PROVIDER.equals(provider) ? "gps" : "network");
+        result.put("latitude", found.getLatitude());
+        result.put("longitude", found.getLongitude());
+        result.put("accuracy", found.hasAccuracy() ? found.getAccuracy() : 0);
+        result.put("time", found.getTime());
+        result.put("elapsedMs", Math.max(0, System.currentTimeMillis() - found.getTime()));
+        return result;
+    }
+
+    private TextToSpeech tts;
+    private boolean ttsReady;
+    private final Object ttsLock = new Object();
+
+    /** TextToSpeech initialises asynchronously; wait once, then reuse it. */
+    private boolean ensureTts() {
+        synchronized (ttsLock) {
+            if (ttsReady) return true;
+            final CountDownLatch latch = new CountDownLatch(1);
+            final boolean[] ok = new boolean[1];
+            tts = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
+                @Override public void onInit(int status) {
+                    ok[0] = status == TextToSpeech.SUCCESS;
+                    latch.countDown();
+                }
+            });
+            try { latch.await(6, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            ttsReady = ok[0];
+            if (!ttsReady && tts != null) {
+                try { tts.shutdown(); } catch (Throwable ignored) {}
+                tts = null;
+            }
+            return ttsReady;
+        }
+    }
+
+    /** Piper stays first in the tree; this is the Android fallback when it cannot run. */
+    private JSONObject speech(JSONObject args) throws Exception {
+        String text = args == null ? "" : args.optString("text", "");
+        if (text.isEmpty()) throw new IllegalArgumentException("no text");
+        if (!ensureTts()) throw new IllegalStateException("tts engine unavailable");
+
+        if (args.has("rate")) tts.setSpeechRate((float) args.optDouble("rate", 1.0));
+        if (args.has("pitch")) tts.setPitch((float) args.optDouble("pitch", 1.0));
+        String language = args.optString("language", "");
+        if (!language.isEmpty()) {
+            tts.setLanguage(new Locale(language));
+        }
+        String voice = args.optString("voice", "");
+        if (!voice.isEmpty() && tts.getVoices() != null) {
+            for (Voice candidate : tts.getVoices()) {
+                if (candidate.getName().equals(voice)) { tts.setVoice(candidate); break; }
+            }
+        }
+
+        int mode = args.optBoolean("flush", true) ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+        int rc = tts.speak(text, mode, null, "jawn-" + System.currentTimeMillis());
+        if (rc != TextToSpeech.SUCCESS) throw new IllegalStateException("speak failed: " + rc);
+
+        JSONObject result = new JSONObject();
+        result.put("spoken", true);
+        result.put("engine", tts.getDefaultEngine() == null ? "" : tts.getDefaultEngine());
+        return result;
+    }
+
+    /** ACTION_CALL, the native form of termux-telephony-call (CALL_PHONE granted). */
+    private JSONObject dial(JSONObject args) throws Exception {
+        String number = args == null ? "" : args.optString("number", "").trim();
+        if (number.isEmpty()) throw new IllegalArgumentException("no number");
+        Intent call = new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)));
+        call.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        JSONObject result = new JSONObject();
+        if (args.optBoolean("dry_run", false)) {
+            result.put("would_dial", call.resolveActivity(getPackageManager()) != null);
+            result.put("dry_run", true);
+            return result;
+        }
+        startActivity(call);
+        result.put("dialed", true);
+        return result;
+    }
+
+    /** TelephonyManager in termux-telephony-deviceinfo's shape. */
+    private JSONObject telephonyInfo() throws Exception {
+        JSONObject result = new JSONObject();
+        TelephonyManager manager = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+        if (manager == null) {
+            result.put("phone_type", "none");
+            result.put("sim_state", "");
+            result.put("network_type", "");
+            return result;
+        }
+        String phoneType = "none";
+        try {
+            switch (manager.getPhoneType()) {
+                case TelephonyManager.PHONE_TYPE_GSM: phoneType = "gsm"; break;
+                case TelephonyManager.PHONE_TYPE_CDMA: phoneType = "cdma"; break;
+                case TelephonyManager.PHONE_TYPE_SIP: phoneType = "sip"; break;
+                default: phoneType = "none";
+            }
+        } catch (Throwable ignored) {}
+        result.put("phone_type", phoneType);
+        result.put("sim_state", simState(manager.getSimState()));
+        String network = "";
+        try {
+            network = Build.VERSION.SDK_INT >= 24
+                ? networkType(manager.getDataNetworkType())
+                : networkType(manager.getNetworkType());
+        } catch (Throwable ignored) {}
+        result.put("network_type", network);
+        result.put("operator", manager.getNetworkOperatorName() == null ? "" : manager.getNetworkOperatorName());
+        result.put("sim_operator", manager.getSimOperatorName() == null ? "" : manager.getSimOperatorName());
+        return result;
+    }
+
+    private static String simState(int state) {
+        switch (state) {
+            case TelephonyManager.SIM_STATE_READY: return "ready";
+            case TelephonyManager.SIM_STATE_ABSENT: return "absent";
+            case TelephonyManager.SIM_STATE_PIN_REQUIRED: return "pin_required";
+            case TelephonyManager.SIM_STATE_PUK_REQUIRED: return "puk_required";
+            case TelephonyManager.SIM_STATE_NETWORK_LOCKED: return "network_locked";
+            case TelephonyManager.SIM_STATE_NOT_READY: return "not_ready";
+            case TelephonyManager.SIM_STATE_PERM_DISABLED: return "perm_disabled";
+            case TelephonyManager.SIM_STATE_CARD_IO_ERROR: return "card_io_error";
+            default: return "unknown";
+        }
+    }
+
+    private static String networkType(int type) {
+        switch (type) {
+            case TelephonyManager.NETWORK_TYPE_GPRS: return "gprs";
+            case TelephonyManager.NETWORK_TYPE_EDGE: return "edge";
+            case TelephonyManager.NETWORK_TYPE_UMTS: return "umts";
+            case TelephonyManager.NETWORK_TYPE_CDMA: return "cdma";
+            case TelephonyManager.NETWORK_TYPE_EVDO_0: return "evdo_0";
+            case TelephonyManager.NETWORK_TYPE_EVDO_A: return "evdo_a";
+            case TelephonyManager.NETWORK_TYPE_1xRTT: return "1xrtt";
+            case TelephonyManager.NETWORK_TYPE_HSDPA: return "hsdpa";
+            case TelephonyManager.NETWORK_TYPE_HSUPA: return "hsupa";
+            case TelephonyManager.NETWORK_TYPE_HSPA: return "hspa";
+            case TelephonyManager.NETWORK_TYPE_IDEN: return "iden";
+            case TelephonyManager.NETWORK_TYPE_EVDO_B: return "evdo_b";
+            case TelephonyManager.NETWORK_TYPE_LTE: return "lte";
+            case TelephonyManager.NETWORK_TYPE_EHRPD: return "ehrpd";
+            case TelephonyManager.NETWORK_TYPE_HSPAP: return "hspap";
+            case TelephonyManager.NETWORK_TYPE_GSM: return "gsm";
+            case TelephonyManager.NETWORK_TYPE_TD_SCDMA: return "td_scdma";
+            case TelephonyManager.NETWORK_TYPE_IWLAN: return "iwlan";
+            default:
+                if (Build.VERSION.SDK_INT >= 29 && type == TelephonyManager.NETWORK_TYPE_NR) return "nr";
+                return "unknown";
+        }
     }
 
     // --- SMS, call log, contacts ------------------------------------------

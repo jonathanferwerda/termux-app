@@ -954,3 +954,12 @@ work and a full-width build has crashed it (2026-10-10).
 91. The CallLog and SMS providers reject a `LIMIT` in the sort order
     ("Invalid token LIMIT"); the bridge caps in the cursor loop instead.
     Contacts accepted it, but all three now use the same loop.
+
+92. Native location, speech and telephony on the M1 bridge:
+    `location.current` (one bounded GPS fix via LocationManager, the fallback
+    when JawnLocationService has not run), `speech.speak` (TextToSpeech; voice,
+    rate, pitch, queue mode — Piper still comes first in the tree),
+    `telephony.dial` (ACTION_CALL, with a dry_run that only resolves a handler)
+    and `telephony.deviceinfo` (TelephonyManager: phone type, SIM state,
+    network type). The tree prefers them and keeps the termux commands as
+    fallbacks.
