@@ -950,3 +950,7 @@ work and a full-width build has crashed it (2026-10-10).
     (CallLog.Calls, duration as H:MM:SS/M:SS), and `contact.list`
     (ContactsContract, capped). The tree prefers them and keeps the termux
     commands as fallbacks.
+
+91. The CallLog and SMS providers reject a `LIMIT` in the sort order
+    ("Invalid token LIMIT"); the bridge caps in the cursor loop instead.
+    Contacts accepted it, but all three now use the same loop.

@@ -552,9 +552,9 @@ public class DeviceService extends Service {
         };
         JSONArray messages = new JSONArray();
         try (Cursor cursor = resolver.query(Telephony.Sms.CONTENT_URI, columns, null, null,
-                Telephony.Sms.DATE + " DESC LIMIT " + limit)) {
+                Telephony.Sms.DATE + " DESC")) {
             if (cursor != null) {
-                while (cursor.moveToNext()) {
+                while (cursor.moveToNext() && messages.length() < limit) {
                     JSONObject message = new JSONObject();
                     String address = cursor.getString(1);
                     String body = cursor.getString(2);
@@ -581,9 +581,9 @@ public class DeviceService extends Service {
         };
         JSONArray calls = new JSONArray();
         try (Cursor cursor = resolver.query(CallLog.Calls.CONTENT_URI, columns, null, null,
-                CallLog.Calls.DATE + " DESC LIMIT " + limit)) {
+                CallLog.Calls.DATE + " DESC")) {
             if (cursor != null) {
-                while (cursor.moveToNext()) {
+                while (cursor.moveToNext() && calls.length() < limit) {
                     JSONObject call = new JSONObject();
                     String number = cursor.getString(0);
                     String name = cursor.getString(1);
@@ -612,9 +612,9 @@ public class DeviceService extends Service {
         JSONArray list = new JSONArray();
         try (Cursor cursor = resolver.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI, columns, null, null,
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC LIMIT " + limit)) {
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")) {
             if (cursor != null) {
-                while (cursor.moveToNext()) {
+                while (cursor.moveToNext() && list.length() < limit) {
                     String name = cursor.getString(0);
                     String number = cursor.getString(1);
                     if (number == null || number.isEmpty()) continue;
