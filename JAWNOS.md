@@ -997,3 +997,23 @@ work and a full-width build has crashed it (2026-10-10).
     translucent Activity that asks and hands the answer back to DeviceService
     in-process; the answer carries termux-fingerprint's auth_result, so a
     cancellation is final rather than a second prompt).
+
+98. M2 — the app's own supervisor. `SessionService` forks `perl ./jawn` with an
+    explicit environment (`HOME`, `PREFIX`, `PATH`, `TMPDIR`, `LANG`, `TERM`,
+    `PWD`), one merged stdout/stderr pipe appended to `~/manager.log`, and a
+    plain thread that keeps exactly one master alive: it refuses to start while
+    `~/.president/pid` still answers, respawns an unexpected exit with a backoff
+    (2s/5s/10s/30s/60s, reset after a minute of uptime), and never touches
+    `~/.president/status` — the tree's own loop owns restarts. Stop sends the
+    master SIGINT (`$PREFIX/bin/kill -INT`), runs `manager_killer.pl master` as
+    mop-up, and stops the service. No `bin/login`, no `bash`, no
+    `termux-exec`: `LD_PRELOAD` is removed from the child's environment. The
+    dashboard gains "Run jawn under the app's own supervisor" (default on, with
+    the old Termux session as the rollback) and Console now opens the live log
+    when the supervisor owns the tree, because the tree's output *is*
+    `~/manager.log` and there is no login session to attach to.
+99. `jawn` names the interpreter it is running under (`exec '$^X'
+    ./President.pl`) instead of letting the pty shell resolve President.pl's
+    `#!/usr/bin/perl` line, which on a device only works through termux-exec's
+    `LD_PRELOAD`. This is what lets the supervisor run the tree without
+    termux-exec, on the phone and on the desktop alike.

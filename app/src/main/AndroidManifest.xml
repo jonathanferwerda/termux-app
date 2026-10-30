@@ -545,6 +545,14 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- M2 supervisor: forks jawn itself (perl ./jawn) with one pipe into
+             ~/manager.log, keeps one master alive, and replaces Termux's login
+             session for the tree. Not exported. -->
+        <service
+            android:name=".app.SessionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- The M1 device bridge: loopback JSON for the termux-* commands the
              app answers itself. Not exported; the token in $HOME/.jawn gates it. -->
         <service

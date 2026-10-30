@@ -58,6 +58,7 @@ public class JawnDashboardActivity extends Activity {
     private EditText dirEdit;
     private CheckBox autostart;
     private CheckBox bleWithJawn;
+    private CheckBox nativeSupervisor;
     private CheckBox systemBars;
     private CheckBox lockScreen;
     private boolean resumed = false;
@@ -110,7 +111,13 @@ public class JawnDashboardActivity extends Activity {
         buttonRow(open, new String[] { "In browser", "Log", "Console" }, new Runnable[] {
             () -> openUi(),
             () -> startActivity(new Intent(self, JawnLogActivity.class)),
-            () -> startActivity(new Intent(self, TermuxActivity.class)),
+            () -> {
+                // Under the native supervisor jawn runs on a pipe into
+                // ~/manager.log, so the tree's live output *is* the log and
+                // there is no login session to attach to (M2).
+                startActivity(new Intent(self, JawnLauncher.useNativeSupervisor(self)
+                    ? JawnLogActivity.class : TermuxActivity.class));
+            },
         }, null);
 
         // ---- keyboard ----
@@ -161,6 +168,13 @@ public class JawnDashboardActivity extends Activity {
         bleWithJawn.setButtonTintList(ColorStateList.valueOf(ACCENT));
         bleWithJawn.setChecked(JawnLauncher.isBleWithJawn(this));
         settings.addView(bleWithJawn);
+        nativeSupervisor = new CheckBox(this);
+        nativeSupervisor.setText("Run jawn under the app's own supervisor");
+        nativeSupervisor.setTextColor(TEXT);
+        nativeSupervisor.setButtonTintList(ColorStateList.valueOf(ACCENT));
+        nativeSupervisor.setChecked(JawnLauncher.prefs(this)
+            .getBoolean(JawnLauncher.KEY_NATIVE_SUPERVISOR, true));
+        settings.addView(nativeSupervisor);
         systemBars = new CheckBox(this);
         systemBars.setText("Show the status and navigation bars");
         systemBars.setTextColor(TEXT);
@@ -497,6 +511,7 @@ public class JawnDashboardActivity extends Activity {
             .putString(JawnLauncher.KEY_DIR, name)
             .putBoolean(JawnLauncher.KEY_AUTOSTART, autostart.isChecked())
             .putBoolean(JawnLauncher.KEY_BLE_WITH_JAWN, bleWithJawn.isChecked())
+            .putBoolean(JawnLauncher.KEY_NATIVE_SUPERVISOR, nativeSupervisor.isChecked())
             .putBoolean(JawnLauncher.KEY_SYSTEM_BARS, systemBars.isChecked())
             .putBoolean(JawnLockScreen.KEY, lockScreen.isChecked())
             .apply();

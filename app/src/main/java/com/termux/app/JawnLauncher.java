@@ -29,6 +29,9 @@ public class JawnLauncher {
     public static final String KEY_BLE_WITH_JAWN = "ble_with_jawn";
     public static final String KEY_RUNNING = "jawn_running";
     public static final String KEY_SYSTEM_BARS = "system_bars";
+    /** M2: run jawn from the app's own supervisor (SessionService) instead of
+     *  a Termux login session. Off restores the old path for a rollback. */
+    public static final String KEY_NATIVE_SUPERVISOR = "native_supervisor";
     public static final String DEFAULT_DIR = "jawnos";
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -97,6 +100,14 @@ public class JawnLauncher {
 
     public static boolean isBleWithJawn(Context context) {
         return prefs(context).getBoolean(KEY_BLE_WITH_JAWN, true);
+    }
+
+    /** Whether jawn runs under the app's own supervisor (M2). The fallback is
+     *  the Termux login session, which needs perl to be installed, so a device
+     *  without one keeps the path it has always had. */
+    public static boolean useNativeSupervisor(Context context) {
+        if (!prefs(context).getBoolean(KEY_NATIVE_SUPERVISOR, true)) return false;
+        return new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl").canExecute();
     }
 
     /** Whether the user wants jawn kept running. A fresh install follows the
@@ -316,6 +327,14 @@ public class JawnLauncher {
         }
 
         String dir = getJawnDirPath(context);
+        // M2: the app's own supervisor forks perl directly, with one pipe into
+        // ~/manager.log. No login, no bash, no termux-exec.
+        if (useNativeSupervisor(context)) {
+            if (isBleWithJawn(context)) startBle(context);
+            startDeviceService(context);
+            SessionService.start(context);
+            return;
+        }
         Intent intent = new Intent(context, TermuxService.class);
         intent.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
         // Run through Termux's login script rather than bash directly: login is
@@ -373,6 +392,12 @@ public class JawnLauncher {
 
     /** Tear down the running tree and stop the service, but leave BLE alone. */
     private static void stopJawnTree(Context context) {
+        // M2: the supervisor sends the master its INT, waits out the tree's own
+        // teardown and runs the killer as mop-up, then stops itself.
+        if (useNativeSupervisor(context)) {
+            SessionService.stop(context);
+            return;
+        }
         // Take the tree down before stopping the service: ACTION_STOP_SERVICE
         // only SIGKILLs the terminal sessions, which the master's Ctrl+C
         // handler never sees, so President.pl, the workers, the BLE client and
