@@ -1,16 +1,23 @@
 package com.termux.app;
 
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.BatteryManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -26,6 +33,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import com.termux.R;
 
 /**
  * M1 device bridge (docs/leaving-termux.md): the app's own answer to the
@@ -51,6 +60,8 @@ public class DeviceService extends Service {
     private static final int NOTIFICATION_ID = 46001;
     private static final String CHANNEL_ID = "jawn-device";
     private static final String TOKEN_NAME = "device.token";
+    private static final String CHANNEL_DEFAULT = "jawn_notifications";
+    private static final String CHANNEL_SILENT = "jawn_notifications_silent";
     private static final int MAX_CLIENTS = 8;
 
     private volatile boolean running = true;
@@ -157,6 +168,25 @@ public class DeviceService extends Service {
                 reply.put("ok", true);
                 reply.put("result", battery());
             }
+            else if ("toast.show".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                String message = args == null ? "" : args.optString("message", "");
+                boolean longToast = args != null && args.optBoolean("long", false);
+                toast(message, longToast);
+                reply.put("ok", true);
+                reply.put("result", new JSONObject());
+            }
+            else if ("notification.post".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                reply.put("ok", true);
+                reply.put("result", notificationPost(args == null ? new JSONObject() : args));
+            }
+            else if ("notification.remove".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                notificationRemove(args == null ? "" : args.optString("id", ""));
+                reply.put("ok", true);
+                reply.put("result", new JSONObject());
+            }
             else {
                 reply.put("ok", false);
                 reply.put("error", "unknown method");
@@ -248,6 +278,180 @@ public class DeviceService extends Service {
                 }
                 return "UNPLUGGED";
         }
+    }
+
+    // --- native replacements ---------------------------------------------
+
+    /** A native toast: no shell, no termux-toast, native duration. */
+    private void toast(final String message, final boolean longToast) {
+        if (message == null || message.isEmpty()) return;
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                Toast.makeText(getApplicationContext(), message,
+                    longToast ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    /**
+     * A native notification with the app's own control: two channels (normal and
+     * quiet), a small-icon name (system or app drawable), a large icon from any
+     * file, actions that open the WebView at a URL, a progress bar, grouping,
+     * vibration and colour. The tap opens JawnWebViewActivity, with the caller's
+     * url when it names one.
+     */
+    private JSONObject notificationPost(JSONObject args) throws Exception {
+        ensureChannels();
+        String tag = args.optString("id", "");
+        if (tag.isEmpty()) tag = String.valueOf(System.currentTimeMillis());
+        int id = Math.abs(tag.hashCode());
+        String title = args.optString("title", "JawnOS");
+        String text = args.optString("text", args.optString("message", ""));
+        boolean silent = args.optBoolean("silent", false);
+        boolean ongoing = args.optBoolean("ongoing", false);
+
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+            | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+        Intent open = new Intent(this, JawnWebViewActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String url = args.optString("url", "");
+        if (!url.isEmpty()) open.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, id, open, piFlags);
+
+        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(this, silent ? CHANNEL_SILENT : CHANNEL_DEFAULT)
+            : new Notification.Builder(this);
+        builder.setContentTitle(title)
+               .setContentText(text)
+               .setSmallIcon(smallIcon(args.optString("small_icon", "")))
+               .setContentIntent(contentIntent)
+               .setAutoCancel(!ongoing && args.optBoolean("auto_cancel", true))
+               .setShowWhen(true);
+        if (ongoing || args.optBoolean("ongoing", false)) builder.setOngoing(true);
+        if (silent || args.optBoolean("only_alert_once", false)) builder.setOnlyAlertOnce(true);
+
+        String subText = args.optString("sub_text", "");
+        if (!subText.isEmpty()) builder.setSubText(subText);
+        String bigText = args.optString("big_text", "");
+        if (!bigText.isEmpty()) builder.setStyle(new Notification.BigTextStyle().bigText(bigText));
+        String group = args.optString("group", "");
+        if (!group.isEmpty()) builder.setGroup(group);
+        if (args.has("color")) builder.setColor((int) args.optLong("color", 0));
+        if (args.has("number")) builder.setNumber(args.optInt("number", 0));
+
+        JSONObject progress = args.optJSONObject("progress");
+        if (progress != null) {
+            builder.setProgress(progress.optInt("max", 100),
+                progress.optInt("current", 0), progress.optBoolean("indeterminate", false));
+        }
+
+        if (!silent && args.has("vibrate")) {
+            long[] pattern = vibration(args.optString("vibrate", ""));
+            if (pattern.length > 0) builder.setVibrate(pattern);
+        }
+
+        String large = args.optString("large_icon", "");
+        if (!large.isEmpty()) {
+            Bitmap bitmap = BitmapFactory.decodeFile(large);
+            if (bitmap != null) builder.setLargeIcon(bitmap);
+        }
+
+        JSONArray actions = args.optJSONArray("actions");
+        if (actions != null) {
+            for (int i = 0, added = 0; i < actions.length() && added < 3; i++) {
+                JSONObject action = actions.optJSONObject(i);
+                if (action == null) continue;
+                String label = action.optString("label", "");
+                if (label.isEmpty()) continue;
+                Intent target = new Intent(this, JawnWebViewActivity.class);
+                target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                String actionUrl = action.optString("url", "");
+                if (!actionUrl.isEmpty()) target.putExtra(JawnWebViewActivity.EXTRA_URL, actionUrl);
+                PendingIntent pi = PendingIntent.getActivity(this, id * 31 + added + 1, target, piFlags);
+                builder.addAction(new Notification.Action.Builder(
+                    android.R.drawable.ic_menu_send, label, pi).build());
+                added++;
+            }
+        }
+
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) throw new IllegalStateException("no notification manager");
+        manager.notify(tag, id, builder.build());
+
+        JSONObject result = new JSONObject();
+        result.put("id", tag);
+        result.put("notification_id", id);
+        return result;
+    }
+
+    private void notificationRemove(String tag) {
+        if (tag == null || tag.isEmpty()) return;
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) manager.cancel(tag, Math.abs(tag.hashCode()));
+    }
+
+    /** "200,150,200" -> {200, 150, 200}; anything unparsable is ignored. */
+    private static long[] vibration(String spec) {
+        if (spec == null || spec.trim().isEmpty()) return new long[0];
+        String[] parts = spec.split(",");
+        long[] out = new long[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try {
+                out[i] = Long.parseLong(parts[i].trim());
+            } catch (NumberFormatException e) {
+                return new long[0];
+            }
+        }
+        return out;
+    }
+
+    /**
+     * A small icon is a resource: a drawable name the app ships, then a known
+     * jawn concept, then the launcher-ish default. The large icon is a file the
+     * caller names, so a notification can wear its own picture.
+     */
+    private int smallIcon(String name) {
+        if (name != null && !name.isEmpty()) {
+            int res = getResources().getIdentifier(name, "drawable", getPackageName());
+            if (res != 0) return res;
+        }
+        String key = name == null ? "" : name.toLowerCase(java.util.Locale.US);
+        switch (key) {
+            case "message": case "chat": case "sms": return android.R.drawable.stat_notify_chat;
+            case "mail": case "email": return android.R.drawable.ic_dialog_email;
+            case "alarm": case "clock": case "timer": return android.R.drawable.ic_lock_idle_alarm;
+            case "call": case "phone": return android.R.drawable.stat_notify_missed_call;
+            case "warning": case "alert": case "error": return android.R.drawable.ic_dialog_alert;
+            case "info": return android.R.drawable.ic_dialog_info;
+            case "download": return android.R.drawable.stat_sys_download;
+            case "sync": case "refresh": return android.R.drawable.stat_notify_sync;
+            case "camera": case "photo": return android.R.drawable.ic_menu_camera;
+            case "location": case "gps": return android.R.drawable.ic_menu_mylocation;
+            case "music": case "media": return android.R.drawable.ic_media_play;
+            case "battery": return android.R.drawable.ic_lock_idle_charging;
+            case "lock": case "security": return android.R.drawable.ic_lock_lock;
+            case "check": case "done": return android.R.drawable.checkbox_on_background;
+            case "store": case "cart": case "market": return android.R.drawable.ic_menu_agenda;
+            case "print": case "printer": return android.R.drawable.ic_menu_share;
+            case "session": case "jawn": default: return R.drawable.ic_new_session;
+        }
+    }
+
+    /** The two channels the app already uses, so the person's own settings hold. */
+    private void ensureChannels() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        NotificationChannel normal = new NotificationChannel(
+            CHANNEL_DEFAULT, "JawnOS", NotificationManager.IMPORTANCE_DEFAULT);
+        normal.setShowBadge(true);
+        manager.createNotificationChannel(normal);
+        NotificationChannel quiet = new NotificationChannel(
+            CHANNEL_SILENT, "JawnOS (quiet)", NotificationManager.IMPORTANCE_LOW);
+        quiet.setShowBadge(true);
+        quiet.setSound(null, null);
+        quiet.enableVibration(false);
+        manager.createNotificationChannel(quiet);
     }
 
     // --- token and notification ------------------------------------------

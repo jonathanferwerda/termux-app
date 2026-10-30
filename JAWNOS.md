@@ -927,3 +927,12 @@ work and a full-width build has crashed it (2026-10-10).
     Started and stopped with jawn, beside the BLE bridge. `subs::device_call` in
     the Perl tree dials it and keeps the termux command as its fallback, so an
     old app with a new tree (and the reverse) still works.
+
+88. Native notification and toast on the M1 bridge. `notification.post` uses the
+    app's two existing channels (`jawn_notifications`, `jawn_notifications_silent`),
+    a small icon named by drawable or app concept, a large icon decoded from any
+    file, up to three actions that open `JawnWebViewActivity` at a URL, a
+    progress bar, grouping, a vibration pattern, colour and ongoing. Also
+    `notification.remove` and `toast.show`. The tree's `notification_sender`
+    asks the bridge first and keeps the broadcast receiver and termux-notification
+    as fallbacks.
