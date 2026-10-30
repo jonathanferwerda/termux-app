@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="jawnos_home" path="home/" />
+    <!-- /data/data and /data/user/0 are bind-mounted aliases of one directory,
+         and canonicalisation can keep either spelling. The tree's paths use
+         /data/data/com.termux/files, so name that root as well. -->
+    <root-path name="termux_data_alias" path="data/data/com.termux/files/" />
     <!-- the OS camera/video recorder writes a capture here (JawnCamera) -->
     <cache-path name="captures" path="captures/" />
 </paths>

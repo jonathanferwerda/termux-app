@@ -975,3 +975,10 @@ work and a full-width build has crashed it (2026-10-10).
     optional text; accepts termux-share's mime-as-action shape) and `open.url`
     (ACTION_VIEW for a URL or a FileProvider file path). The tree prefers them
     and keeps termux-media-player/share/open as fallbacks.
+
+95. `<root-path name="termux_data_alias" path="data/data/com.termux/files/" />`
+    joined the FileProvider paths. `/data/data` and `/data/user/0` are
+    bind-mounted aliases and `getCanonicalPath` kept the tree's `/data/data`
+    spelling, which `<files-path>` (built from getFilesDir()'s
+    `/data/user/0/...`) did not match, so `share.send` failed with "Failed to
+    find configured root".
