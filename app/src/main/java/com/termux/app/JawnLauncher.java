@@ -179,8 +179,16 @@ public class JawnLauncher {
 
     /** jawn's web server answers on the configured port, and always on the dock 3000. */
     public static boolean jawnIsUp(Context context) {
-        return portOpen("127.0.0.1", getJawnPort(context), 400)
-            || portOpen("127.0.0.1", 3000, 400);
+        return jawnIsUp(context, 400);
+    }
+
+    /** The same question with the caller's own patience. A phone thawing from a
+     *  freeze, or a tree whose workers are momentarily all busy, can miss a
+     *  400 ms connect to a tree that is in fact serving - the launch path asks
+     *  again with a longer window before it decides the house is down. */
+    public static boolean jawnIsUp(Context context, int timeoutMs) {
+        return portOpen("127.0.0.1", getJawnPort(context), timeoutMs)
+            || portOpen("127.0.0.1", 3000, timeoutMs);
     }
 
     /** True if the jawn *master* process is alive, even while the tree is booting.

@@ -80,6 +80,9 @@ public class JawnWebViewActivity extends Activity {
     private static final int REQ_GEO = 7003;
     private static final int REQ_LOC = 7004;
     private boolean pendingLocationStart = false;
+    // A launch bumps this; only the newest waiter may load its URL. A superseded
+    // wait must not replace a page the person has since opened.
+    private volatile int loadGeneration = 0;
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -306,15 +309,49 @@ public class JawnWebViewActivity extends Activity {
     private void loadWhenReady(final String url) {
         gateFallback = false;
         copySessionToLoopback(url);
-        // Load the page first. The port check can disagree with a busy or
-        // just-restarted tree - the dashboard said "running" while this screen
-        // stayed on the splash - and a splash that never leaves is worse than
-        // the page reporting its own error (onReceivedError opens the
-        // dashboard). Only start the tree when the port really is closed.
-        web.loadUrl(url);
-        if (!JawnLauncher.jawnIsUp(this)) {
-            JawnLauncher.startJawn(this);
-        }
+        final int generation = ++loadGeneration;
+        final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+        // A serving tree answers in milliseconds: load straight in and never
+        // show the splash. The logo appears only when the port has not answered
+        // after a beat, so the everyday launch is not a flash of splash.
+        final Runnable splash = new Runnable() {
+            public void run() {
+                if (generation != loadGeneration) return;
+                showSplash();
+                splashStatus("Starting the house...");
+            }
+        };
+        ui.postDelayed(splash, 700);
+        // The probe is a network call and a start is a fork, so both stay off
+        // the UI thread. The wait is patient: a phone thawing from a freeze, or
+        // a tree whose two workers are both mid-request, can lose a 400 ms
+        // connect. Loading a page into a view that then sits black was the
+        // minute-long blank screen; the splash carries the Admin Panel button,
+        // and a tree that never comes up still gets the page (its own error
+        // opens the dashboard) at the deadline.
+        new Thread(new Runnable() {
+            public void run() {
+                boolean up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this, 1500);
+                if (!up) {
+                    // The master check inside startJawn keeps this from ever
+                    // becoming a second tree while one is merely asleep.
+                    JawnLauncher.startJawn(JawnWebViewActivity.this);
+                }
+                long deadline = System.currentTimeMillis() + 90000L;
+                while (!up && System.currentTimeMillis() < deadline) {
+                    try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                    if (generation != loadGeneration) return;
+                    up = JawnLauncher.jawnIsUp(JawnWebViewActivity.this, 1500);
+                }
+                ui.removeCallbacks(splash);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (generation != loadGeneration || web == null) return;
+                        web.loadUrl(url);
+                    }
+                });
+            }
+        }, "jawn-launch").start();
     }
 
     /** The logo-with-a-glow splash (assets/splash.html), shown while jawn is
@@ -492,6 +529,7 @@ public class JawnWebViewActivity extends Activity {
     /** The house, on any of its names, keeps navigation in the app. */
     @Override
     protected void onDestroy() {
+        loadGeneration++;
         if (speech != null) { speech.destroy(); speech = null; }
         JawnPhoneState.poster = null;
         super.onDestroy();

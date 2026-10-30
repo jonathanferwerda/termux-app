@@ -903,3 +903,17 @@ work and a full-width build has crashed it (2026-10-10).
     way when the pid file's master is alive but too frozen to answer the watch
     query in three seconds, so even an older APK cannot start a second tree
     over a master that is merely asleep.
+
+86. The manager launch waits on a splash, never on black. The view used to load
+    the manager URL first and start jawn only if a 400 ms port probe failed:
+    a phone thawing from an Android freeze (or a tree whose two main workers
+    were both mid-request) loses that probe, and a page request that has to
+    queue behind a booting or saturated tree left a plain black view for up to
+    a minute. `loadWhenReady` now probes on a background thread with a 1.5 s
+    window, shows the logo splash only when the port has not answered after
+    700 ms, starts jawn only when no master is alive (the delta-85 guard), and
+    loads the manager the moment the port answers - at a 90 s deadline it loads
+    it regardless, so the page's own error still opens the dashboard. A launch
+    generation keeps a superseded wait from replacing a page opened since.
+    `JawnLauncher.jawnIsUp(context, timeoutMs)` is the patient form of the
+    probe; the everyday 400 ms form is unchanged for status polls.
