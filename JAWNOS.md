@@ -1035,3 +1035,13 @@ work and a full-width build has crashed it (2026-10-10).
      allowed from the tree because it runs under this uid) both use it. With that
      and the native BLE bridge, nothing in the tree calls `com.termux.api`; the
      API app is now only a rollback.
+
+102. M3a — the supervisor can run the tree on a runtime the app owns.
+     `SessionService.spawn` prefers `~/.jawnos/runtime/bin/perl` when that
+     archive is unpacked (its `lib/perl5/*/aarch64-*/CORE/libperl.so` is the
+     test), and sets `LD_LIBRARY_PATH` to the runtime's `lib` plus `CORE` and
+     `PERL5LIB` to its `lib/perl5` and `site_perl`. Nothing else moves: `$PREFIX`
+     still exists on today's devices, so `PATH` and the compiled-in paths are
+     unchanged and Termux's perl remains the fallback. Proven on the tablet:
+     `/proc/<master>/exe` was `…/.jawnos/runtime/bin/perl`, status `good`, port
+     3000 answering, every worker up.

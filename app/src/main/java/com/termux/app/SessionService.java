@@ -204,9 +204,41 @@ public final class SessionService extends Service {
         }
     }
 
+    /** The runtime the app unpacks for itself (M3): ~/.jawnos/runtime. It is a
+     *  plain prefix with our own perl and modules, so choosing it is just
+     *  picking a different interpreter - nothing else moves. Empty when it is
+     *  absent, which is the case on every device that still runs Termux's. */
+    private static File runtimeDir() {
+        return new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".jawnos/runtime");
+    }
+
+    /** The aarch64 CORE directory inside a runtime, or null. The perl version
+     *  in the path is whatever the archive was built with. */
+    private static File runtimeCore(File runtime) {
+        File perl5 = new File(runtime, "lib/perl5");
+        File[] versions = perl5.listFiles();
+        if (versions == null) return null;
+        for (File v : versions) {
+            File[] arches = v.listFiles();
+            if (arches == null) continue;
+            for (File a : arches) {
+                File core = new File(a, "CORE");
+                if (new File(core, "libperl.so").isFile()) return core;
+            }
+        }
+        return null;
+    }
+
     private Process spawn() {
         File dir = new File(JawnLauncher.getJawnDirPath(this));
         File perl = new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl");
+        File runtime = runtimeDir();
+        File runtimePerl = new File(runtime, "bin/perl");
+        File core = runtimeCore(runtime);
+        // Our own runtime wins when it is there: that is the whole point of
+        // shipping one. Termux's perl is the fallback until the app unpacks it.
+        boolean ownRuntime = runtimePerl.canExecute() && core != null;
+        if (ownRuntime) perl = runtimePerl;
         if (!perl.canExecute()) {
             JawnLog.append("supervisor: no perl at " + perl);
             return null;
@@ -229,6 +261,29 @@ public final class SessionService extends Service {
         env.put("PWD", dir.getAbsolutePath());
         if (env.get("SHELL") == null) env.put("SHELL", prefix + "/bin/bash");
         if (env.get("TERMUX_VERSION") == null) env.put("TERMUX_VERSION", "0.118");
+        if (ownRuntime) {
+            // The archive's perl carries Termux's compiled-in @INC, so point it
+            // at the copy beside it and let the loader find libperl.so and the
+            // XS libraries there rather than in the prefix.
+            String rt = runtime.getAbsolutePath();
+            String lib = rt + "/lib";
+            StringBuilder inc = new StringBuilder();
+            File perl5 = new File(runtime, "lib/perl5");
+            File[] versions = perl5.listFiles();
+            if (versions != null) {
+                for (File v : versions) {
+                    for (File d : new File[] { v, new File(v, "site_perl") }) {
+                        if (d.isDirectory() && inc.indexOf(d.getAbsolutePath()) < 0) {
+                            if (inc.length() > 0) inc.append(':');
+                            inc.append(d.getAbsolutePath());
+                        }
+                    }
+                }
+            }
+            env.put("LD_LIBRARY_PATH", lib + ":" + core.getAbsolutePath());
+            if (inc.length() > 0) env.put("PERL5LIB", inc.toString());
+            JawnLog.append("supervisor: using the app's own runtime at " + rt);
+        }
         // M2 drops termux-exec: no #!/usr/bin/perl rewriting. jawn execs the
         // interpreter it is already running under ($^X), so nothing needs it.
         env.remove("LD_PRELOAD");
