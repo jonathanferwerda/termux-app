@@ -163,6 +163,25 @@ public class JawnLauncher {
         }
     }
 
+    /** Start the app's own device bridge (M1); safe if it already runs. */
+    public static void startDeviceService(Context context) {
+        try {
+            Intent i = new Intent(context, DeviceService.class);
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
+            else context.startService(i);
+        } catch (Throwable t) {
+            JawnLog.append("device bridge start failed: " + t);
+        }
+    }
+
+    public static void stopDeviceService(Context context) {
+        try {
+            context.stopService(new Intent(context, DeviceService.class));
+        } catch (Throwable t) {
+            JawnLog.append("device bridge stop failed: " + t);
+        }
+    }
+
     /** True if something is listening on the loopback port (used for live status). */
     public static boolean portOpen(String host, int port, int timeoutMs) {
         java.net.Socket s = null;
@@ -328,6 +347,9 @@ public class JawnLauncher {
         // Bring the BLE bridge up first so jawn's listener has a daemon to dial
         // the moment it starts (and take it down again on Stop when tied).
         if (isBleWithJawn(context)) startBle(context);
+        // The device bridge serves battery and the rest straight from the app
+        // (M1); an old tree simply never dials it.
+        startDeviceService(context);
         context.startForegroundService(intent);
     }
 
@@ -335,6 +357,7 @@ public class JawnLauncher {
     public static void stopJawn(Context context) {
         setKeepRunning(context, false);
         if (isBleWithJawn(context)) stopBle(context);
+        stopDeviceService(context);
         stopJawnTree(context);
     }
 

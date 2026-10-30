@@ -917,3 +917,13 @@ work and a full-width build has crashed it (2026-10-10).
     generation keeps a superseded wait from replacing a page opened since.
     `JawnLauncher.jawnIsUp(context, timeoutMs)` is the patient form of the
     probe; the everyday 400 ms form is unchanged for status polls.
+
+87. M1 device bridge. `DeviceService` listens on 127.0.0.1:46000 with
+    newline-delimited JSON and answers `ping` and `battery.status` (the
+    termux-battery-status shape), so the termux-api app can retire a command at
+    a time. It writes `$HOME/.jawn/device.token` (mode 600) and refuses a caller
+    without it; loopback plus a token because a filesystem unix socket needs JNI
+    on the listening side, and this matches the jawn-bt bridge's transport.
+    Started and stopped with jawn, beside the BLE bridge. `subs::device_call` in
+    the Perl tree dials it and keeps the termux command as its fallback, so an
+    old app with a new tree (and the reverse) still works.

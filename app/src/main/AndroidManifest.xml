@@ -40,6 +40,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -532,6 +533,13 @@
             android:name=".app.JawnLocationService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!-- The M1 device bridge: loopback JSON for the termux-* commands the
+             app answers itself. Not exported; the token in $HOME/.jawn gates it. -->
+        <service
+            android:name=".app.DeviceService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- One short CPU wake per navigation interval, re-armed by the receiver.
              It replaces the permanently held Termux wake lock. -->
