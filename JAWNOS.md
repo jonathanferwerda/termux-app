@@ -1230,3 +1230,16 @@ work and a full-width build has crashed it (2026-10-10).
      1222. Four GPL-3-only originals remain:
      `TermuxAppSharedPreferences`, `TermuxPreferenceConstants`,
      `TermuxShellEnvironmentClient`, `TermuxShellUtils`.
+
+117. M4 — jawnos-shared is BSD-2: the last four GPL-3-only files are gone.
+     `TermuxAppSharedPreferences` was rewritten with only the log level and the
+     crash-notification switch (same preference file and keys, so an update
+     keeps them), `TermuxPreferenceConstants` was deleted, `TermuxShellUtils`
+     was rewritten with the same environment (HOME, PREFIX, PATH,
+     LD_LIBRARY_PATH, TMPDIR, GIT_EXEC_PATH, SSL_CERT_FILE, PERL5LIB) and
+     `TermuxShellEnvironmentClient` was deleted. `LICENSE.md` now says BSD-2
+     with the retained MIT/Apache/Classpath notices. The app module is still a
+     derivative of termux-app, so the APK stays GPL-3 until that code is
+     replaced. Verified on both devices: a stop/start through SessionService
+     brings the tree up `good` with the rewritten environment (the master's
+     `/proc/<pid>/environ` carries the runtime paths). Build 1223.

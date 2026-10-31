@@ -17,7 +17,6 @@ import com.jawnos.shared.models.ReportInfo;
 import com.jawnos.app.models.UserAction;
 import com.jawnos.shared.notification.TermuxNotificationUtils;
 import com.jawnos.shared.settings.preferences.TermuxAppSharedPreferences;
-import com.jawnos.shared.settings.preferences.TermuxPreferenceConstants;
 import com.jawnos.shared.data.DataUtils;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.termux.AndroidUtils;
@@ -37,7 +36,7 @@ public class CrashUtils {
      * created by {@link com.jawnos.shared.crash.CrashHandler}.
      *
      * If the crash log file exists and is not empty and
-     * {@link TermuxPreferenceConstants.TERMUX_APP#KEY_CRASH_REPORT_NOTIFICATIONS_ENABLED} is
+     * `crash_report_notifications_enabled` is
      * enabled, then a notification will be shown for the crash on the
      * {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME} channel, otherwise nothing will be done.
      *
@@ -101,7 +100,7 @@ public class CrashUtils {
      * @param message The message for the crash report.
      * @param forceNotification If set to {@code true}, then a notification will be shown
      *                          regardless of if pending intent is {@code null} or
-     *                          {@link TermuxPreferenceConstants.TERMUX_APP#KEY_CRASH_REPORT_NOTIFICATIONS_ENABLED}
+     *                          `crash_report_notifications_enabled`
      *                          is {@code false}.
      * @param addAppAndDeviceInfo If set to {@code true}, then app and device info will be appended
      *                            to the message.

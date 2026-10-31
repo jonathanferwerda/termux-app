@@ -19,7 +19,6 @@ import com.jawnos.shared.markdown.MarkdownUtils;
 import com.jawnos.shared.models.ExecutionCommand;
 import com.jawnos.shared.models.errors.Error;
 import com.jawnos.shared.packages.PackageUtils;
-import com.jawnos.shared.shell.TermuxShellEnvironmentClient;
 import com.jawnos.shared.shell.TermuxTask;
 import com.jawnos.shared.termux.TermuxConstants;
 import com.jawnos.shared.termux.TermuxUtils;
