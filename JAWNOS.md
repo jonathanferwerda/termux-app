@@ -1335,3 +1335,18 @@ work and a full-width build has crashed it (2026-10-10).
      `bin/magick` is absent. x86_64 remains at 0.1.1670 (it is built on the
      emulator, which was not running); the pin now names aarch64 0.1.1697 and
      x86_64 0.1.1670. Build 1232 pins the new archive.
+
+125. M5 starts — the app is signed. A release key now exists
+     (`.secrets/jawnos-release.jks`, PKCS12/RSA-4096, SHA-256 3ec2a657…), named
+     by the gitignored `keystore.properties`; `scripts/app_build.pl --release`
+     builds and stages the signed APK and `app_publish.pl` ships it. The signed
+     build stays `debuggable` on purpose: `app_migrate.pl`, `app_ticket.pl` and
+     the device probes all reach the house through `adb run-as`. Also fixed a
+     latent dependency: `markwon:recycler` was declared with no version, which
+     the debug build never resolved but `lintVitalRelease` did.
+     Play Protect's adb verifier refused the new key once
+     (`INSTALL_FAILED_VERIFICATION_FAILURE`); `app_migrate.pl` now retries once
+     with the verifier off and restores the setting, and gained
+     `--restore-only DIR` to resume after an install that failed midway.
+     Cut-over: the tablet moved from the debug key to this one with its
+     114,600 appointments and identity intact. Build 1235.

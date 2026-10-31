@@ -39,3 +39,7 @@ Thumbs.db
 
 # Tailscale Android AAR is a build input, not a source file
 app/libs/*.aar
+
+# JawnOS release signing (never commit a key)
+keystore.properties
+*.jks

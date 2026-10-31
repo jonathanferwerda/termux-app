@@ -6,6 +6,17 @@ repositories {
     flatDir { dirs 'libs' }
 }
 
+// The release key is the app's identity for as long as it exists: a build
+// signed with another key cannot install over this one. The properties file is
+// gitignored and points at the keystore under the tree's .secrets/. Without it
+// a release build is unsigned, which is what a clean checkout or a distro
+// builder should get.
+def keystoreFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystoreFile.exists()) {
+    keystoreFile.withInputStream { keystoreProps.load(it) }
+}
+
 android {
     compileSdkVersion project.properties.compileSdkVersion.toInteger()
     ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
@@ -24,7 +35,7 @@ android {
         implementation "io.noties.markwon:core:$markwonVersion"
         implementation "io.noties.markwon:ext-strikethrough:$markwonVersion"
         implementation "io.noties.markwon:linkify:$markwonVersion"
-        implementation "io.noties.markwon:recycler:"
+        implementation "io.noties.markwon:recycler:$markwonVersion"
         implementation "com.klinkerapps:android-smsmms:5.2.6"
         implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
         implementation(name: 'libtailscale', ext: 'aar')
@@ -36,8 +47,8 @@ android {
         applicationId "com.jawnos"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 1232
-        versionName "0.118.233"
+        versionCode 1235
+        versionName "0.118.236"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -73,10 +84,28 @@ android {
             storePassword 'xrj45yWGLbsO7W0v'
             keyPassword 'xrj45yWGLbsO7W0v'
         }
+        release {
+            if (keystoreFile.exists()) {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (keystoreFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+            // JawnOS is sideloaded onto machines its owner controls, and every
+            // maintenance path - scripts/app_migrate.pl, app_ticket.pl, the
+            // device probes - reaches the house through `adb run-as`. A
+            // non-debuggable build closes that door, so the signed build keeps
+            // the flag. This is also why the Play channel (which forbids it) is
+            // not the distribution route; see docs/leaving-termux.md M5.
+            debuggable true
             minifyEnabled true
             shrinkResources false // Reproducible builds
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
