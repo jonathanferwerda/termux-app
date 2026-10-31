@@ -88,9 +88,15 @@ final class JawnFirstRun {
             if (dir.exists() && !isEmptyDirectory(dir) && !resume) {
                 throw new SetupException("The folder " + dir.getAbsolutePath() + " has files in it but is not a JawnOS install. Move it aside, then tap Try again.");
             }
-            report.progress("Installing git...");
-            Result r = run(context, "command -v git >/dev/null 2>&1 || pkg install -y git", home, GIT_TIMEOUT_MS);
-            if (r.exitCode != 0) throw new SetupException("Could not install git." + detail(r));
+            report.progress("Preparing the tree...");
+            // The app's runtime (M3) carries git; there is no package manager to
+            // install one from, so a missing git here means a broken runtime, not
+            // something this step can repair.
+            Result r = run(context, "command -v git >/dev/null 2>&1", home, GIT_TIMEOUT_MS);
+            if (r.exitCode != 0) {
+                throw new SetupException("This build's runtime has no git, so the JawnOS tree cannot be fetched. Reinstall the app.");
+            }
+
             if (resume) {
                 report.progress("Resuming the JawnOS download...");
                 r = run(context, "export GIT_TERMINAL_PROMPT=0; git -C " + quote(dir.getAbsolutePath())
