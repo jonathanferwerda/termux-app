@@ -1131,3 +1131,16 @@ work and a full-width build has crashed it (2026-10-10).
      tablet: the broadcast started the node, it registered with the control
      server (`thejunderground.com`) and reported an AuthURL, and a second
      broadcast after a force-stop brought it back.
+
+109. M4 — the app is no longer a shared user and has no command plugin surface.
+     `android:sharedUserId`/`sharedUserLabel` are gone (the app owns its uid),
+     and the `.permission.RUN_COMMAND` permission, the exported
+     `RunCommandService`/`.RUN_COMMAND` intent, the `TermuxOpenReceiver`
+     receiver and its `${package}.files` provider are deleted. Nothing in the
+     tree used them: the device bridge answers every command, and share/open
+     go through the `${package}.jawnupdates` FileProvider. Build 1213.
+     The tablet can be installed fresh; the phone's existing install cannot
+     upgrade in place (Android refuses a shared-user change), so it needs the
+     documented uninstall + restore when it moves.
+     `jawnos-shared/LICENSE.md` now names the renamed `com/jawnos/shared/`
+     source paths (same terms; the list had gone stale at the package rename).

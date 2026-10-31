@@ -2,9 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="com.jawnos"
-    android:installLocation="internalOnly"
-    android:sharedUserId="${TERMUX_PACKAGE_NAME}"
-    android:sharedUserLabel="@string/shared_user_label">
+    android:installLocation="internalOnly">
 
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -12,13 +10,6 @@
     <uses-feature
         android:name="android.software.leanback"
         android:required="false" />
-
-    <permission
-        android:name="${TERMUX_PACKAGE_NAME}.permission.RUN_COMMAND"
-        android:description="@string/permission_run_command_description"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/permission_run_command_label"
-        android:protectionLevel="dangerous" />
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -204,13 +195,6 @@
         </provider>
 
         <provider
-            android:name=".app.TermuxOpenReceiver$ContentProvider"
-            android:authorities="${TERMUX_PACKAGE_NAME}.files"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="${TERMUX_PACKAGE_NAME}.permission.RUN_COMMAND" />
-
-        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${TERMUX_PACKAGE_NAME}.jawnupdates"
             android:exported="false"
@@ -220,8 +204,6 @@
                 android:resource="@xml/jawn_file_paths" />
         </provider>
 
-
-        <receiver android:name=".app.TermuxOpenReceiver" android:exported="false" />
 
         <receiver android:name=".app.JawnBootReceiver" android:exported="false">
             <intent-filter>
@@ -655,15 +637,6 @@
                 <action android:name="com.jawnos.app.CLOCK_ALARM" />
             </intent-filter>
         </receiver>
-
-        <service
-            android:name=".app.RunCommandService"
-            android:exported="true"
-            android:permission="${TERMUX_PACKAGE_NAME}.permission.RUN_COMMAND">
-            <intent-filter>
-                <action android:name="${TERMUX_PACKAGE_NAME}.RUN_COMMAND" />
-            </intent-filter>
-        </service>
 
 
         <!-- This (or rather, value 2.1 or higher) is needed to make the Samsung Galaxy S8 mark the
