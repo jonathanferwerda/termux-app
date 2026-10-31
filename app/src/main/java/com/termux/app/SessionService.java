@@ -261,28 +261,23 @@ public final class SessionService extends Service {
         env.put("PWD", dir.getAbsolutePath());
         if (env.get("SHELL") == null) env.put("SHELL", prefix + "/bin/bash");
         if (env.get("TERMUX_VERSION") == null) env.put("TERMUX_VERSION", "0.118");
+        // The runtime's binaries were compiled for another package's prefix, so
+        // the loader has to be told where its libraries now live. The shims below
+        // name the other paths baked into those binaries: perl's module
+        // directories, git's exec path and CA bundle, and the CA libcurl trusts.
         if (ownRuntime) {
-            // The archive's perl carries Termux's compiled-in @INC, so point it
-            // at the copy beside it and let the loader find libperl.so and the
-            // XS libraries there rather than in the prefix.
             String rt = runtime.getAbsolutePath();
-            String lib = rt + "/lib";
-            StringBuilder inc = new StringBuilder();
-            File perl5 = new File(runtime, "lib/perl5");
-            File[] versions = perl5.listFiles();
-            if (versions != null) {
-                for (File v : versions) {
-                    for (File d : new File[] { v, new File(v, "site_perl") }) {
-                        if (d.isDirectory() && inc.indexOf(d.getAbsolutePath()) < 0) {
-                            if (inc.length() > 0) inc.append(':');
-                            inc.append(d.getAbsolutePath());
-                        }
-                    }
-                }
-            }
-            env.put("LD_LIBRARY_PATH", lib + ":" + core.getAbsolutePath());
-            if (inc.length() > 0) env.put("PERL5LIB", inc.toString());
+            env.put("LD_LIBRARY_PATH", rt + "/lib:" + core.getAbsolutePath());
             JawnLog.append("supervisor: using the app's own runtime at " + rt);
+        }
+        else {
+            env.put("LD_LIBRARY_PATH", prefix + "/lib");
+        }
+        java.util.List<String> shims = new java.util.ArrayList<>();
+        com.termux.shared.shell.TermuxShellUtils.addRuntimeEnvironment(shims);
+        for (String shim : shims) {
+            int at = shim.indexOf('=');
+            if (at > 0) env.put(shim.substring(0, at), shim.substring(at + 1));
         }
         // M2 drops termux-exec: no #!/usr/bin/perl rewriting. jawn execs the
         // interpreter it is already running under ($^X), so nothing needs it.

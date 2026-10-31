@@ -1073,3 +1073,16 @@ work and a full-width build has crashed it (2026-10-10).
      `JawnFirstRun` runs its steps through `$PREFIX/bin/sh -c` (the runtime has no
      `bin/login`). Proven on a wiped x86_64 emulator: download → sha256 → unpack
      -> tree cloned -> `status=good` on the runtime's own perl, no `base64` error.
+
+105. M4 — the app is `com.jawnos`. `applicationId` and `TermuxConstants.TERMUX_PACKAGE_NAME`
+     moved together, so the data directory, the provider authorities and every
+     path derived from them follow; the Java package is still `com.termux.app`
+     for now. Two fixes came out of a wipe-and-install on the tablet: the app's
+     shell environment never set `LD_LIBRARY_PATH` (Termux got it from
+     `bin/login`, which M2 deleted), and `libtermux.so` was linked for 4 KB
+     pages, which is what Android 15's "16 KB compatible" dialog was reporting —
+     it is built with `-Wl,-z,max-page-size=16384` now. The runtime relocates
+     because the packer rewrites its baked prefix (`com.termux` → `com.jawnos`
+     is the same length, so no ELF offset moves); proven with an empty
+     environment. Rehearsed migration A: backup out of com.termux, wipe, install
+     com.jawnos, import — the house came back with the same 114,390 appointments.

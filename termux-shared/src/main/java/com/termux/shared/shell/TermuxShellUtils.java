@@ -118,11 +118,72 @@ public class TermuxShellUtils {
         } else {
             environment.add("LANG=en_US.UTF-8");
             environment.add("PATH=" + TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH);
+            // The runtime's binaries find their libraries here and nowhere else:
+            // bin/login used to export this, and the app's own runtime has no
+            // login. Without it every tool that links a prefix library (git and
+            // libpcre2-8, curl and libcurl, ssh and libldns) fails to start.
+            environment.add("LD_LIBRARY_PATH=" + TermuxConstants.TERMUX_LIB_PREFIX_DIR_PATH);
+            addRuntimeEnvironment(environment);
             environment.add("PWD=" + workingDirectory);
             environment.add("TMPDIR=" + TermuxConstants.TERMUX_TMP_PREFIX_DIR_PATH);
         }
 
         return environment.toArray(new String[0]);
+    }
+
+    /**
+     * The variables the runtime's own binaries need when the prefix is not the
+     * path they were compiled for. Every one of them is a path Termux baked into
+     * a binary at build time: perl's @INC, git's exec path, and the CA bundle
+     * libcurl was told to trust. Each is added only when the file it names is
+     * really there, so a runtime built for this prefix needs none of them.
+     */
+    public static void addRuntimeEnvironment(List<String> environment) {
+        java.io.File prefix = TermuxConstants.TERMUX_PREFIX_DIR;
+
+        java.io.File gitCore = new java.io.File(prefix, "libexec/git-core");
+        if (gitCore.isDirectory()) {
+            environment.add("GIT_EXEC_PATH=" + gitCore.getAbsolutePath());
+            java.io.File templates = new java.io.File(prefix, "share/git-core/templates");
+            if (templates.isDirectory()) environment.add("GIT_TEMPLATE_DIR=" + templates.getAbsolutePath());
+        }
+
+        java.io.File ca = new java.io.File(prefix, "etc/tls/cert.pem");
+        if (ca.isFile()) {
+            environment.add("SSL_CERT_FILE=" + ca.getAbsolutePath());
+            environment.add("GIT_SSL_CAINFO=" + ca.getAbsolutePath());
+        }
+
+        String perlLib = perlLibraryPath(new java.io.File(prefix, "lib"));
+        if (perlLib != null) environment.add("PERL5LIB=" + perlLib);
+    }
+
+    /** Every versioned perl5 tree in the prefix, with its site_perl and arch
+     *  directories, so perl finds the modules a moved prefix left behind. */
+    private static String perlLibraryPath(java.io.File lib) {
+        java.io.File perl5 = new java.io.File(lib, "perl5");
+        java.io.File[] versions = perl5.listFiles();
+        if (versions == null) return null;
+        List<String> dirs = new ArrayList<>();
+        for (java.io.File version : versions) {
+            if (!version.isDirectory() || !version.getName().matches("\\d+\\.\\d+\\.\\d+")) continue;
+            dirs.add(version.getAbsolutePath());
+            addArchDirectories(dirs, version);
+            java.io.File site = new java.io.File(perl5, "site_perl/" + version.getName());
+            if (site.isDirectory()) {
+                dirs.add(site.getAbsolutePath());
+                addArchDirectories(dirs, site);
+            }
+        }
+        return dirs.isEmpty() ? null : String.join(":", dirs);
+    }
+
+    private static void addArchDirectories(List<String> dirs, java.io.File parent) {
+        java.io.File[] children = parent.listFiles();
+        if (children == null) return;
+        for (java.io.File child : children) {
+            if (child.isDirectory() && child.getName().endsWith("-android")) dirs.add(child.getAbsolutePath());
+        }
     }
 
     public static void addToEnvIfPresent(List<String> environment, String name) {
