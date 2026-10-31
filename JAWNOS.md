@@ -1323,3 +1323,15 @@ work and a full-width build has crashed it (2026-10-10).
      desktop fallback everywhere. Verified on the tablet: identify 16x8,
      convert 8x4 JPEG, gray exactly 72 bytes, normalize 4x4, montage 24x8 with
      red at x=0, blue at x=15 and red at x=16. Build 1231.
+
+124. M3 — ImageMagick leaves the runtime. The diet no longer ships `magick` or
+     `convert`; `ffmpeg`/`ffprobe` stay because their uses (film frames,
+     loudness, subtitles, Music's video stream) have no native path yet. The
+     aarch64 archive was rebuilt on the tablet from its own prefix:
+     291.6 MB raw / 100.5 MB zipped before the image work, now **212.3 MB raw
+     and 82.0 MB zipped** (3,404 files, sha256 0fca7874…). It was unpacked into
+     an empty directory and run from there: `perl` with JSON::PP, Mojolicious,
+     DBD::SQLite, CryptX and Sereal::Encoder, plus ffmpeg 8.1.3 and git 2.55.0;
+     `bin/magick` is absent. x86_64 remains at 0.1.1670 (it is built on the
+     emulator, which was not running); the pin now names aarch64 0.1.1697 and
+     x86_64 0.1.1670. Build 1232 pins the new archive.
