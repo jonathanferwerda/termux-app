@@ -277,6 +277,18 @@ public class DeviceService extends Service {
                     reply.put("result", made);
                 }
             }
+            else if ("image.cover".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageCover(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not cover-crop the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
             else if ("battery.status".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", battery());
@@ -1716,9 +1728,10 @@ public class DeviceService extends Service {
         return false;
     }
 
-    /** Decode a picture, honouring its EXIF orientation and never loading more
-     *  pixels than the thumbnail needs. */
-    private static Bitmap decodePicture(java.io.File file, int max) {
+    /** Decode a picture, honouring its EXIF orientation and sampling no finer
+     *  than `max` in either axis; no fit-shrink, so a caller that needs to
+     *  fill a square has pixels to spare. */
+    private static Bitmap decodeOriented(java.io.File file, int max) {
         try {
             BitmapFactory.Options bounds = new BitmapFactory.Options();
             bounds.inJustDecodeBounds = true;
@@ -1751,10 +1764,17 @@ public class DeviceService extends Service {
                 if (turned != bitmap) bitmap.recycle();
                 bitmap = turned;
             }
-            return fitWithin(bitmap, max);
+            return bitmap;
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** Decode a picture, honouring its EXIF orientation and never loading more
+     *  pixels than the thumbnail needs. */
+    private static Bitmap decodePicture(java.io.File file, int max) {
+        Bitmap bitmap = decodeOriented(file, max);
+        return bitmap == null ? null : fitWithin(bitmap, max);
     }
 
     /** The first page of a PDF, drawn at thumbnail size. */
@@ -1801,6 +1821,59 @@ public class DeviceService extends Service {
         return scaled;
     }
 
+
+    /** Fill a square of `size` from the centre of the picture, then write it.
+     *
+     *  The avatars and covers used `magick <file> -resize NxN^ -gravity center
+     *  -extent NxN -quality Q`; this scales until both sides reach `size` and
+     *  crops the middle, which is what that command did.
+     */
+    private JSONObject imageCover(JSONObject args) {
+        Bitmap bitmap = null;
+        Bitmap scaled = null;
+        Bitmap cropped = null;
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", "");
+            int size = args.optInt("size", 160);
+            int quality = args.optInt("quality", 82);
+            if (out.isEmpty() || size < 1) return null;
+            File source = new File(path);
+            if (!source.isFile()) return null;
+
+            bitmap = decodeOriented(source, size);
+            if (bitmap == null) return null;
+
+            double scale = Math.max((double) size / bitmap.getWidth(), (double) size / bitmap.getHeight());
+            int width = Math.max(size, (int) Math.round(bitmap.getWidth() * scale));
+            int height = Math.max(size, (int) Math.round(bitmap.getHeight() * scale));
+            scaled = Bitmap.createScaledBitmap(bitmap, width, height, true);
+            if (scaled != bitmap) bitmap.recycle();
+            bitmap = null;
+
+            int left = Math.max(0, (width - size) / 2);
+            int top = Math.max(0, (height - size) / 2);
+            cropped = Bitmap.createBitmap(scaled, left, top, size, size);
+            if (cropped != scaled) scaled.recycle();
+            scaled = null;
+
+            boolean written = writeBitmap(cropped, new File(out), extensionOf(out), quality);
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", size);
+            result.put("height", size);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.cover failed", t);
+            return null;
+        } finally {
+            if (cropped != null) cropped.recycle();
+            if (scaled != null) scaled.recycle();
+            if (bitmap != null) bitmap.recycle();
+        }
+    }
 
     /** Resize an image to fit width × height without upscaling.
      *

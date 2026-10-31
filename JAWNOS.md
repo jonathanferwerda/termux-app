@@ -1294,3 +1294,15 @@ work and a full-width build has crashed it (2026-10-10).
      tablet: an 8x8 two-colour checkerboard through rotate+blur came back 8x8
      with 9 colours, and crop 4x4+2+2 with modulate 150 came back 4x4. Build
      1229.
+
+122. M3 — thumbnails and cover art stop needing magick. A new `image.cover`
+     fills a square from the centre (the old `-resize NxN^ -gravity center
+     -extent NxN`) and writes it at a chosen JPEG quality; the picture decode
+     is split so a cover samples to at least the square's side instead of
+     loading the full frame. The unclaimed-pool thumbnail and the generated
+     media (camera/recorder output) now ask `media.thumbnail` for the PNG, and
+     the generated picture asks `image.resize`, each keeping its ffmpeg |
+     magick pipeline for a desktop. The contact avatar thumb and the crest
+     card's display copy use the same bridge first. Verified on the tablet: a
+     16x8 half-red/half-blue PNG through `image.cover` at 4 came back 4x4 with
+     red at 0,0 and blue at 3,3. Build 1230.
