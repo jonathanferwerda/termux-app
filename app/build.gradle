@@ -29,7 +29,6 @@ android {
         implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
         implementation(name: 'libtailscale', ext: 'aar')
 
-        implementation project(":terminal-view")
         implementation project(":jawnos-shared")
     }
 
@@ -37,8 +36,8 @@ android {
         applicationId "com.jawnos"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()
-        versionCode 1215
-        versionName "0.118.216"
+        versionCode 1216
+        versionName "0.118.217"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

@@ -3,13 +3,11 @@ package com.jawnos.app;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
 import com.jawnos.shared.termux.TermuxConstants;
-import com.jawnos.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_SERVICE;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -29,13 +27,9 @@ public class JawnLauncher {
     public static final String KEY_BLE_WITH_JAWN = "ble_with_jawn";
     public static final String KEY_RUNNING = "jawn_running";
     public static final String KEY_SYSTEM_BARS = "system_bars";
-    /** M2: run jawn from the app's own supervisor (SessionService) instead of
-     *  a Termux login session. Off restores the old path for a rollback. */
-    public static final String KEY_NATIVE_SUPERVISOR = "native_supervisor";
     public static final String DEFAULT_DIR = "jawnos";
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static Runnable pendingStop;
 
     public static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -100,14 +94,6 @@ public class JawnLauncher {
 
     public static boolean isBleWithJawn(Context context) {
         return prefs(context).getBoolean(KEY_BLE_WITH_JAWN, true);
-    }
-
-    /** Whether jawn runs under the app's own supervisor (M2). The fallback is
-     *  the Termux login session, which needs perl to be installed, so a device
-     *  without one keeps the path it has always had. */
-    public static boolean useNativeSupervisor(Context context) {
-        if (!prefs(context).getBoolean(KEY_NATIVE_SUPERVISOR, true)) return false;
-        return new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl").canExecute();
     }
 
     /** Whether the user wants jawn kept running. A fresh install follows the
@@ -285,34 +271,20 @@ public class JawnLauncher {
         return portOpen("127.0.0.1", 45999, 400);
     }
 
-    /** Start jawn as a background task (dashboard button).
-     *
-     *  A foreground terminal *session* does not actually run until a terminal
-     *  view is attached, so with the app in the background (the normal case --
-     *  dot only) the session sat idle and jawn never came up: the web app did
-     *  not load until the console was opened, which attached a view and let the
-     *  session finally run. The boot path has always used a background task and
-     *  runs headless, so use that here too. */
+    /** Start jawn (dashboard button). The app's own supervisor is the only
+     *  path: it forks perl directly and runs headless with the app in the
+     *  background. */
     public static void startJawn(Context context) {
-        startJawn(context, true, false);
+        startJawn(context, false);
     }
 
-    /** Start jawn as a background task (boot autostart): the foreground service
-     *  and the dot still run, but no console session is created, so jawn's
-     *  output does not pop up in the console after a reboot. */
+    /** Start jawn (boot autostart). Same supervisor path as the dashboard. */
     public static void startJawnBackground(Context context) {
-        startJawn(context, true, false);
+        startJawn(context, false);
     }
 
-    private static void startJawn(Context context, boolean background, boolean afterKill) {
+    private static void startJawn(Context context, boolean afterKill) {
         setKeepRunning(context, true);
-        // A Stop scheduled a service stop to fire once its killer has had its
-        // few seconds. If the user starts again inside that window, cancel it,
-        // or it tears the fresh start down.
-        if (pendingStop != null) {
-            MAIN.removeCallbacks(pendingStop);
-            pendingStop = null;
-        }
 
         // One master per machine. A second tree wipes ~/.president under the
         // first, both take the ports and they cycle - which is the "black
@@ -325,50 +297,15 @@ public class JawnLauncher {
             return;
         }
 
-        String dir = getJawnDirPath(context);
-        // M2: the app's own supervisor forks perl directly, with one pipe into
+        // The app's own supervisor forks perl directly, with one pipe into
         // ~/manager.log. No login, no bash, no termux-exec.
-        if (useNativeSupervisor(context)) {
-            if (isBleWithJawn(context)) startBle(context);
-            startDeviceService(context);
-            SessionService.start(context);
-            return;
-        }
-        Intent intent = new Intent(context, TermuxService.class);
-        intent.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
-        // Run through Termux's login script rather than bash directly: login is
-        // what exports LD_PRELOAD for termux-exec, so #!/usr/bin/perl-style
-        // shebangs in user scripts resolve. Launching bash directly skips it
-        // and ./President.pl dies with "bad interpreter: /usr/bin/perl".
-        intent.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
-        // Wait out a manager_killer still sweeping from a recent Stop before
-        // starting. The killer matches "perl ./jawn" on its targets' command
-        // lines, so a session started while it runs is killed before jawn can
-        // come up (a quick Stop then Start used to leave nothing running). The
-        // program name is built from a variable so this waiting shell does not
-        // itself match the killer's "perl ./jawn" pattern.
-        intent.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc",
-            "cd " + dir + " && p='./jawn'; n=0; "
-            + "while pgrep -f 'manager_killer[.]pl' >/dev/null 2>&1 && [ $n -lt 30 ]; "
-            + "do sleep 1; n=$((n+1)); done; exec perl \"$p\"" });
-        intent.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
-        intent.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, background);
-        // Do not let the new session drag the Termux console to the front. A
-        // foreground execution otherwise defaults to
-        // SWITCH_TO_NEW_SESSION_AND_OPEN_ACTIVITY, which calls
-        // startTermuxActivity() and throws the user out of the dashboard and into
-        // the console the moment jawn starts. The session is still created and
-        // selected, so "Open console" still lands on jawn's output.
-        intent.putExtra(TERMUX_SERVICE.EXTRA_SESSION_ACTION, String.valueOf(
-            TERMUX_SERVICE.VALUE_EXTRA_SESSION_ACTION_SWITCH_TO_NEW_SESSION_AND_DONT_OPEN_ACTIVITY));
-        intent.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn");
         // Bring the BLE bridge up first so jawn's listener has a daemon to dial
         // the moment it starts (and take it down again on Stop when tied).
         if (isBleWithJawn(context)) startBle(context);
         // The device bridge serves battery and the rest straight from the app
         // (M1); an old tree simply never dials it.
         startDeviceService(context);
-        context.startForegroundService(intent);
+        SessionService.start(context);
     }
 
     /** Stop jawn (and the BLE bridge when it rides along with it). */
@@ -380,52 +317,19 @@ public class JawnLauncher {
     }
 
     /** Restart the tree without stopping the service: kill what runs, then start
-     *  again. startJawn() cancels the delayed service stop that stopJawnTree
-     *  schedules, and its launch waits out the killer. */
+     *  again after the supervisor has had time to finish its own teardown. */
     public static void restartJawn(final Context context) {
         stopJawnTree(context);
         MAIN.postDelayed(new Runnable() {
-            public void run() { startJawn(context, true, true); }
+            public void run() { startJawn(context, true); }
         }, 800);
     }
 
     /** Tear down the running tree and stop the service, but leave BLE alone. */
     private static void stopJawnTree(Context context) {
-        // M2: the supervisor sends the master its INT, waits out the tree's own
+        // The supervisor sends the master its INT, waits out the tree's own
         // teardown and runs the killer as mop-up, then stops itself.
-        if (useNativeSupervisor(context)) {
-            SessionService.stop(context);
-            return;
-        }
-        // Take the tree down before stopping the service: ACTION_STOP_SERVICE
-        // only SIGKILLs the terminal sessions, which the master's Ctrl+C
-        // handler never sees, so President.pl, the workers, the BLE client and
-        // ollama all survived -- and a master left behind keeps
-        // ~/.process_watch answering, so the next Start stands down (2026-10-10:
-        // after Stop the web UI was still reachable and the phone ran hot).
-        // The killer rides the foreground service as a background task, which
-        // the service stop below does not kill, so its sweeps always finish.
-        final String dir = getJawnDirPath(context);
-        Intent killer = new Intent(context, TermuxService.class);
-        killer.setAction(TERMUX_SERVICE.ACTION_SERVICE_EXECUTE);
-        killer.setData(Uri.parse(TERMUX_SERVICE.URI_SCHEME_SERVICE_EXECUTE + "://" + TermuxConstants.TERMUX_PREFIX_DIR_PATH + "/bin/login"));
-        killer.putExtra(TERMUX_SERVICE.EXTRA_ARGUMENTS, new String[] { "-lc", "cd " + dir + " && perl ./scripts/manager_killer.pl master" });
-        killer.putExtra(TERMUX_SERVICE.EXTRA_WORKDIR, dir);
-        killer.putExtra(TERMUX_SERVICE.EXTRA_BACKGROUND, true);
-        killer.putExtra(TERMUX_SERVICE.EXTRA_COMMAND_LABEL, "jawn-killer");
-        context.startForegroundService(killer);
-        // then put the service (and the dot) away; the killer has had its few
-        // seconds by now and finishes even after the service stops
-        pendingStop = new Runnable() {
-            @Override
-            public void run() {
-                pendingStop = null;
-                Intent stop = new Intent(context, TermuxService.class);
-                stop.setAction(TERMUX_SERVICE.ACTION_STOP_SERVICE);
-                context.startService(stop);
-            }
-        };
-        MAIN.postDelayed(pendingStop, 8000);
+        SessionService.stop(context);
     }
 
     /** Read working_port from the jawn config.json, defaulting to 3000. */

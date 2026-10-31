@@ -30,8 +30,8 @@ import java.util.Map;
  * died, and refuses to start a second one while the live master's pid still
  * answers.
  *
- * What it replaces: TermuxService's session for jawn (bin/login + bash +
- * termux-exec). TermuxService stays for the Console until M3 deletes it.
+ * What it replaces: the old Termux console session for jawn (bin/login + bash
+ * + termux-exec), which M4 removed along with the terminal stack.
  */
 public final class SessionService extends Service {
 

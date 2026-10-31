@@ -17,10 +17,6 @@ import com.jawnos.shared.models.ReportInfo;
 import com.jawnos.app.models.UserAction;
 import com.jawnos.shared.interact.ShareUtils;
 import com.jawnos.shared.packages.PackageUtils;
-import com.jawnos.shared.settings.preferences.TermuxAPIAppSharedPreferences;
-import com.jawnos.shared.settings.preferences.TermuxFloatAppSharedPreferences;
-import com.jawnos.shared.settings.preferences.TermuxTaskerAppSharedPreferences;
-import com.jawnos.shared.settings.preferences.TermuxWidgetAppSharedPreferences;
 import com.jawnos.shared.termux.AndroidUtils;
 import com.jawnos.shared.termux.TermuxConstants;
 import com.jawnos.shared.termux.TermuxUtils;
@@ -58,48 +54,8 @@ public class SettingsActivity extends AppCompatActivity {
 
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
 
-            configureTermuxAPIPreference(context);
-            configureTermuxFloatPreference(context);
-            configureTermuxTaskerPreference(context);
-            configureTermuxWidgetPreference(context);
             configureAboutPreference(context);
             configureDonatePreference(context);
-        }
-
-        private void configureTermuxAPIPreference(@NonNull Context context) {
-            Preference termuxAPIPreference = findPreference("termux_api");
-            if (termuxAPIPreference != null) {
-                TermuxAPIAppSharedPreferences preferences = TermuxAPIAppSharedPreferences.build(context, false);
-                // If failed to get app preferences, then likely app is not installed, so do not show its preference
-                termuxAPIPreference.setVisible(preferences != null);
-            }
-        }
-
-        private void configureTermuxFloatPreference(@NonNull Context context) {
-            Preference termuxFloatPreference = findPreference("termux_float");
-            if (termuxFloatPreference != null) {
-                TermuxFloatAppSharedPreferences preferences = TermuxFloatAppSharedPreferences.build(context, false);
-                // If failed to get app preferences, then likely app is not installed, so do not show its preference
-                termuxFloatPreference.setVisible(preferences != null);
-            }
-        }
-
-        private void configureTermuxTaskerPreference(@NonNull Context context) {
-            Preference termuxTaskerPreference = findPreference("termux_tasker");
-            if (termuxTaskerPreference != null) {
-                TermuxTaskerAppSharedPreferences preferences = TermuxTaskerAppSharedPreferences.build(context, false);
-                // If failed to get app preferences, then likely app is not installed, so do not show its preference
-                termuxTaskerPreference.setVisible(preferences != null);
-            }
-        }
-
-        private void configureTermuxWidgetPreference(@NonNull Context context) {
-            Preference termuxWidgetPreference = findPreference("termux_widget");
-            if (termuxWidgetPreference != null) {
-                TermuxWidgetAppSharedPreferences preferences = TermuxWidgetAppSharedPreferences.build(context, false);
-                // If failed to get app preferences, then likely app is not installed, so do not show its preference
-                termuxWidgetPreference.setVisible(preferences != null);
-            }
         }
 
         private void configureAboutPreference(@NonNull Context context) {

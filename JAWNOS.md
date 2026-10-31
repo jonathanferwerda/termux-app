@@ -1152,3 +1152,22 @@ work and a full-width build has crashed it (2026-10-10).
      `assets/jawnrt.json` pin names a runtime that is not staged or does not
      match its sha256, and uploads any pinned runtime the release is missing.
      Build 1215.
+
+111. M4 — no terminal stack. The app's own supervisor (`SessionService`, a pipe
+     into `~/manager.log`) is the only way jawn runs: the "Run jawn under the
+     app's own supervisor" toggle, `KEY_NATIVE_SUPERVISOR`, `useNativeSupervisor()`
+     and every `TermuxService` start/stop/killer/restart branch and login-script
+     URI are gone. Console on the dashboard always opens `JawnLogActivity`,
+     since the tree's live output is the log. `TermuxActivity`, `TermuxService`,
+     the `app/terminal/` package, the `fragments/settings/termux*` preference
+     screens (and their XML), the share-to-terminal `TermuxFileReceiverActivity`,
+     both `TerminalActivityTest` cases, the terminal layouts/menus/drawables/
+     strings and `res/xml/shortcuts.xml` are deleted. `settings.gradle` includes
+     only `:app` and `:jawnos-shared`; the `:terminal-view`/`:terminal-emulator`
+     module directories are gone, and `LICENSE.md` no longer carries their
+     Apache-2.0 exception. `android:sharedUserId` and the UID are untouched.
+     `jawnos-shared` keeps its terminal/extrakeys classes on disk (`ShellUtils`
+     lost only its terminal-transcript helper); the six classes that still
+     import `com.termux.terminal`/`com.termux.view` have no callers and are
+     excluded from that module's source set until the GPL pass deletes them.
+     Build 1216.
