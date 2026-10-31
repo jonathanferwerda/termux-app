@@ -12,6 +12,8 @@ import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.Image;
 import android.media.ImageReader;
+import android.media.ExifInterface;
+import android.media.MediaMetadataRetriever;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.location.Location;
@@ -25,8 +27,11 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.graphics.pdf.PdfRenderer;
 import android.graphics.ImageFormat;
 import android.os.BatteryManager;
+import android.os.ParcelFileDescriptor;
 import android.os.Build;
 import android.net.Uri;
 import android.os.Handler;
@@ -45,6 +50,7 @@ import android.provider.ContactsContract;
 import android.provider.Telephony;
 import android.telephony.SmsManager;
 import android.media.AudioManager;
+import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -53,6 +59,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -206,6 +213,21 @@ public class DeviceService extends Service {
                 result.put("pid", android.os.Process.myPid());
                 reply.put("ok", true);
                 reply.put("result", result);
+            }
+            else if ("media.thumbnail".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                String want = args == null ? "" : args.optString("path", "");
+                int max = args == null ? 256 : args.optInt("max", 256);
+                long atMs = args == null ? -1 : args.optLong("at_ms", -1);
+                JSONObject made = mediaThumbnail(want, max, atMs);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "no thumbnail for " + want);
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
             }
             else if ("battery.status".equals(method)) {
                 reply.put("ok", true);
@@ -1485,4 +1507,160 @@ public class DeviceService extends Service {
     private static void closeQuietly(Socket socket) {
         try { socket.close(); } catch (Throwable ignored) {}
     }
+    /**
+     * A PNG thumbnail of a picture, a film frame or a PDF page, as {data, width,
+     * height, kind}. Null means "not something this can render", and the caller
+     * falls back to the shell pipeline. The manager's thumbnail routes ask for
+     * this first so a phone with no ImageMagick can still draw a gallery.
+     */
+    private JSONObject mediaThumbnail(String path, int max, long atMs) {
+        Bitmap bitmap = null;
+        String kind = null;
+        java.io.File file = new java.io.File(path);
+        if (!file.isFile()) return null;
+        if (max <= 0) max = 256;
+
+        if (atMs >= 0 || isVideo(file)) {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(path);
+                bitmap = atMs >= 0
+                        ? retriever.getFrameAtTime(atMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        : retriever.getFrameAtTime();
+                if (bitmap == null) bitmap = retriever.getFrameAtTime(0);
+                if (bitmap != null) kind = "video";
+            } catch (Throwable ignored) {
+                bitmap = null;
+            } finally {
+                try { retriever.release(); } catch (Throwable ignored) { }
+            }
+        }
+
+        if (bitmap == null) {
+            bitmap = decodePicture(file, max);
+            if (bitmap != null) kind = "image";
+        }
+        if (bitmap == null) {
+            bitmap = decodePdfPage(file, max);
+            if (bitmap != null) kind = "pdf";
+        }
+        if (bitmap == null) return null;
+        bitmap = fitWithin(bitmap, max);
+
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+        bitmap.recycle();
+        try {
+            JSONObject result = new JSONObject();
+            result.put("data", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
+            result.put("width", width);
+            result.put("height", height);
+            result.put("kind", kind);
+            return result;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static final String[] VIDEO_EXTENSIONS = {
+        ".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".mpg", ".mpeg",
+        ".ts", ".m2ts", ".3gp", ".ogv", ".flv", ".wmv",
+    };
+
+    /** A container the retriever understands: ask it for a frame, cheaply. */
+    private static boolean isVideo(java.io.File file) {
+        String name = file.getName().toLowerCase();
+        for (String ext : VIDEO_EXTENSIONS) {
+            if (name.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    /** Decode a picture, honouring its EXIF orientation and never loading more
+     *  pixels than the thumbnail needs. */
+    private static Bitmap decodePicture(java.io.File file, int max) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= max && bounds.outHeight / (sample * 2) >= max) {
+                sample *= 2;
+            }
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+            if (bitmap == null) return null;
+
+            int degrees = 0;
+            try {
+                ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+                int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+                if (orientation == ExifInterface.ORIENTATION_ROTATE_90) degrees = 90;
+                else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) degrees = 180;
+                else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) degrees = 270;
+            } catch (Throwable ignored) { }
+
+            if (degrees != 0) {
+                Matrix matrix = new Matrix();
+                matrix.postRotate(degrees);
+                Bitmap turned = Bitmap.createBitmap(bitmap, 0, 0,
+                        bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+                if (turned != bitmap) bitmap.recycle();
+                bitmap = turned;
+            }
+            return fitWithin(bitmap, max);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** The first page of a PDF, drawn at thumbnail size. */
+    private static Bitmap decodePdfPage(java.io.File file, int max) {
+        ParcelFileDescriptor fd = null;
+        PdfRenderer renderer = null;
+        try {
+            fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            renderer = new PdfRenderer(fd);
+            if (renderer.getPageCount() < 1) return null;
+            PdfRenderer.Page page = renderer.openPage(0);
+            try {
+                int pageWidth = page.getWidth();
+                int pageHeight = page.getHeight();
+                if (pageWidth <= 0 || pageHeight <= 0) return null;
+                double scale = Math.min((double) max / pageWidth, (double) max / pageHeight);
+                int width = Math.max(1, (int) Math.round(pageWidth * scale));
+                int height = Math.max(1, (int) Math.round(pageHeight * scale));
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                bitmap.eraseColor(android.graphics.Color.WHITE);
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                return bitmap;
+            } finally {
+                page.close();
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { if (renderer != null) renderer.close(); } catch (Throwable ignored) { }
+            try { if (fd != null) fd.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** Scale down to fit a square of the given side; a smaller picture is kept. */
+    private static Bitmap fitWithin(Bitmap bitmap, int max) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        if (width <= max && height <= max) return bitmap;
+        double scale = Math.min((double) max / width, (double) max / height);
+        int newWidth = Math.max(1, (int) Math.round(width * scale));
+        int newHeight = Math.max(1, (int) Math.round(height * scale));
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true);
+        if (scaled != bitmap) bitmap.recycle();
+        return scaled;
+    }
+
 }
