@@ -237,6 +237,30 @@ public class DeviceService extends Service {
                     reply.put("result", made);
                 }
             }
+            else if ("image.resize".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageResize(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not resize the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.save".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageSave(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not save the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
             else if ("battery.status".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", battery());
@@ -1759,6 +1783,136 @@ public class DeviceService extends Service {
         Bitmap scaled = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true);
         if (scaled != bitmap) bitmap.recycle();
         return scaled;
+    }
+
+
+    /** Resize an image to fit width × height without upscaling.
+     *
+     *  The tree's camera and upload paths used `magick <file> -resize WxH
+     *  <file>`; this decodes with an inSampleSize and scales once, then writes
+     *  the same format (JPEG/PNG/WebP) through a temp file. */
+    private JSONObject imageResize(JSONObject args) {
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", path);
+            int width = args.optInt("width", 0);
+            int height = args.optInt("height", 0);
+            int max = args.optInt("max", 0);
+            File source = new File(path);
+            if (!source.isFile()) return null;
+
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int sourceWidth = bounds.outWidth;
+            int sourceHeight = bounds.outHeight;
+            if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+            if (width <= 0 && height <= 0 && max > 0) {
+                width = max;
+                height = max;
+            }
+            if (width <= 0 && height <= 0) {
+                width = sourceWidth;
+                height = sourceHeight;
+            }
+
+            double scale = Math.min((double) width / sourceWidth, (double) height / sourceHeight);
+            if (scale > 1) scale = 1;
+            int targetWidth = Math.max(1, (int) Math.round(sourceWidth * scale));
+            int targetHeight = Math.max(1, (int) Math.round(sourceHeight * scale));
+
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sampleSize(sourceWidth, sourceHeight, targetWidth, targetHeight);
+            Bitmap bitmap = BitmapFactory.decodeFile(path, options);
+            if (bitmap == null) return null;
+            Bitmap scaled = bitmap;
+            if (bitmap.getWidth() != targetWidth || bitmap.getHeight() != targetHeight) {
+                scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
+                if (scaled != bitmap) bitmap.recycle();
+            }
+            boolean written = writeBitmap(scaled, new File(out), extensionOf(out), 90);
+            scaled.recycle();
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", targetWidth);
+            result.put("height", targetHeight);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.resize failed", t);
+            return null;
+        }
+    }
+
+    /** Decode an image and write it as args.out, at args.format/args.quality. */
+    private JSONObject imageSave(JSONObject args) {
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", "");
+            if (out.isEmpty()) return null;
+            Bitmap bitmap = BitmapFactory.decodeFile(path);
+            if (bitmap == null) return null;
+            String format = args.optString("format", extensionOf(out));
+            int quality = args.optInt("quality", 90);
+            boolean written = writeBitmap(bitmap, new File(out), format, quality);
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+            bitmap.recycle();
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", width);
+            result.put("height", height);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.save failed", t);
+            return null;
+        }
+    }
+
+    private static int sampleSize(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {
+        int sample = 1;
+        while (sourceWidth / (sample * 2) >= targetWidth
+            && sourceHeight / (sample * 2) >= targetHeight) {
+            sample *= 2;
+        }
+        return sample;
+    }
+
+    private static String extensionOf(String path) {
+        int dot = path.lastIndexOf('.');
+        return dot < 0 ? "" : path.substring(dot + 1).toLowerCase();
+    }
+
+    private static boolean writeBitmap(Bitmap bitmap, File out, String format, int quality) {
+        File parent = out.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+        File temp = new File(out.getPath() + ".part");
+        try (FileOutputStream stream = new FileOutputStream(temp)) {
+            String kind = format == null ? "" : format.toLowerCase();
+            Bitmap.CompressFormat compress = kind.equals("png") ? Bitmap.CompressFormat.PNG
+                : kind.equals("webp") ? Bitmap.CompressFormat.WEBP
+                : Bitmap.CompressFormat.JPEG;
+            int useQuality = compress == Bitmap.CompressFormat.PNG ? 100 : Math.max(1, Math.min(100, quality));
+            if (!bitmap.compress(compress, useQuality, stream)) {
+                temp.delete();
+                return false;
+            }
+        } catch (Throwable t) {
+            temp.delete();
+            return false;
+        }
+        if (!temp.renameTo(out)) {
+            out.delete();
+            if (!temp.renameTo(out)) {
+                temp.delete();
+                return false;
+            }
+        }
+        return true;
     }
 
 }

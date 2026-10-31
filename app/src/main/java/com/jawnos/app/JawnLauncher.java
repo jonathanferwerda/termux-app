@@ -286,6 +286,14 @@ public class JawnLauncher {
     private static void startJawn(Context context, boolean afterKill) {
         setKeepRunning(context, true);
 
+        // The bridges ride with the app, not only with a fresh tree. A package
+        // update (or a crash) can kill the app process while the exec'd perl
+        // tree survives: status stays good, but battery/clipboard/SMS and BLE
+        // are gone because their services died with the app. Starting them
+        // before the master check makes the next app launch heal that.
+        if (isBleWithJawn(context)) startBle(context);
+        startDeviceService(context);
+
         // One master per machine. A second tree wipes ~/.president under the
         // first, both take the ports and they cycle - which is the "black
         // screen for a minute or two" after picking the phone up. The live
@@ -299,12 +307,6 @@ public class JawnLauncher {
 
         // The app's own supervisor forks perl directly, with one pipe into
         // ~/manager.log. No login, no bash, no termux-exec.
-        // Bring the BLE bridge up first so jawn's listener has a daemon to dial
-        // the moment it starts (and take it down again on Stop when tied).
-        if (isBleWithJawn(context)) startBle(context);
-        // The device bridge serves battery and the rest straight from the app
-        // (M1); an old tree simply never dials it.
-        startDeviceService(context);
         SessionService.start(context);
     }
 

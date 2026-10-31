@@ -1268,3 +1268,15 @@ work and a full-width build has crashed it (2026-10-10).
      boilerplate at 0.79; every other file is below 0.2. The APK's licence is
      still GPL-3.0-only: similarity is evidence, not a clean-room proof, and
      the relicense is a decision for the source owner. Build 1225.
+
+120. M3/M1 — image.resize/image.save in the bridge, and the bridges heal with
+     the app. `image.resize` fits an image inside width x height without
+     upscaling (inSampleSize decode, one scale, temp-file write) and keeps the
+     output extension's format; `image.save` re-encodes as JPEG/PNG/WebP at a
+     chosen quality. The camera capture and upload paths ask the bridge first
+     and keep magick as the desktop fallback. Separately: an app process start
+     now starts DeviceService and the BLE daemon, because a package update can
+     kill the app while the exec'd tree survives — status stays good while
+     every bridged device call and BLE link is gone. Verified on the tablet:
+     a 400x200 PNG became 100x50 through the bridge, in place, and
+     `magick identify` confirmed it. Builds 1226-1228.
