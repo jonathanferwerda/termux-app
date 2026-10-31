@@ -1,1 +1,1 @@
-include ':app', ':termux-shared', ':terminal-emulator', ':terminal-view'
+include ':app', ':jawnos-shared', ':terminal-emulator', ':terminal-view'

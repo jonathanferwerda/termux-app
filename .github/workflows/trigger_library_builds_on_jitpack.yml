@@ -18,4 +18,4 @@ jobs:
           sleep 180 # It will take some time for the new tag to be detected by Jitpack
           curl --max-time 600 --no-progress-meter "https://jitpack.io/com/termux/termux-app/terminal-emulator/$TERMUX_LIB_VERSION/terminal-emulator-$TERMUX_LIB_VERSION.pom"
           curl --max-time 600 --no-progress-meter "https://jitpack.io/com/termux/termux-app/terminal-view/$TERMUX_LIB_VERSION/terminal-view-$TERMUX_LIB_VERSION.pom"
-          curl --max-time 600 --no-progress-meter "https://jitpack.io/com/termux/termux-app/termux-shared/$TERMUX_LIB_VERSION/termux-shared-$TERMUX_LIB_VERSION.pom"
+          curl --max-time 600 --no-progress-meter "https://jitpack.io/com/termux/termux-app/jawnos-shared/$TERMUX_LIB_VERSION/jawnos-shared-$TERMUX_LIB_VERSION.pom"

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.termux"
+    package="com.jawnos"
     android:installLocation="internalOnly"
     android:sharedUserId="${TERMUX_PACKAGE_NAME}"
     android:sharedUserLabel="@string/shared_user_label">
@@ -234,16 +234,17 @@
              own; jawn is then started if it is down. -->
         <receiver android:name=".app.JawnWakeReceiver" android:exported="true">
             <intent-filter>
-                <action android:name="com.termux.app.JAWN_WAKE" />
+                <action android:name="com.jawnos.app.JAWN_WAKE" />
+                <action android:name="com.jawnos.app.JAWN_PERMISSIONS" />
             </intent-filter>
         </receiver>
 
         <!-- Posts jawn's notifications from the app, so the badge lands on the
              app's own launcher icon (jawn's notification_sender broadcasts
-             com.termux.app.JAWN_NOTIFY here). -->
+             com.jawnos.app.JAWN_NOTIFY here). -->
         <receiver android:name=".app.JawnNotifyReceiver" android:exported="true">
             <intent-filter>
-                <action android:name="com.termux.app.JAWN_NOTIFY" />
+                <action android:name="com.jawnos.app.JAWN_NOTIFY" />
             </intent-filter>
         </receiver>
 
@@ -553,9 +554,9 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Requests the device permissions the utilities need, in the app's own
-             name (M2: the API app used to own this screen). Reachable from the
-             dashboard and from the tree, which runs under this uid, so it is
-             not exported. -->
+             name (M2: the API app used to own this screen). Opened from the
+             dashboard, and from the tree through the wake receiver's
+             JAWN_PERMISSIONS broadcast, so it is not exported. -->
         <activity
             android:name=".app.JawnPermissionsActivity"
             android:exported="false"
@@ -640,17 +641,17 @@
             android:name=".app.JawnClockReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.termux.app.JAWN_CLOCK_SYNC" />
-                <action android:name="com.termux.app.JAWN_CLOCK_RING" />
-                <action android:name="com.termux.app.JAWN_CLOCK_DISMISSED" />
-                <action android:name="com.termux.app.JAWN_CLOCK_REJECT" />
-                <action android:name="com.termux.app.JAWN_CLOCK_TIMER" />
-                <action android:name="com.termux.app.JAWN_CLOCK_PREVIEW" />
-                <action android:name="com.termux.app.CLOCK_UPCOMING" />
-                <action android:name="com.termux.app.JAWN_CLOCK_SKIP" />
-                <action android:name="com.termux.app.JAWN_CLOCK_DISMISS" />
-                <action android:name="com.termux.app.JAWN_CLOCK_SNOOZE" />
-                <action android:name="com.termux.app.CLOCK_ALARM" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_SYNC" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_RING" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_DISMISSED" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_REJECT" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_TIMER" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_PREVIEW" />
+                <action android:name="com.jawnos.app.CLOCK_UPCOMING" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_SKIP" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_DISMISS" />
+                <action android:name="com.jawnos.app.JAWN_CLOCK_SNOOZE" />
+                <action android:name="com.jawnos.app.CLOCK_ALARM" />
             </intent-filter>
         </receiver>
 

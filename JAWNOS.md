@@ -345,12 +345,12 @@ work and a full-width build has crashed it (2026-10-10).
 
 ## Deltas round V (the scan sheet comes down on Done/Cancel)
 
-- JawnScan: close(), plus a com.termux.app.SCAN_STOP broadcast receiver registered
+- JawnScan: close(), plus a com.jawnos.app.SCAN_STOP broadcast receiver registered
   while a scan is open. Google's sheet runs in our task, one activity above ML
   Kit's invisible delegate, so re-fronting the delegate with CLEAR_TOP |
   SINGLE_TOP finishes the sheet. The WebView is paused behind it, so the receiver
   is the channel that works; the manager fires the broadcast
-  (`am broadcast -a com.termux.app.SCAN_STOP -p com.termux`) when the run is Done
+  (`am broadcast -a com.jawnos.app.SCAN_STOP -p com.termux`) when the run is Done
   or Cancelled, and the page's marketPhoneScanStop() also calls close().
 
 ## Deltas round W (self-heal and a wake trigger)
@@ -369,7 +369,7 @@ work and a full-width build has crashed it (2026-10-10).
 - JawnDashboardActivity: runs selfTest() on resume and offers a "Self test"
   button beside Start/Restart/Stop. Reopening after Stop no longer restarts
   jawn (Stop is now a real stop); press Start or Self test to bring it back.
-- JawnWakeReceiver (new, exported): `com.termux.app.JAWN_WAKE` starts jawn from
+- JawnWakeReceiver (new, exported): `com.jawnos.app.JAWN_WAKE` starts jawn from
   outside the app; only the shell UID (adb) and the app itself are accepted.
   `scripts/phone_wake.pl` in the jawnos tree sends it over adb.
 
@@ -1019,7 +1019,7 @@ work and a full-width build has crashed it (2026-10-10).
     termux-exec, on the phone and on the desktop alike.
 
 100. M2 — the BLE bridge is the app's own now. `JawnBleService` moved from
-     `com.termux.api` to `com.termux.app` unchanged (same v2 multi-link NUS
+     `com.termux.api` to `com.jawnos.app` unchanged (same v2 multi-link NUS
      protocol on 127.0.0.1:45999, same "jawn-bt" prefs), so the tree and
      `scripts/jawn-bt` only needed the component name in their start command.
      The manifest gains BLUETOOTH, BLUETOOTH_ADMIN, BLUETOOTH_SCAN and
@@ -1076,7 +1076,7 @@ work and a full-width build has crashed it (2026-10-10).
 
 105. M4 — the app is `com.jawnos`. `applicationId` and `TermuxConstants.TERMUX_PACKAGE_NAME`
      moved together, so the data directory, the provider authorities and every
-     path derived from them follow; the Java package is still `com.termux.app`
+     path derived from them follow; the Java package is still `com.jawnos.app`
      for now. Two fixes came out of a wipe-and-install on the tablet: the app's
      shell environment never set `LD_LIBRARY_PATH` (Termux got it from
      `bin/login`, which M2 deleted), and `libtermux.so` was linked for 4 KB
@@ -1093,3 +1093,29 @@ work and a full-width build has crashed it (2026-10-10).
      access" for the package (and asks for the media permissions on 13+), and
      `JawnFirstRun` makes the twelve `~/storage/*` links in the app's own home
      the way termux-setup-storage did, skipping any target this device lacks.
+
+107. M4 — the Java package is `com.jawnos.app`, and so is every action. One
+     mechanical rename: `com.termux.app` → `com.jawnos.app`, `com.termux.shared`
+     → `com.jawnos.shared`, `com.termux.filepicker` → `com.jawnos.filepicker`,
+     the `termux-shared` module → `jawnos-shared`, and every `com.termux.app.*`
+     action → `com.jawnos.app.*` (223 files). Components now read
+     `com.jawnos/.app.X`. The manifest `package` stays `com.jawnos`: it is the
+     R namespace and the base for the relative component names, so
+     `package="com.jawnos.app"` produced `com.jawnos.app.app.TermuxApplication`
+     — caught in the merged manifest before it ever ran. `com.termux.terminal`
+     and `com.termux.view` are left alone: the JNI binds them and those two
+     modules are the next deletion. No class was renamed (`TermuxActivity`
+     et al keep their names); that is the cleanup pass after the modules go.
+     Two defects surfaced while proving it. Notifications from this app were
+     being dropped by the system ("Suppressing notification from package
+     com.jawnos by user request") because the activity never asked for
+     `POST_NOTIFICATIONS` even though the manifest declares it — it asks now,
+     so the prompt reaches a fresh install. And the permission screen was
+     unreachable from the tree: `am start` on a non-exported activity from the
+     tree's own shell child is refused ("package=com.android.shell does not
+     belong to uid=10321"), so the exported wake receiver handles
+     `com.jawnos.app.JAWN_PERMISSIONS` and opens it in-process instead.
+     Proven on the tablet (1207 → 1209): `am broadcast -a
+     com.jawnos.app.JAWN_WAKE -n com.jawnos/.app.JawnWakeReceiver` brought the
+     tree back `good`, `JAWN_NOTIFY` reached `JawnNotifyReceiver` and posted,
+     and `JAWN_PERMISSIONS` opened `com.jawnos/.app.JawnPermissionsActivity`.
