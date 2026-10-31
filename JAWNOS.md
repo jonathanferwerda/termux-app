@@ -1171,3 +1171,14 @@ work and a full-width build has crashed it (2026-10-10).
      import `com.termux.terminal`/`com.termux.view` have no callers and are
      excluded from that module's source set until the GPL pass deletes them.
      Build 1216.
+
+112. M4 — the shared user is gone, and `app_migrate.pl` is the only way across.
+     `android:sharedUserId`/`sharedUserLabel` are no longer in the manifest, so
+     a build cannot upgrade over an install that still declares them
+     (`INSTALL_FAILED_UID_CHANGED`). `scripts/app_migrate.pl` in the jawnos repo
+     uninstalls, installs, waits for the first run (runtime + tree), force-stops
+     before the vault can be sealed with a fresh key, restores the database,
+     config and the four identity files, and verifies the count and `device=`.
+     The phone and tablet were migrated with it on 2026-10-31. The app gate asks
+     for the device unlock again afterwards: the Keystore key dies with the
+     uninstall.
