@@ -3,7 +3,7 @@ package com.jawnos.app;
 import android.os.Handler;
 import android.os.Looper;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.File;
 import java.io.RandomAccessFile;
@@ -25,7 +25,7 @@ public class JawnLog {
     private static Runnable trimmer;
 
     public static File file() {
-        return new File(TermuxConstants.TERMUX_HOME_DIR_PATH, "manager.log");
+        return new File(JawnConstants.TERMUX_HOME_DIR_PATH, "manager.log");
     }
 
     /** Trim the log if it is over the cap, keeping the most recent part. */

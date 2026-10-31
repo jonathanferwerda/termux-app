@@ -12,16 +12,16 @@ import android.view.WindowManager;
 import com.jawnos.R;
 import com.jawnos.app.utils.CrashUtils;
 import com.jawnos.shared.file.FileUtils;
-import com.jawnos.shared.file.TermuxFileUtils;
+import com.jawnos.shared.file.JawnFileUtils;
 import com.jawnos.shared.interact.MessageDialogUtils;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.markdown.MarkdownUtils;
 import com.jawnos.shared.models.ExecutionCommand;
 import com.jawnos.shared.models.errors.Error;
 import com.jawnos.shared.packages.PackageUtils;
-import com.jawnos.shared.shell.TermuxTask;
-import com.jawnos.shared.termux.TermuxConstants;
-import com.jawnos.shared.termux.TermuxUtils;
+import com.jawnos.shared.shell.JawnTask;
+import com.jawnos.shared.jawnos.JawnConstants;
+import com.jawnos.shared.jawnos.JawnUtils;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -33,10 +33,10 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-import static com.jawnos.shared.termux.TermuxConstants.TERMUX_PREFIX_DIR;
-import static com.jawnos.shared.termux.TermuxConstants.TERMUX_PREFIX_DIR_PATH;
-import static com.jawnos.shared.termux.TermuxConstants.TERMUX_STAGING_PREFIX_DIR;
-import static com.jawnos.shared.termux.TermuxConstants.TERMUX_STAGING_PREFIX_DIR_PATH;
+import static com.jawnos.shared.jawnos.JawnConstants.TERMUX_PREFIX_DIR;
+import static com.jawnos.shared.jawnos.JawnConstants.TERMUX_PREFIX_DIR_PATH;
+import static com.jawnos.shared.jawnos.JawnConstants.TERMUX_STAGING_PREFIX_DIR;
+import static com.jawnos.shared.jawnos.JawnConstants.TERMUX_STAGING_PREFIX_DIR_PATH;
 
 /**
  * Install the Termux bootstrap packages if necessary by following the below steps:
@@ -57,9 +57,9 @@ import static com.jawnos.shared.termux.TermuxConstants.TERMUX_STAGING_PREFIX_DIR
  * <p/>
  * (5.2) For every other zip entry, extract it into $STAGING_PREFIX and set execute permissions if necessary.
  */
-final class TermuxInstaller {
+final class JawnInstaller {
 
-    private static final String LOG_TAG = "TermuxInstaller";
+    private static final String LOG_TAG = "JawnInstaller";
 
     /** Performs bootstrap setup if necessary. */
     static void setupBootstrapIfNeeded(final Activity activity, final Runnable whenDone) {
@@ -68,7 +68,7 @@ final class TermuxInstaller {
 
         // This will also call Context.getFilesDir(), which should ensure that termux files directory
         // is created if it does not already exist
-        filesDirectoryAccessibleError = TermuxFileUtils.isTermuxFilesDirectoryAccessible(activity, true, true);
+        filesDirectoryAccessibleError = JawnFileUtils.isTermuxFilesDirectoryAccessible(activity, true, true);
         boolean isFilesDirectoryAccessible = filesDirectoryAccessibleError == null;
 
         // Termux can only be run as the primary user (device owner) since only that
@@ -85,7 +85,7 @@ final class TermuxInstaller {
         }
 
         if (!isFilesDirectoryAccessible) {
-            bootstrapErrorMessage = Error.getMinimalErrorString(filesDirectoryAccessibleError) + "\nTERMUX_FILES_DIR: " + MarkdownUtils.getMarkdownCodeForString(TermuxConstants.TERMUX_FILES_DIR_PATH, false);
+            bootstrapErrorMessage = Error.getMinimalErrorString(filesDirectoryAccessibleError) + "\nTERMUX_FILES_DIR: " + MarkdownUtils.getMarkdownCodeForString(JawnConstants.TERMUX_FILES_DIR_PATH, false);
             Logger.logError(LOG_TAG, bootstrapErrorMessage);
             sendBootstrapCrashReportNotification(activity, bootstrapErrorMessage);
             MessageDialogUtils.showMessage(activity,
@@ -98,7 +98,7 @@ final class TermuxInstaller {
         if (FileUtils.directoryFileExists(TERMUX_PREFIX_DIR_PATH, true)) {
             File[] PREFIX_FILE_LIST =  TERMUX_PREFIX_DIR.listFiles();
             // If prefix directory is empty or only contains the tmp directory
-            if(PREFIX_FILE_LIST == null || PREFIX_FILE_LIST.length == 0 || (PREFIX_FILE_LIST.length == 1 && TermuxConstants.TERMUX_TMP_PREFIX_DIR_PATH.equals(PREFIX_FILE_LIST[0].getAbsolutePath()))) {
+            if(PREFIX_FILE_LIST == null || PREFIX_FILE_LIST.length == 0 || (PREFIX_FILE_LIST.length == 1 && JawnConstants.TERMUX_TMP_PREFIX_DIR_PATH.equals(PREFIX_FILE_LIST[0].getAbsolutePath()))) {
                 Logger.logInfo(LOG_TAG, "The termux prefix directory \"" + TERMUX_PREFIX_DIR_PATH + "\" exists but is empty or only contains the tmp directory.");
             } else {
                 whenDone.run();
@@ -113,7 +113,7 @@ final class TermuxInstaller {
             @Override
             public void run() {
                 try {
-                    Logger.logInfo(LOG_TAG, "Installing " + TermuxConstants.TERMUX_APP_NAME + " bootstrap packages.");
+                    Logger.logInfo(LOG_TAG, "Installing " + JawnConstants.TERMUX_APP_NAME + " bootstrap packages.");
 
                     Error error;
 
@@ -132,14 +132,14 @@ final class TermuxInstaller {
                     }
 
                     // Create prefix staging directory if it does not already exist and set required permissions
-                    error = TermuxFileUtils.isTermuxPrefixStagingDirectoryAccessible(true, true);
+                    error = JawnFileUtils.isTermuxPrefixStagingDirectoryAccessible(true, true);
                     if (error != null) {
                         showBootstrapErrorDialog(activity, whenDone, Error.getErrorMarkdownString(error));
                         return;
                     }
 
                     // Create prefix directory if it does not already exist and set required permissions
-                    error = TermuxFileUtils.isTermuxPrefixDirectoryAccessible(true, true);
+                    error = JawnFileUtils.isTermuxPrefixDirectoryAccessible(true, true);
                     if (error != null) {
                         showBootstrapErrorDialog(activity, whenDone, Error.getErrorMarkdownString(error));
                         return;
@@ -196,7 +196,7 @@ final class TermuxInstaller {
                     .setPositiveButton(R.string.bootstrap_error_try_again, (dialog, which) -> {
                         dialog.dismiss();
                         FileUtils.deleteFile("termux prefix directory", TERMUX_PREFIX_DIR_PATH, true);
-                        TermuxInstaller.setupBootstrapIfNeeded(activity, whenDone);
+                        JawnInstaller.setupBootstrapIfNeeded(activity, whenDone);
                     }).show();
             } catch (WindowManager.BadTokenException e1) {
                 // Activity already dismissed - ignore.
@@ -207,7 +207,7 @@ final class TermuxInstaller {
     private static void sendBootstrapCrashReportNotification(Activity activity, String message) {
         CrashUtils.sendCrashReportNotification(activity, LOG_TAG,
             "## Bootstrap Error\n\n" + message + "\n\n" +
-                TermuxUtils.getTermuxDebugMarkdownString(activity),
+                JawnUtils.getTermuxDebugMarkdownString(activity),
             true, true);
     }
 
@@ -220,7 +220,7 @@ final class TermuxInstaller {
             public void run() {
                 try {
                     Error error;
-                    File storageDir = TermuxConstants.TERMUX_STORAGE_HOME_DIR;
+                    File storageDir = JawnConstants.TERMUX_STORAGE_HOME_DIR;
 
                     error = FileUtils.clearDirectory("~/storage", storageDir.getAbsolutePath());
                     if (error != null) {

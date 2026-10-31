@@ -16,8 +16,8 @@ import com.jawnos.shared.models.ResultConfig;
 import com.jawnos.shared.models.ResultData;
 import com.jawnos.shared.models.errors.FunctionErrno;
 import com.jawnos.shared.models.errors.ResultSenderErrno;
-import com.jawnos.shared.termux.AndroidUtils;
-import com.jawnos.shared.termux.TermuxConstants.RESULT_SENDER;
+import com.jawnos.shared.jawnos.AndroidUtils;
+import com.jawnos.shared.jawnos.JawnConstants.RESULT_SENDER;
 
 public class ResultSender {
 

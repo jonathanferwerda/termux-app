@@ -7,7 +7,7 @@ import androidx.annotation.NonNull;
 
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.models.errors.Error;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.File;
 
@@ -19,9 +19,9 @@ import java.io.File;
  * directory checks the installer makes before the runtime is unpacked, so this
  * file is now those checks and nothing else.
  */
-public class TermuxFileUtils {
+public class JawnFileUtils {
 
-    private static final String LOG_TAG = "TermuxFileUtils";
+    private static final String LOG_TAG = "JawnFileUtils";
 
     public static Error isTermuxFilesDirectoryAccessible(@NonNull final Context context,
                                                          boolean createDirectoryIfMissing,
@@ -31,20 +31,20 @@ public class TermuxFileUtils {
         try { context.getFilesDir(); } catch (Exception e) {
             return new Error("FileUtils", 0, "Could not access the app files directory: " + e.getMessage());
         }
-        return checkDirectory("termux files directory", TermuxConstants.TERMUX_FILES_DIR_PATH,
+        return checkDirectory("termux files directory", JawnConstants.TERMUX_FILES_DIR_PATH,
             createDirectoryIfMissing, setMissingPermissions);
     }
 
     public static Error isTermuxPrefixDirectoryAccessible(boolean createDirectoryIfMissing,
                                                           boolean setMissingPermissions) {
-        return checkDirectory("termux prefix directory", TermuxConstants.TERMUX_PREFIX_DIR_PATH,
+        return checkDirectory("termux prefix directory", JawnConstants.TERMUX_PREFIX_DIR_PATH,
             createDirectoryIfMissing, setMissingPermissions);
     }
 
     public static Error isTermuxPrefixStagingDirectoryAccessible(boolean createDirectoryIfMissing,
                                                                  boolean setMissingPermissions) {
         return checkDirectory("termux prefix staging directory",
-            TermuxConstants.TERMUX_STAGING_PREFIX_DIR_PATH,
+            JawnConstants.TERMUX_STAGING_PREFIX_DIR_PATH,
             createDirectoryIfMissing, setMissingPermissions);
     }
 

@@ -394,7 +394,7 @@ public class JawnSms {
 
     /**
      * The file spelled the way the FileProvider's <files-path> root sees it.
-     * TermuxConstants and subs::home() say /data/data/... while getFilesDir()
+     * JawnConstants and subs::home() say /data/data/... while getFilesDir()
      * is /data/user/0/..., and a path outside that root makes getUriForFile
      * throw "Failed to find configured root".
      */

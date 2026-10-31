@@ -28,7 +28,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import com.jawnos.R;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import org.json.JSONObject;
 
@@ -109,7 +109,7 @@ public class JawnLocationService extends Service {
      *  moves the phone's own sampling and wake interval too; the stored setting
      *  is the fallback and four minutes the last resort. */
     public static long restingPaceMs(Context context) {
-        File file = new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), "gps_pace");
+        File file = new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"), "gps_pace");
         if (file.exists()) {
             try (FileInputStream in = new FileInputStream(file)) {
                 byte[] bytes = new byte[32];
@@ -202,7 +202,7 @@ public class JawnLocationService extends Service {
     /** The app side of the handshake: a fresh wake_ready tells the Perl tree it
      *  may release the permanent Termux wake lock. */
     public static void touchReady(Context context) {
-        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
         if (!dir.exists() && !dir.mkdirs()) return;
         File file = new File(dir, "wake_ready");
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -215,7 +215,7 @@ public class JawnLocationService extends Service {
     }
 
     public static void clearReady(Context context) {
-        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
         File file = new File(dir, "wake_ready");
         //noinspection ResultOfMethodCallIgnored
         file.delete();
@@ -562,7 +562,7 @@ public class JawnLocationService extends Service {
     }
 
     private static File fixFile() {
-        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
         if (!dir.exists() && !dir.mkdirs()) return null;
         return new File(dir, "location.json");
     }

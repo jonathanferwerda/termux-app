@@ -15,14 +15,14 @@ import com.jawnos.shared.notification.NotificationUtils;
 import com.jawnos.shared.file.FileUtils;
 import com.jawnos.shared.models.ReportInfo;
 import com.jawnos.app.models.UserAction;
-import com.jawnos.shared.notification.TermuxNotificationUtils;
-import com.jawnos.shared.settings.preferences.TermuxAppSharedPreferences;
+import com.jawnos.shared.notification.JawnNotificationUtils;
+import com.jawnos.shared.settings.preferences.JawnSharedPreferences;
 import com.jawnos.shared.data.DataUtils;
 import com.jawnos.shared.logger.Logger;
-import com.jawnos.shared.termux.AndroidUtils;
-import com.jawnos.shared.termux.TermuxUtils;
+import com.jawnos.shared.jawnos.AndroidUtils;
+import com.jawnos.shared.jawnos.JawnUtils;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.nio.charset.Charset;
 
@@ -32,15 +32,15 @@ public class CrashUtils {
 
     /**
      * Notify the user of an app crash at last run by reading the crash info from the crash log file
-     * at {@link TermuxConstants#TERMUX_CRASH_LOG_FILE_PATH}. The crash log file would have been
+     * at {@link JawnConstants#TERMUX_CRASH_LOG_FILE_PATH}. The crash log file would have been
      * created by {@link com.jawnos.shared.crash.CrashHandler}.
      *
      * If the crash log file exists and is not empty and
      * `crash_report_notifications_enabled` is
      * enabled, then a notification will be shown for the crash on the
-     * {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME} channel, otherwise nothing will be done.
+     * {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME} channel, otherwise nothing will be done.
      *
-     * After reading from the crash log file, it will be moved to {@link TermuxConstants#TERMUX_CRASH_LOG_BACKUP_FILE_PATH}.
+     * After reading from the crash log file, it will be moved to {@link JawnConstants#TERMUX_CRASH_LOG_BACKUP_FILE_PATH}.
      *
      * @param context The {@link Context} for operations.
      * @param logTagParam The log tag to use for logging.
@@ -48,7 +48,7 @@ public class CrashUtils {
     public static void notifyAppCrashOnLastRun(final Context context, final String logTagParam) {
         if (context == null) return;
 
-        TermuxAppSharedPreferences preferences = TermuxAppSharedPreferences.build(context);
+        JawnSharedPreferences preferences = JawnSharedPreferences.build(context);
         if (preferences == null) return;
 
         // If user has disabled notifications for crashes
@@ -60,21 +60,21 @@ public class CrashUtils {
             public void run() {
                 String logTag = DataUtils.getDefaultIfNull(logTagParam, LOG_TAG);
 
-                if (!FileUtils.regularFileExists(TermuxConstants.TERMUX_CRASH_LOG_FILE_PATH, false))
+                if (!FileUtils.regularFileExists(JawnConstants.TERMUX_CRASH_LOG_FILE_PATH, false))
                     return;
 
                 Error error;
                 StringBuilder reportStringBuilder = new StringBuilder();
 
                 // Read report string from crash log file
-                error = FileUtils.readStringFromFile("crash log", TermuxConstants.TERMUX_CRASH_LOG_FILE_PATH, Charset.defaultCharset(), reportStringBuilder, false);
+                error = FileUtils.readStringFromFile("crash log", JawnConstants.TERMUX_CRASH_LOG_FILE_PATH, Charset.defaultCharset(), reportStringBuilder, false);
                 if (error != null) {
                     Logger.logErrorExtended(logTag, error.toString());
                     return;
                 }
 
                 // Move crash log file to backup location if it exists
-                error = FileUtils.moveRegularFile("crash log", TermuxConstants.TERMUX_CRASH_LOG_FILE_PATH, TermuxConstants.TERMUX_CRASH_LOG_BACKUP_FILE_PATH, true);
+                error = FileUtils.moveRegularFile("crash log", JawnConstants.TERMUX_CRASH_LOG_FILE_PATH, JawnConstants.TERMUX_CRASH_LOG_BACKUP_FILE_PATH, true);
                 if (error != null) {
                     Logger.logErrorExtended(logTag, error.toString());
                 }
@@ -84,7 +84,7 @@ public class CrashUtils {
                 if (reportString.isEmpty())
                     return;
 
-                Logger.logDebug(logTag, "A crash log file found at \"" + TermuxConstants.TERMUX_CRASH_LOG_FILE_PATH +  "\".");
+                Logger.logDebug(logTag, "A crash log file found at \"" + JawnConstants.TERMUX_CRASH_LOG_FILE_PATH +  "\".");
 
                 sendCrashReportNotification(context, logTag, reportString, false, false);
             }
@@ -92,8 +92,8 @@ public class CrashUtils {
     }
 
     /**
-     * Send a crash report notification for {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID}
-     * and {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
+     * Send a crash report notification for {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID}
+     * and {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
      *
      * @param context The {@link Context} for operations.
      * @param logTag The log tag to use for logging.
@@ -108,7 +108,7 @@ public class CrashUtils {
     public static void sendCrashReportNotification(final Context context, String logTag, String message, boolean forceNotification, boolean addAppAndDeviceInfo) {
         if (context == null) return;
 
-        TermuxAppSharedPreferences preferences = TermuxAppSharedPreferences.build(context);
+        JawnSharedPreferences preferences = JawnSharedPreferences.build(context);
         if (preferences == null) return;
 
         // If user has disabled notifications for crashes
@@ -119,28 +119,28 @@ public class CrashUtils {
 
         // Send a notification to show the crash log which when clicked will open the {@link ReportActivity}
         // to show the details of the crash
-        String title = TermuxConstants.TERMUX_APP_NAME + " Crash Report";
+        String title = JawnConstants.TERMUX_APP_NAME + " Crash Report";
 
         Logger.logDebug(logTag, "Sending \"" + title + "\" notification.");
 
         StringBuilder reportString = new StringBuilder(message);
 
         if (addAppAndDeviceInfo) {
-            reportString.append("\n\n").append(TermuxUtils.getAppInfoMarkdownString(context, true));
+            reportString.append("\n\n").append(JawnUtils.getAppInfoMarkdownString(context, true));
             reportString.append("\n\n").append(AndroidUtils.getDeviceInfoMarkdownString(context));
         }
 
         String userActionName = UserAction.CRASH_REPORT.getName();
         ReportActivity.NewInstanceResult result = ReportActivity.newInstance(context, new ReportInfo(userActionName,
             logTag, title, null, reportString.toString(),
-            "\n\n" + TermuxUtils.getReportIssueMarkdownString(context), true,
+            "\n\n" + JawnUtils.getReportIssueMarkdownString(context), true,
             userActionName,
             Environment.getExternalStorageDirectory() + "/" +
-                FileUtils.sanitizeFileName(TermuxConstants.TERMUX_APP_NAME + "-" + userActionName + ".log", true, true)));
+                FileUtils.sanitizeFileName(JawnConstants.TERMUX_APP_NAME + "-" + userActionName + ".log", true, true)));
         if (result.contentIntent == null) return;
 
         // Must ensure result code for PendingIntents and id for notification are unique otherwise will override previous
-        int nextNotificationId = TermuxNotificationUtils.getNextNotificationId(context);
+        int nextNotificationId = JawnNotificationUtils.getNextNotificationId(context);
 
         PendingIntent contentIntent = PendingIntent.getActivity(context, nextNotificationId, result.contentIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
@@ -163,8 +163,8 @@ public class CrashUtils {
     }
 
     /**
-     * Get {@link Notification.Builder} for {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID}
-     * and {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
+     * Get {@link Notification.Builder} for {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID}
+     * and {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
      *
      * @param context The {@link Context} for operations.
      * @param title The title for the notification.
@@ -179,7 +179,7 @@ public class CrashUtils {
     public static Notification.Builder getCrashReportsNotificationBuilder(final Context context, final CharSequence title, final CharSequence notificationText, final CharSequence notificationBigText, final PendingIntent contentIntent, final PendingIntent deleteIntent, final int notificationMode) {
 
         Notification.Builder builder =  NotificationUtils.geNotificationBuilder(context,
-            TermuxConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID, Notification.PRIORITY_HIGH,
+            JawnConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID, Notification.PRIORITY_HIGH,
             title, notificationText, notificationBigText, contentIntent, deleteIntent, notificationMode);
 
         if (builder == null)  return null;
@@ -200,14 +200,14 @@ public class CrashUtils {
     }
 
     /**
-     * Setup the notification channel for {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID} and
-     * {@link TermuxConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
+     * Setup the notification channel for {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID} and
+     * {@link JawnConstants#TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME}.
      *
      * @param context The {@link Context} for operations.
      */
     public static void setupCrashReportsNotificationChannel(final Context context) {
-        NotificationUtils.setupNotificationChannel(context, TermuxConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID,
-            TermuxConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
+        NotificationUtils.setupNotificationChannel(context, JawnConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_ID,
+            JawnConstants.TERMUX_CRASH_REPORTS_NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH);
     }
 
 }

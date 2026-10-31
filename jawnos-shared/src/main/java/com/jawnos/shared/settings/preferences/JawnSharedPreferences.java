@@ -8,7 +8,7 @@ import androidx.annotation.Nullable;
 
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.packages.PackageUtils;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 /**
  * The app's own settings, kept in the same preference file and under the same
@@ -19,7 +19,7 @@ import com.jawnos.shared.termux.TermuxConstants;
  * log level and the crash-notification switch, so this is those two and the
  * packaged context lookup.
  */
-public class TermuxAppSharedPreferences {
+public class JawnSharedPreferences {
 
     private static final String KEY_LOG_LEVEL = "log_level";
     private static final String KEY_CRASH_REPORT_NOTIFICATIONS_ENABLED = "crash_report_notifications_enabled";
@@ -27,22 +27,22 @@ public class TermuxAppSharedPreferences {
 
     private final SharedPreferences preferences;
 
-    private TermuxAppSharedPreferences(@NonNull Context context) {
+    private JawnSharedPreferences(@NonNull Context context) {
         preferences = context.getSharedPreferences(
-            TermuxConstants.TERMUX_DEFAULT_PREFERENCES_FILE_BASENAME_WITHOUT_EXTENSION,
+            JawnConstants.TERMUX_DEFAULT_PREFERENCES_FILE_BASENAME_WITHOUT_EXTENSION,
             Context.MODE_PRIVATE);
     }
 
     @Nullable
-    public static TermuxAppSharedPreferences build(@NonNull final Context context) {
-        Context packageContext = PackageUtils.getContextForPackage(context, TermuxConstants.TERMUX_PACKAGE_NAME);
-        return packageContext == null ? null : new TermuxAppSharedPreferences(packageContext);
+    public static JawnSharedPreferences build(@NonNull final Context context) {
+        Context packageContext = PackageUtils.getContextForPackage(context, JawnConstants.TERMUX_PACKAGE_NAME);
+        return packageContext == null ? null : new JawnSharedPreferences(packageContext);
     }
 
-    public static TermuxAppSharedPreferences build(@NonNull final Context context, final boolean exitAppOnError) {
+    public static JawnSharedPreferences build(@NonNull final Context context, final boolean exitAppOnError) {
         Context packageContext = PackageUtils.getContextForPackageOrExitApp(
-            context, TermuxConstants.TERMUX_PACKAGE_NAME, exitAppOnError);
-        return packageContext == null ? null : new TermuxAppSharedPreferences(packageContext);
+            context, JawnConstants.TERMUX_PACKAGE_NAME, exitAppOnError);
+        return packageContext == null ? null : new JawnSharedPreferences(packageContext);
     }
 
     public int getLogLevel() {

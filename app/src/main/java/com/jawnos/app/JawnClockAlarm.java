@@ -7,7 +7,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.util.Log;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import org.json.JSONObject;
 
@@ -44,7 +44,7 @@ public final class JawnClockAlarm {
     private JawnClockAlarm() {}
 
     private static File alarmFile() {
-        return new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"),
+        return new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"),
                 "clock_alarm.json");
     }
 

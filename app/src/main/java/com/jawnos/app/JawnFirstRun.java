@@ -6,8 +6,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.system.Os;
 
-import com.jawnos.shared.shell.TermuxShellUtils;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.shell.JawnShellUtils;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -63,7 +63,7 @@ final class JawnFirstRun {
         // The bootstrap is Termux's own install path (it asks for the primary
         // user and shows its own progress and error dialogs). Everything after
         // it runs off the UI thread.
-        TermuxInstaller.setupBootstrapIfNeeded(activity, () -> {
+        JawnInstaller.setupBootstrapIfNeeded(activity, () -> {
             final Context context = activity.getApplicationContext();
             new Thread(() -> {
                 try {
@@ -80,7 +80,7 @@ final class JawnFirstRun {
 
     /** Each stage continues an earlier attempt; nothing here deletes. */
     private static String provision(Context context, Reporter report) throws Exception {
-        File home = new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
+        File home = new File(JawnConstants.TERMUX_HOME_DIR_PATH);
         File dir = new File(JawnLauncher.getJawnDirPath(context));
 
         if (!treeIsComplete(dir)) {
@@ -210,7 +210,7 @@ final class JawnFirstRun {
     /** The code is the only key to the database; leave it where a person can
      *  find it from the console, owner-readable only. */
     private static void writeUnlockCode(String code) {
-        File file = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, UNLOCK_FILE);
+        File file = new File(JawnConstants.TERMUX_HOME_DIR_PATH, UNLOCK_FILE);
         try (FileOutputStream out = new FileOutputStream(file)) {
             out.write((code + "\n").getBytes(StandardCharsets.UTF_8));
         } catch (Throwable t) {
@@ -225,13 +225,13 @@ final class JawnFirstRun {
     private static Result run(Context context, String script, File workDir, long timeoutMs)
             throws IOException, InterruptedException {
         File cwd = workDir != null && workDir.isDirectory()
-                ? workDir : new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
+                ? workDir : new File(JawnConstants.TERMUX_HOME_DIR_PATH);
         // The app's own runtime (M3) has no bin/login: it is Termux's session
         // wrapper, and it is not part of the diet. A plain $PREFIX/bin/sh -c is
         // all these steps need, with the environment built explicitly below.
-        String shell = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/sh";
-        String[] args = TermuxShellUtils.setupProcessArgs(shell, new String[] { "-c", script });
-        String[] env = TermuxShellUtils.buildEnvironment(context, false, cwd.getAbsolutePath());
+        String shell = JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/sh";
+        String[] args = JawnShellUtils.setupProcessArgs(shell, new String[] { "-c", script });
+        String[] env = JawnShellUtils.buildEnvironment(context, false, cwd.getAbsolutePath());
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.directory(cwd);
         builder.redirectErrorStream(true);

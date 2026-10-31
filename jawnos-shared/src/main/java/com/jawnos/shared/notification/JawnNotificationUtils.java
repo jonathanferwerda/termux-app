@@ -3,7 +3,7 @@ package com.jawnos.shared.notification;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 /**
  * Hands out notification ids that the app is not already using.
@@ -12,7 +12,7 @@ import com.jawnos.shared.termux.TermuxConstants;
  * preferences because plugins shared a uid. JawnOS is one app, so the counter
  * lives in its own small preference file and skips the two reserved ids.
  */
-public class TermuxNotificationUtils {
+public class JawnNotificationUtils {
 
     private static final String PREFS = "jawnos_notifications";
     private static final String KEY_LAST_ID = "last_notification_id";
@@ -22,8 +22,8 @@ public class TermuxNotificationUtils {
         if (context == null) return DEFAULT_ID;
         SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         int next = preferences.getInt(KEY_LAST_ID, DEFAULT_ID) + 1;
-        while (next == TermuxConstants.TERMUX_APP_NOTIFICATION_ID
-            || next == TermuxConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID) {
+        while (next == JawnConstants.TERMUX_APP_NOTIFICATION_ID
+            || next == JawnConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID) {
             next++;
         }
         if (next == Integer.MAX_VALUE || next < 0) next = DEFAULT_ID;

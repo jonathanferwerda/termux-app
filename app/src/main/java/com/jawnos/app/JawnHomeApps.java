@@ -53,7 +53,7 @@ final class JawnHomeApps {
             this.system = system;
         }
 
-        /** Search matches the visible name and the package, so "com.termux" works. */
+        /** Search matches the visible name and the package, so "com.jawnos" works. */
         boolean matches(String needle) {
             if (needle == null || needle.isEmpty()) return true;
             String lower = needle.toLowerCase(Locale.getDefault());

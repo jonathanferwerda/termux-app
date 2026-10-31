@@ -3,7 +3,7 @@ package com.jawnos.shared.models;
 import androidx.annotation.Keep;
 
 import com.jawnos.shared.markdown.MarkdownUtils;
-import com.jawnos.shared.termux.AndroidUtils;
+import com.jawnos.shared.jawnos.AndroidUtils;
 
 import java.io.Serializable;
 

@@ -8,7 +8,7 @@ import android.os.Process;
 import androidx.annotation.NonNull;
 
 import com.jawnos.shared.packages.PackageUtils;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -24,7 +24,7 @@ import java.util.List;
  * the runtime directly, so this keeps the same variable set (the tools and the
  * moved prefix depend on it) without the terminal/session half.
  */
-public class TermuxShellUtils {
+public class JawnShellUtils {
 
     public static String TERMUX_VERSION_NAME;
     public static String TERMUX_IS_DEBUGGABLE_BUILD;
@@ -33,15 +33,15 @@ public class TermuxShellUtils {
     public static String TERMUX_API_VERSION_NAME;
 
     public static String getDefaultWorkingDirectoryPath() {
-        return TermuxConstants.TERMUX_HOME_DIR_PATH;
+        return JawnConstants.TERMUX_HOME_DIR_PATH;
     }
 
     public static String getDefaultBinPath() {
-        return TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH;
+        return JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH;
     }
 
     public static String[] buildEnvironment(Context context, boolean isFailSafe, String workingDirectory) {
-        TermuxConstants.TERMUX_HOME_DIR.mkdirs();
+        JawnConstants.TERMUX_HOME_DIR.mkdirs();
         if (workingDirectory == null || workingDirectory.isEmpty()) {
             workingDirectory = getDefaultWorkingDirectoryPath();
         }
@@ -66,11 +66,11 @@ public class TermuxShellUtils {
             }
         } catch (Exception ignored) { }
 
-        environment.add("TERMUX__ROOTFS_DIR=" + TermuxConstants.TERMUX_FILES_DIR_PATH);
-        environment.add("HOME=" + TermuxConstants.TERMUX_HOME_DIR_PATH);
-        environment.add("TERMUX__HOME=" + TermuxConstants.TERMUX_HOME_DIR_PATH);
-        environment.add("PREFIX=" + TermuxConstants.TERMUX_PREFIX_DIR_PATH);
-        environment.add("TERMUX__PREFIX=" + TermuxConstants.TERMUX_PREFIX_DIR_PATH);
+        environment.add("TERMUX__ROOTFS_DIR=" + JawnConstants.TERMUX_FILES_DIR_PATH);
+        environment.add("HOME=" + JawnConstants.TERMUX_HOME_DIR_PATH);
+        environment.add("TERMUX__HOME=" + JawnConstants.TERMUX_HOME_DIR_PATH);
+        environment.add("PREFIX=" + JawnConstants.TERMUX_PREFIX_DIR_PATH);
+        environment.add("TERMUX__PREFIX=" + JawnConstants.TERMUX_PREFIX_DIR_PATH);
 
         for (String name : new String[] {
             "BOOTCLASSPATH", "ANDROID_ROOT", "ANDROID_DATA", "EXTERNAL_STORAGE",
@@ -85,13 +85,13 @@ public class TermuxShellUtils {
             environment.add("PATH= " + System.getenv("PATH"));
         } else {
             environment.add("LANG=en_US.UTF-8");
-            environment.add("PATH=" + TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH);
+            environment.add("PATH=" + JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH);
             // The runtime's tools link prefix libraries (git/libpcre2, curl,
             // ssh/libldns); bin/login used to export this and JawnOS has none.
-            environment.add("LD_LIBRARY_PATH=" + TermuxConstants.TERMUX_LIB_PREFIX_DIR_PATH);
+            environment.add("LD_LIBRARY_PATH=" + JawnConstants.TERMUX_LIB_PREFIX_DIR_PATH);
             addRuntimeEnvironment(environment);
             environment.add("PWD=" + workingDirectory);
-            environment.add("TMPDIR=" + TermuxConstants.TERMUX_TMP_PREFIX_DIR_PATH);
+            environment.add("TMPDIR=" + JawnConstants.TERMUX_TMP_PREFIX_DIR_PATH);
         }
 
         return environment.toArray(new String[0]);
@@ -99,7 +99,7 @@ public class TermuxShellUtils {
 
     /** The path variables a runtime built for another prefix still needs. */
     public static void addRuntimeEnvironment(List<String> environment) {
-        File prefix = TermuxConstants.TERMUX_PREFIX_DIR;
+        File prefix = JawnConstants.TERMUX_PREFIX_DIR;
 
         File gitCore = new File(prefix, "libexec/git-core");
         if (gitCore.isDirectory()) {
@@ -178,7 +178,7 @@ public class TermuxShellUtils {
                                         String executable = shebang.toString();
                                         if (executable.startsWith("/usr") || executable.startsWith("/bin")) {
                                             String[] parts = executable.split("/");
-                                            interpreter = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH
+                                            interpreter = JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH
                                                 + "/" + parts[parts.length - 1];
                                         }
                                         break;
@@ -188,7 +188,7 @@ public class TermuxShellUtils {
                                 }
                             }
                         } else {
-                            interpreter = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/sh";
+                            interpreter = JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/sh";
                         }
                     }
                 }

@@ -1243,3 +1243,16 @@ work and a full-width build has crashed it (2026-10-10).
      replaced. Verified on both devices: a stop/start through SessionService
      brings the tree up `good` with the rewritten environment (the master's
      `/proc/<pid>/environ` carries the runtime paths). Build 1223.
+
+118. M4 — the app-module identity pass. Every remaining `Termux*` class was
+     renamed (`JawnApplication`, `JawnInstaller`, `JawnDocumentsProvider`,
+     `JawnConstants`, `JawnUtils`, `JawnFileUtils`, `JawnNotificationUtils`,
+     `JawnCrashUtils`, `JawnSharedPreferences`, `JawnShellUtils`, `JawnTask`),
+     the shared package moved from `com.jawnos.shared.termux` to
+     `com.jawnos.shared.jawnos`, `TERMUX_APP_NAME` is "JawnOS", and the four
+     literal `com.termux` strings are gone (the FileProvider root now names
+     `/data/data/com.jawnos/files/`, the BLE comment no longer credits the old
+     package, the home-apps search example is com.jawnos, and the constants'
+     defaults read com.jawnos). `grep -r com.termux app/src jawnos-shared/src`
+     is empty. The app module is still termux-app-derived code, so the APK
+     stays GPL-3; this is the naming, not a relicense. Build 1224.

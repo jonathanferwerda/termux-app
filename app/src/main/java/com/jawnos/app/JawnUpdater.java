@@ -51,10 +51,10 @@ public class JawnUpdater {
     private static final String AUTHORITY_SUFFIX = ".jawnupdates";
 
     public static File releasesDir(Context context) {
-        // Build from getFilesDir() rather than TermuxConstants' /data/data path.
+        // Build from getFilesDir() rather than JawnConstants' /data/data path.
         // FileProvider's <files-path> root is getFilesDir(), and getUriForFile
         // matches path prefixes - getFilesDir() reports /data/user/0/... while
-        // TermuxConstants uses /data/data/..., so the two must agree here.
+        // JawnConstants uses /data/data/..., so the two must agree here.
         return new File(context.getFilesDir(),
             "home/" + JawnLauncher.getJawnDirName(context) + "/releases");
     }

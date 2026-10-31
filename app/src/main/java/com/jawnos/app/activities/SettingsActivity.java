@@ -15,9 +15,9 @@ import com.jawnos.shared.activities.ReportActivity;
 import com.jawnos.shared.file.FileUtils;
 import com.jawnos.shared.models.ReportInfo;
 import com.jawnos.app.models.UserAction;
-import com.jawnos.shared.termux.AndroidUtils;
-import com.jawnos.shared.termux.TermuxConstants;
-import com.jawnos.shared.termux.TermuxUtils;
+import com.jawnos.shared.jawnos.AndroidUtils;
+import com.jawnos.shared.jawnos.JawnConstants;
+import com.jawnos.shared.jawnos.JawnUtils;
 
 public class SettingsActivity extends AppCompatActivity {
 
@@ -65,24 +65,24 @@ public class SettingsActivity extends AppCompatActivity {
                             String title = "About";
 
                             StringBuilder aboutString = new StringBuilder();
-                            aboutString.append(TermuxUtils.getAppInfoMarkdownString(context, false));
+                            aboutString.append(JawnUtils.getAppInfoMarkdownString(context, false));
 
-                            String termuxPluginAppsInfo =  TermuxUtils.getTermuxPluginAppsInfoMarkdownString(context);
+                            String termuxPluginAppsInfo =  JawnUtils.getTermuxPluginAppsInfoMarkdownString(context);
                             if (termuxPluginAppsInfo != null)
                                 aboutString.append("\n\n").append(termuxPluginAppsInfo);
 
                             aboutString.append("\n\n").append(AndroidUtils.getDeviceInfoMarkdownString(context));
-                            aboutString.append("\n\n").append(TermuxUtils.getImportantLinksMarkdownString(context));
+                            aboutString.append("\n\n").append(JawnUtils.getImportantLinksMarkdownString(context));
                             aboutString.append("\n\n### Licenses\n");
                             aboutString.append("\nJawnOS is distributed under the GNU GPL v3. The license texts and third-party notices ship in the app's `assets/licenses/` directory and in the source repository at https://github.com/jonathanferwerda/termux-app");
 
                             String userActionName = UserAction.ABOUT.getName();
                             ReportActivity.startReportActivity(context, new ReportInfo(userActionName,
-                                TermuxConstants.TERMUX_APP.TERMUX_SETTINGS_ACTIVITY_NAME, title, null,
+                                JawnConstants.TERMUX_APP.TERMUX_SETTINGS_ACTIVITY_NAME, title, null,
                                 aboutString.toString(), null, false,
                                 userActionName,
                                 Environment.getExternalStorageDirectory() + "/" +
-                                    FileUtils.sanitizeFileName(TermuxConstants.TERMUX_APP_NAME + "-" + userActionName + ".log", true, true)));
+                                    FileUtils.sanitizeFileName(JawnConstants.TERMUX_APP_NAME + "-" + userActionName + ".log", true, true)));
                         }
                     }.start();
 

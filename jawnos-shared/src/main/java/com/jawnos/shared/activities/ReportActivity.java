@@ -22,7 +22,7 @@ import com.jawnos.shared.file.FileUtils;
 import com.jawnos.shared.file.filesystem.FileType;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.models.errors.Error;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 import com.jawnos.shared.markdown.MarkdownUtils;
 import com.jawnos.shared.interact.ShareUtils;
 import com.jawnos.shared.models.ReportInfo;
@@ -146,7 +146,7 @@ public class ReportActivity extends AppCompatActivity {
             if (mReportInfo.reportTitle != null)
                 actionBar.setTitle(mReportInfo.reportTitle);
             else
-                actionBar.setTitle(TermuxConstants.TERMUX_APP_NAME + " App Report");
+                actionBar.setTitle(JawnConstants.TERMUX_APP_NAME + " App Report");
         }
 
 

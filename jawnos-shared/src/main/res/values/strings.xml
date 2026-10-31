@@ -61,7 +61,7 @@
 
 
 
-    <!-- TermuxUtils -->
+    <!-- JawnUtils -->
     <string name="msg_report_issue">
         If you want to report this issue, then copy its text from the options menu (3-dots on top right) and post
         an issue on one of the following links.

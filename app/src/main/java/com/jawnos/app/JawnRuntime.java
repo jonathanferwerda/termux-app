@@ -22,7 +22,7 @@ import java.util.zip.ZipFile;
 
 import android.system.Os;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 /**
  * M3 (docs/leaving-termux.md): the runtime a clean install unpacks, instead of
@@ -110,7 +110,7 @@ public final class JawnRuntime {
         }
 
         progress.step("Unpacking the runtime");
-        File prefix = new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH);
+        File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
         if (prefix.exists() && !delete(prefix)) {
             throw new RuntimeException("could not clear the existing prefix at " + prefix);
         }

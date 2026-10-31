@@ -8,7 +8,7 @@ import com.jawnos.shared.file.FileUtils;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.markdown.MarkdownUtils;
 import com.jawnos.shared.models.errors.Error;
-import com.jawnos.shared.termux.AndroidUtils;
+import com.jawnos.shared.jawnos.AndroidUtils;
 
 import java.nio.charset.Charset;
 

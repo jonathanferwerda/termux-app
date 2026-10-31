@@ -5,7 +5,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Color;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import org.json.JSONObject;
 
@@ -59,7 +59,7 @@ public final class JawnTheme {
 
     /** The bundle the manager wrote for native surfaces, or null if absent. */
     public static JawnTheme fromFile(Context context) {
-        File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+        File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
         File file = new File(dir, "native_theme.json");
         if (!file.isFile()) return null;
         FileInputStream in = null;

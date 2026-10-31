@@ -9,7 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.IBinder;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -215,7 +215,7 @@ public final class SessionService extends Service {
      *  picking a different interpreter - nothing else moves. Empty when it is
      *  absent, which is the case on every device that still runs Termux's. */
     private static File runtimeDir() {
-        return new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".jawnos/runtime");
+        return new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".jawnos/runtime");
     }
 
     /** The aarch64 CORE directory inside a runtime, or null. The perl version
@@ -237,7 +237,7 @@ public final class SessionService extends Service {
 
     private Process spawn() {
         File dir = new File(JawnLauncher.getJawnDirPath(this));
-        File perl = new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl");
+        File perl = new File(JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl");
         File runtime = runtimeDir();
         File runtimePerl = new File(runtime, "bin/perl");
         File core = runtimeCore(runtime);
@@ -256,8 +256,8 @@ public final class SessionService extends Service {
         pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
 
         Map<String, String> env = pb.environment();
-        String home = TermuxConstants.TERMUX_HOME_DIR_PATH;
-        String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
+        String home = JawnConstants.TERMUX_HOME_DIR_PATH;
+        String prefix = JawnConstants.TERMUX_PREFIX_DIR_PATH;
         env.put("HOME", home);
         env.put("PREFIX", prefix);
         env.put("PATH", prefix + "/bin:" + prefix + "/bin/applets:/system/bin:/system/xbin");
@@ -280,7 +280,7 @@ public final class SessionService extends Service {
             env.put("LD_LIBRARY_PATH", prefix + "/lib");
         }
         java.util.List<String> shims = new java.util.ArrayList<>();
-        com.jawnos.shared.shell.TermuxShellUtils.addRuntimeEnvironment(shims);
+        com.jawnos.shared.shell.JawnShellUtils.addRuntimeEnvironment(shims);
         for (String shim : shims) {
             int at = shim.indexOf('=');
             if (at > 0) env.put(shim.substring(0, at), shim.substring(at + 1));
@@ -345,7 +345,7 @@ public final class SessionService extends Service {
         try {
             File dir = new File(JawnLauncher.getJawnDirPath(this));
             new ProcessBuilder(Arrays.asList(
-                    TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl",
+                    JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl",
                     "./scripts/manager_killer.pl", "master"))
                 .directory(dir)
                 .redirectErrorStream(true)
@@ -378,7 +378,7 @@ public final class SessionService extends Service {
 
     /** A live master named by the tree's own pid file, or 0. */
     private int readMasterPid() {
-        File f = new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), "pid");
+        File f = new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"), "pid");
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String s = r.readLine();
             if (s == null) return 0;

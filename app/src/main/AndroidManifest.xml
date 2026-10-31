@@ -86,7 +86,7 @@
     </queries>
 
     <application
-        android:name=".app.TermuxApplication"
+        android:name=".app.JawnApplication"
         android:allowBackup="false"
         android:banner="@drawable/banner"
         android:extractNativeLibs="true"
@@ -116,7 +116,7 @@
             />
 
         <provider
-            android:name=".filepicker.TermuxDocumentsProvider"
+            android:name=".filepicker.JawnDocumentsProvider"
             android:authorities="${TERMUX_PACKAGE_NAME}.documents"
             android:exported="true"
             android:grantUriPermissions="true"
@@ -481,7 +481,7 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- The BLE bridge (was com.termux.api.JawnBleService): loopback JSON on
+        <!-- The BLE bridge (the retired API app's service moved in): loopback JSON on
              127.0.0.1:45999, the v2 multi-link NUS daemon scripts/jawn-bt
              speaks to. Not exported; loopback and the shared uid are the gate. -->
         <service

@@ -8,7 +8,7 @@ import android.widget.Toast;
 
 import com.jawnos.shared.R;
 import com.jawnos.shared.data.DataUtils;
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -19,7 +19,7 @@ import java.util.List;
 
 public class Logger {
 
-    public static final String DEFAULT_LOG_TAG = TermuxConstants.TERMUX_APP_NAME;
+    public static final String DEFAULT_LOG_TAG = JawnConstants.TERMUX_APP_NAME;
 
     public static final int LOG_LEVEL_OFF = 0; // log nothing
     public static final int LOG_LEVEL_NORMAL = 1; // start logging error, warn and info messages and stacktraces

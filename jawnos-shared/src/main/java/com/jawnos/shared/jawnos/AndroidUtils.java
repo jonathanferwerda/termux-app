@@ -1,4 +1,4 @@
-package com.jawnos.shared.termux;
+package com.jawnos.shared.jawnos;
 
 import android.annotation.SuppressLint;
 import android.content.Context;

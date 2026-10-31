@@ -25,19 +25,19 @@ import java.nio.charset.StandardCharsets;
  * It also provides a way to link each {@link Process} with the {@link ExecutionCommand}
  * that started it.
  */
-public final class TermuxTask {
+public final class JawnTask {
 
     private final Process mProcess;
     private final ExecutionCommand mExecutionCommand;
-    private final TermuxTaskClient mTermuxTaskClient;
+    private final JawnTaskClient mJawnTaskClient;
 
-    private static final String LOG_TAG = "TermuxTask";
+    private static final String LOG_TAG = "JawnTask";
 
-    private TermuxTask(@NonNull final Process process, @NonNull final ExecutionCommand executionCommand,
-                       final TermuxTaskClient termuxTaskClient) {
+    private JawnTask(@NonNull final Process process, @NonNull final ExecutionCommand executionCommand,
+                       final JawnTaskClient termuxTaskClient) {
         this.mProcess = process;
         this.mExecutionCommand = executionCommand;
-        this.mTermuxTaskClient = termuxTaskClient;
+        this.mJawnTaskClient = termuxTaskClient;
     }
 
     /**
@@ -49,21 +49,21 @@ public final class TermuxTask {
      *
      * @param context The {@link Context} for operations.
      * @param executionCommand The {@link ExecutionCommand} containing the information for execution command.
-     * @param termuxTaskClient The {@link TermuxTaskClient} interface implementation.
-     *                           The {@link TermuxTaskClient#onTermuxTaskExited(TermuxTask)} will
+     * @param termuxTaskClient The {@link JawnTaskClient} interface implementation.
+     *                           The {@link JawnTaskClient#onJawnTaskExited(JawnTask)} will
      *                           be called regardless of {@code isSynchronous} value but not if
      *                           {@code null} is returned by this method. This can
      *                           optionally be {@code null}.
      * @param shellEnvironmentClient The {@link ShellEnvironmentClient} interface implementation.
      * @param isSynchronous If set to {@code true}, then the command will be executed in the
      *                      caller thread and results returned synchronously in the {@link ExecutionCommand}
-     *                      sub object of the {@link TermuxTask} returned.
+     *                      sub object of the {@link JawnTask} returned.
      *                      If set to {@code false}, then a new thread is started run the commands
      *                      asynchronously in the background and control is returned to the caller thread.
-     * @return Returns the {@link TermuxTask}. This will be {@code null} if failed to start the execution command.
+     * @return Returns the {@link JawnTask}. This will be {@code null} if failed to start the execution command.
      */
-    public static TermuxTask execute(@NonNull final Context context, @NonNull ExecutionCommand executionCommand,
-                                     final TermuxTaskClient termuxTaskClient,
+    public static JawnTask execute(@NonNull final Context context, @NonNull ExecutionCommand executionCommand,
+                                     final JawnTaskClient termuxTaskClient,
                                      @NonNull final ShellEnvironmentClient shellEnvironmentClient,
                                      final boolean isSynchronous) {
         if (executionCommand.workingDirectory == null || executionCommand.workingDirectory.isEmpty())
@@ -77,7 +77,7 @@ public final class TermuxTask {
 
         if (!executionCommand.setState(ExecutionState.EXECUTING)) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_failed_to_execute_termux_task_command, executionCommand.getCommandIdAndLabelLogString()));
-            TermuxTask.processTermuxTaskResult(null, executionCommand);
+            JawnTask.processJawnTaskResult(null, executionCommand);
             return null;
         }
 
@@ -96,11 +96,11 @@ public final class TermuxTask {
             process = Runtime.getRuntime().exec(commandArray, env, new File(executionCommand.workingDirectory));
         } catch (IOException e) {
             executionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_failed_to_execute_termux_task_command, executionCommand.getCommandIdAndLabelLogString()), e);
-            TermuxTask.processTermuxTaskResult(null, executionCommand);
+            JawnTask.processJawnTaskResult(null, executionCommand);
             return null;
         }
 
-        final TermuxTask termuxTask = new TermuxTask(process, executionCommand, termuxTaskClient);
+        final JawnTask termuxTask = new JawnTask(process, executionCommand, termuxTaskClient);
 
         if (isSynchronous) {
             try {
@@ -129,14 +129,14 @@ public final class TermuxTask {
      *
      * If the processes finishes, then sets {@link ResultData#stdout}, {@link ResultData#stderr}
      * and {@link ResultData#exitCode} for the {@link #mExecutionCommand} of the {@code termuxTask}
-     * and then calls {@link #processTermuxTaskResult(TermuxTask, ExecutionCommand) to process the result}.
+     * and then calls {@link #processJawnTaskResult(JawnTask, ExecutionCommand) to process the result}.
      *
      * @param context The {@link Context} for operations.
      */
     private void executeInner(@NonNull final Context context) throws IllegalThreadStateException, InterruptedException {
         final int pid = ShellUtils.getPid(mProcess);
 
-        Logger.logDebug(LOG_TAG, "Running \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask with pid " + pid);
+        Logger.logDebug(LOG_TAG, "Running \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask with pid " + pid);
 
         mExecutionCommand.resultData.exitCode = null;
 
@@ -167,7 +167,7 @@ public final class TermuxTask {
                     // returning null
                     mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_exception_received_while_executing_termux_task_command, mExecutionCommand.getCommandIdAndLabelLogString(), e.getMessage()), e);
                     mExecutionCommand.resultData.exitCode = 1;
-                    TermuxTask.processTermuxTaskResult(this, null);
+                    JawnTask.processJawnTaskResult(this, null);
                     kill();
                     return;
                 }
@@ -193,13 +193,13 @@ public final class TermuxTask {
 
         // Process result
         if (exitCode == 0)
-            Logger.logDebug(LOG_TAG, "The \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask with pid " + pid + " exited normally");
+            Logger.logDebug(LOG_TAG, "The \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask with pid " + pid + " exited normally");
         else
-            Logger.logDebug(LOG_TAG, "The \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask with pid " + pid + " exited with code: " + exitCode);
+            Logger.logDebug(LOG_TAG, "The \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask with pid " + pid + " exited with code: " + exitCode);
 
         // If the execution command has already failed, like SIGKILL was sent, then don't continue
         if (mExecutionCommand.isStateFailed()) {
-            Logger.logDebug(LOG_TAG, "Ignoring setting \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask state to ExecutionState.EXECUTED and processing results since it has already failed");
+            Logger.logDebug(LOG_TAG, "Ignoring setting \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask state to ExecutionState.EXECUTED and processing results since it has already failed");
             return;
         }
 
@@ -208,30 +208,30 @@ public final class TermuxTask {
         if (!mExecutionCommand.setState(ExecutionState.EXECUTED))
             return;
 
-        TermuxTask.processTermuxTaskResult(this, null);
+        JawnTask.processJawnTaskResult(this, null);
     }
 
     /**
-     * Kill this {@link TermuxTask} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}
+     * Kill this {@link JawnTask} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}
      * if its still executing.
      *
      * @param context The {@link Context} for operations.
-     * @param processResult If set to {@code true}, then the {@link #processTermuxTaskResult(TermuxTask, ExecutionCommand)}
+     * @param processResult If set to {@code true}, then the {@link #processJawnTaskResult(JawnTask, ExecutionCommand)}
      *                      will be called to process the failure.
      */
     public void killIfExecuting(@NonNull final Context context, boolean processResult) {
         // If execution command has already finished executing, then no need to process results or send SIGKILL
         if (mExecutionCommand.hasExecuted()) {
-            Logger.logDebug(LOG_TAG, "Ignoring sending SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask since it has already finished executing");
+            Logger.logDebug(LOG_TAG, "Ignoring sending SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask since it has already finished executing");
             return;
         }
 
-        Logger.logDebug(LOG_TAG, "Send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask");
+        Logger.logDebug(LOG_TAG, "Send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask");
 
         if (mExecutionCommand.setStateFailed(Errno.ERRNO_FAILED.getCode(), context.getString(R.string.error_sending_sigkill_to_process))) {
             if (processResult) {
                 mExecutionCommand.resultData.exitCode = 137; // SIGKILL
-                TermuxTask.processTermuxTaskResult(this, null);
+                JawnTask.processJawnTaskResult(this, null);
             }
         }
 
@@ -241,7 +241,7 @@ public final class TermuxTask {
     }
 
     /**
-     * Kill this {@link TermuxTask} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}.
+     * Kill this {@link JawnTask} by sending a {@link OsConstants#SIGILL} to its {@link #mProcess}.
      */
     public void kill() {
         int pid = ShellUtils.getPid(mProcess);
@@ -249,40 +249,40 @@ public final class TermuxTask {
             // Send SIGKILL to process
             Os.kill(pid, OsConstants.SIGKILL);
         } catch (ErrnoException e) {
-            Logger.logWarn(LOG_TAG, "Failed to send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask with pid " + pid + ": " + e.getMessage());
+            Logger.logWarn(LOG_TAG, "Failed to send SIGKILL to \"" + mExecutionCommand.getCommandIdAndLabelLogString() + "\" JawnTask with pid " + pid + ": " + e.getMessage());
         }
     }
 
     /**
-     * Process the results of {@link TermuxTask} or {@link ExecutionCommand}.
+     * Process the results of {@link JawnTask} or {@link ExecutionCommand}.
      *
      * Only one of {@code termuxTask} and {@code executionCommand} must be set.
      *
-     * If the {@code termuxTask} and its {@link #mTermuxTaskClient} are not {@code null},
-     * then the {@link TermuxTaskClient#onTermuxTaskExited(TermuxTask)} callback will be called.
+     * If the {@code termuxTask} and its {@link #mJawnTaskClient} are not {@code null},
+     * then the {@link JawnTaskClient#onJawnTaskExited(JawnTask)} callback will be called.
      *
-     * @param termuxTask The {@link TermuxTask}, which should be set if
-     *                  {@link #execute(Context, ExecutionCommand, TermuxTaskClient, ShellEnvironmentClient, boolean)}
+     * @param termuxTask The {@link JawnTask}, which should be set if
+     *                  {@link #execute(Context, ExecutionCommand, JawnTaskClient, ShellEnvironmentClient, boolean)}
      *                   successfully started the process.
      * @param executionCommand The {@link ExecutionCommand}, which should be set if
-     *                          {@link #execute(Context, ExecutionCommand, TermuxTaskClient, ShellEnvironmentClient, boolean)}
+     *                          {@link #execute(Context, ExecutionCommand, JawnTaskClient, ShellEnvironmentClient, boolean)}
      *                          failed to start the process.
      */
-    private static void processTermuxTaskResult(final TermuxTask termuxTask, ExecutionCommand executionCommand) {
+    private static void processJawnTaskResult(final JawnTask termuxTask, ExecutionCommand executionCommand) {
         if (termuxTask != null)
             executionCommand = termuxTask.mExecutionCommand;
 
         if (executionCommand == null) return;
 
         if (executionCommand.shouldNotProcessResults()) {
-            Logger.logDebug(LOG_TAG, "Ignoring duplicate call to process \"" + executionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask result");
+            Logger.logDebug(LOG_TAG, "Ignoring duplicate call to process \"" + executionCommand.getCommandIdAndLabelLogString() + "\" JawnTask result");
             return;
         }
 
-        Logger.logDebug(LOG_TAG, "Processing \"" + executionCommand.getCommandIdAndLabelLogString() + "\" TermuxTask result");
+        Logger.logDebug(LOG_TAG, "Processing \"" + executionCommand.getCommandIdAndLabelLogString() + "\" JawnTask result");
 
-        if (termuxTask != null && termuxTask.mTermuxTaskClient != null) {
-            termuxTask.mTermuxTaskClient.onTermuxTaskExited(termuxTask);
+        if (termuxTask != null && termuxTask.mJawnTaskClient != null) {
+            termuxTask.mJawnTaskClient.onJawnTaskExited(termuxTask);
         } else {
             // If a callback is not set and execution command didn't fail, then we set success state now
             // Otherwise, the callback host can set it himself when its done with the termuxTask
@@ -301,14 +301,14 @@ public final class TermuxTask {
 
 
 
-    public interface TermuxTaskClient {
+    public interface JawnTaskClient {
 
         /**
-         * Callback function for when {@link TermuxTask} exits.
+         * Callback function for when {@link JawnTask} exits.
          *
-         * @param termuxTask The {@link TermuxTask} that exited.
+         * @param termuxTask The {@link JawnTask} that exited.
          */
-        void onTermuxTaskExited(TermuxTask termuxTask);
+        void onJawnTaskExited(JawnTask termuxTask);
 
     }
 

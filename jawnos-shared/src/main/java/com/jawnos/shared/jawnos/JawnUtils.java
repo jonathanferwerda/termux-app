@@ -1,4 +1,4 @@
-package com.jawnos.shared.termux;
+package com.jawnos.shared.jawnos;
 
 import android.content.Context;
 import android.os.Process;
@@ -17,14 +17,14 @@ import com.jawnos.shared.packages.PackageUtils;
  * app's own context and the "installed" checks answer null (installed), which
  * is what the surviving shared helpers use them for.
  */
-public final class TermuxUtils {
+public final class JawnUtils {
 
     public static final String SOURCE_URL = "https://github.com/jonathanferwerda/termux-app";
     public static final String RELEASES_URL = "https://github.com/jonathanferwerda/jawnos/releases";
     public static final String ISSUES_URL = SOURCE_URL + "/issues";
     public static final String DOCS_URL = "https://github.com/jonathanferwerda/jawnos/blob/main/docs/leaving-termux.md";
 
-    private TermuxUtils() { }
+    private JawnUtils() { }
 
     private static String text(String value) {
         return value == null ? "" : value;

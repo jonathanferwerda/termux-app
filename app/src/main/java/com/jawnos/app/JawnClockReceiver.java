@@ -7,7 +7,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import org.json.JSONObject;
 
@@ -232,7 +232,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
                              String nfcUuid, String nfcSerial) {
         if (uuid == null || uuid.isEmpty()) return;
         try {
-            File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+            File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
             if (!dir.exists()) dir.mkdirs();
             JSONObject json = new JSONObject();
             json.put("action", action);
@@ -260,7 +260,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
         JawnClockAlarm.cancel(context);
         if (uuid == null || uuid.isEmpty()) return;
         try {
-            File dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president");
+            File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
             if (!dir.exists()) dir.mkdirs();
             JSONObject json = new JSONObject();
             json.put("uuid", uuid);

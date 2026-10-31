@@ -84,10 +84,10 @@ public class ExecutionCommand {
     public boolean isFailsafe;
 
     /**
-     * The {@link ExecutionCommand} custom log level for background {@link com.jawnos.shared.shell.TermuxTask}
+     * The {@link ExecutionCommand} custom log level for background {@link com.jawnos.shared.shell.JawnTask}
      * commands. By default, @link com.jawnos.shared.shell.StreamGobbler} only logs stdout and
      * stderr if {@link Logger} `CURRENT_LOG_LEVEL` is >= {@link Logger#LOG_LEVEL_VERBOSE} and
-     * {@link com.jawnos.shared.shell.TermuxTask} only logs stdin if `CURRENT_LOG_LEVEL` is >=
+     * {@link com.jawnos.shared.shell.JawnTask} only logs stdin if `CURRENT_LOG_LEVEL` is >=
      * {@link Logger#LOG_LEVEL_DEBUG}.
      */
     public Integer backgroundCustomLogLevel;

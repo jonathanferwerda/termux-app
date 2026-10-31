@@ -7,7 +7,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -42,7 +42,7 @@ public class JawnLauncher {
     }
 
     public static String getJawnDirPath(Context context) {
-        return TermuxConstants.TERMUX_HOME_DIR_PATH + "/" + getJawnDirName(context);
+        return JawnConstants.TERMUX_HOME_DIR_PATH + "/" + getJawnDirName(context);
     }
 
     /** True when the house is all there: the tree, a usable config.json (the
@@ -230,7 +230,7 @@ public class JawnLauncher {
      *  reboot (or a stale file) never passes for a running master. */
     private static int masterPid(Context context) {
         try {
-            File f = new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), "pid");
+            File f = new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"), "pid");
             if (!f.isFile()) return 0;
             StringBuilder sb = new StringBuilder();
             BufferedReader r = new BufferedReader(new FileReader(f));

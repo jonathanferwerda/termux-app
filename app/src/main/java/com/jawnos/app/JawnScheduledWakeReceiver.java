@@ -5,7 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.PowerManager;
 
-import com.jawnos.shared.termux.TermuxConstants;
+import com.jawnos.shared.jawnos.JawnConstants;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -139,7 +139,7 @@ public class JawnScheduledWakeReceiver extends BroadcastReceiver {
     }
 
     private static File presidentFile(String name) {
-        return new File(new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".president"), name);
+        return new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"), name);
     }
 
     /** When the manager last finished a utility tick with nothing due. */
