@@ -236,6 +236,7 @@
             <intent-filter>
                 <action android:name="com.jawnos.app.JAWN_WAKE" />
                 <action android:name="com.jawnos.app.JAWN_PERMISSIONS" />
+                <action android:name="com.jawnos.app.JAWN_TAILNET" />
             </intent-filter>
         </receiver>
 

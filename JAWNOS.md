@@ -1119,3 +1119,15 @@ work and a full-width build has crashed it (2026-10-10).
      com.jawnos.app.JAWN_WAKE -n com.jawnos/.app.JawnWakeReceiver` brought the
      tree back `good`, `JAWN_NOTIFY` reached `JawnNotifyReceiver` and posted,
      and `JAWN_PERMISSIONS` opened `com.jawnos/.app.JawnPermissionsActivity`.
+
+108. M4 — the tree can turn the tailnet on. The VpnService is not exported and the
+     dashboard is not reachable from the tree, so `JawnWakeReceiver` (already
+     exported for JAWN_WAKE and JAWN_PERMISSIONS) now takes
+     `com.jawnos.app.JAWN_TAILNET`: it sets `enabled` in `jawn_tailnet`, accepts
+     an optional `auth_key` string extra, and starts the service. Without a key
+     the node reports a login URL to approve, which is the browser flow the
+     dashboard already offered. `appops set com.jawnos ACTIVATE_VPN allow`
+     supplies the VPN consent a fresh install otherwise asks for. Proven on the
+     tablet: the broadcast started the node, it registered with the control
+     server (`thejunderground.com`) and reported an AuthURL, and a second
+     broadcast after a force-stop brought it back.

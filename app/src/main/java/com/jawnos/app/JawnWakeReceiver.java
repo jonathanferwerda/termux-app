@@ -25,6 +25,12 @@ public class JawnWakeReceiver extends BroadcastReceiver {
 
     public static final String ACTION = "com.jawnos.app.JAWN_WAKE";
     public static final String PERMISSIONS_ACTION = "com.jawnos.app.JAWN_PERMISSIONS";
+    /** Turn the tailnet on and start its service. Startup is the app's job
+     *  (the VpnService is not exported and the dashboard is not reachable from
+     *  the tree), so the tree asks through this receiver. An "auth_key"
+     *  string extra joins with a preauth key; without one the node reports a
+     *  login URL to approve. */
+    public static final String TAILNET_ACTION = "com.jawnos.app.JAWN_TAILNET";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -36,6 +42,18 @@ public class JawnWakeReceiver extends BroadcastReceiver {
             Intent open = new Intent(context, JawnPermissionsActivity.class);
             open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(open);
+            return;
+        }
+        if (TAILNET_ACTION.equals(action)) {
+            if (!allowed()) return;
+            String key = intent.getStringExtra("auth_key");
+            android.content.SharedPreferences.Editor e = context
+                .getSharedPreferences(JawnTailnetController.PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean("enabled", true);
+            if (key != null) e.putString("auth_key", key.trim());
+            e.apply();
+            JawnLog.append("tailnet: starting (key " + (key != null && !key.trim().isEmpty() ? "given" : "none") + ")");
+            JawnTailnetController.startService(context);
             return;
         }
         if (!ACTION.equals(action)) return;
