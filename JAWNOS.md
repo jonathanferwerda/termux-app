@@ -1059,3 +1059,17 @@ work and a full-width build has crashed it (2026-10-10).
      from 46.9 MB to 18.2 MB. Proven on an x86_64 emulator (Android 16) from a
      wiped install: the runtime downloaded, verified and unpacked in ~22 s, and
      `$PREFIX/bin/perl` was executable with `bin/awk` a working symlink.
+
+104. M3c — the runtime is complete, both ABIs. `runtime_build.pl` now decides
+     libraries by reading each shipped ELF's `DT_NEEDED` and pulling the
+     transitive closure (a name list shipped without `libandroid-utimes.so`, and
+     the stopgap "every lib/*.so*" dragged in 240 MB nothing links). It also
+     ships `libexec/git-core`, `ffmpeg`/`ffprobe`/`magick`/`convert` (51 and 44
+     call sites — MediaCodec replaces a codec call, not those pipelines), and
+     `base64`/`timeout`/`ip`/`ss`/`ping`, which the first archive lacked: the
+     manager logged `base64: Unknown option 'decode'` on every watch secret.
+     Archives: aarch64 3,475 files / 291.6 MB raw / 109.9 MB zipped, x86_64
+     3,369 / 282.3 MB / 100.1 MB, both pinned in `assets/jawnrt.json`.
+     `JawnFirstRun` runs its steps through `$PREFIX/bin/sh -c` (the runtime has no
+     `bin/login`). Proven on a wiped x86_64 emulator: download → sha256 → unpack
+     -> tree cloned -> `status=good` on the runtime's own perl, no `base64` error.

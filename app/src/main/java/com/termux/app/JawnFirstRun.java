@@ -216,8 +216,11 @@ final class JawnFirstRun {
             throws IOException, InterruptedException {
         File cwd = workDir != null && workDir.isDirectory()
                 ? workDir : new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
-        String login = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/login";
-        String[] args = TermuxShellUtils.setupProcessArgs(login, new String[] { "-lc", script });
+        // The app's own runtime (M3) has no bin/login: it is Termux's session
+        // wrapper, and it is not part of the diet. A plain $PREFIX/bin/sh -c is
+        // all these steps need, with the environment built explicitly below.
+        String shell = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/sh";
+        String[] args = TermuxShellUtils.setupProcessArgs(shell, new String[] { "-c", script });
         String[] env = TermuxShellUtils.buildEnvironment(context, false, cwd.getAbsolutePath());
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.directory(cwd);
