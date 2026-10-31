@@ -26,23 +26,6 @@ android {
         implementation "commons-io:commons-io:2.5"
     }
 
-    // M4: the terminal stack is gone, but these dead terminal-client classes
-    // still carry com.termux.terminal / com.termux.view imports. They have no
-    // remaining callers and are removed in the GPL pass; keep them in the tree
-    // (uncompiled) until then.
-    sourceSets {
-        main {
-            java {
-                exclude 'com/jawnos/shared/terminal/TermuxTerminalSessionClientBase.java'
-                exclude 'com/jawnos/shared/terminal/TermuxTerminalViewClientBase.java'
-                exclude 'com/jawnos/shared/terminal/io/TerminalExtraKeys.java'
-                exclude 'com/jawnos/shared/shell/TermuxSession.java'
-                exclude 'com/jawnos/shared/settings/properties/TermuxPropertyConstants.java'
-                exclude 'com/jawnos/shared/settings/properties/TermuxSharedProperties.java'
-            }
-        }
-    }
-
     defaultConfig {
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion project.properties.targetSdkVersion.toInteger()

@@ -1192,3 +1192,16 @@ work and a full-width build has crashed it (2026-10-10).
      gateway. `SessionService.ensureSupervisor()` also starts the device bridge
      and the BLE daemon, so a system restart after a package update no longer
      leaves them down while the tree is up. Build 1219.
+
+114. M4 — the dead GPL-3-only `jawnos-shared` files are gone. Removed 21 files
+     with no remaining caller: `UrlUtils`, `TextInputDialogUtils`, the API/
+     Boot/Float/Styling/Tasker/Widget shared preferences,
+     `TermuxPropertyConstants`, `TermuxSharedProperties`, `TermuxSession`, and
+     the whole `terminal/` extra-keys and client-base set (its `build.gradle`
+     exclusion block went with them). Twelve GPL-3-only files remain, all in
+     use: `SELinuxUtils`, `TermuxCrashUtils`, `TermuxFileUtils`,
+     `TermuxNotificationUtils`, `PackageUtils`, `PermissionUtils`,
+     `ReflectionUtils`, `TermuxAppSharedPreferences`,
+     `TermuxPreferenceConstants`, `TermuxShellEnvironmentClient`,
+     `TermuxShellUtils` and `TermuxUtils`. They are the rewrite list before the
+     app can be BSD-2. Build 1220.
