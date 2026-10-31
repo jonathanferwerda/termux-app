@@ -120,6 +120,8 @@ public class SettingsActivity extends AppCompatActivity {
 
                             aboutString.append("\n\n").append(AndroidUtils.getDeviceInfoMarkdownString(context));
                             aboutString.append("\n\n").append(TermuxUtils.getImportantLinksMarkdownString(context));
+                            aboutString.append("\n\n### Licenses\n");
+                            aboutString.append("\nJawnOS is distributed under the GNU GPL v3. The license texts and third-party notices ship in the app's `assets/licenses/` directory and in the source repository at https://github.com/jonathanferwerda/termux-app");
 
                             String userActionName = UserAction.ABOUT.getName();
                             ReportActivity.startReportActivity(context, new ReportInfo(userActionName,

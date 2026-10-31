@@ -1143,3 +1143,12 @@ work and a full-width build has crashed it (2026-10-10).
      go through the `${package}.jawnupdates` FileProvider. Build 1214 (1213 removed the shared user and could not install over 1211/1210).
      `jawnos-shared/LICENSE.md` now names the renamed `com/jawnos/shared/`
      source paths (same terms; the list had gone stale at the package rename).
+
+110. M4/M5 — license texts and notices ship in the APK, and a publish preflights
+     the runtime pin. `assets/licenses/` now carries the full GPL-3.0 and
+     Apache-2.0 texts and `NOTICE.md` (the app and `jawnos-shared` components,
+     the runtime archive's bundled programs, and the source pointer); the About
+     report names them. `scripts/app_publish.pl` refuses to publish an APK whose
+     `assets/jawnrt.json` pin names a runtime that is not staged or does not
+     match its sha256, and uploads any pinned runtime the release is missing.
+     Build 1215.
