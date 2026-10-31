@@ -1218,3 +1218,15 @@ work and a full-width build has crashed it (2026-10-10).
      `TermuxCrashUtils`, `TermuxFileUtils`, `TermuxNotificationUtils`,
      `TermuxAppSharedPreferences`, `TermuxPreferenceConstants`,
      `TermuxShellEnvironmentClient`, `TermuxShellUtils`. Build 1221.
+
+116. M4 — the crash, notification and file helpers are JawnOS code now.
+     `TermuxCrashUtils` (31 lines), `TermuxNotificationUtils` (38) and
+     `TermuxFileUtils` (377) were rewritten as original BSD-2 code. The crash
+     class is the same short CrashHandler adapter without the plugin
+     assumptions; the notification id counter uses its own preference file
+     instead of the Termux app's shared preferences; the file class is only the
+     three directory checks the installer makes (create, chmod 700, readable/
+     writable/executable) instead of the 377-line Termux path toolkit. Build
+     1222. Four GPL-3-only originals remain:
+     `TermuxAppSharedPreferences`, `TermuxPreferenceConstants`,
+     `TermuxShellEnvironmentClient`, `TermuxShellUtils`.

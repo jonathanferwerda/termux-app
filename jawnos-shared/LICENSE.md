@@ -72,3 +72,6 @@ whole still carries GPL-3.0-only files until the last one is rewritten.
 
 - [`src/main/java/com/jawnos/shared/packages/PackageUtils.java`](src/main/java/com/jawnos/shared/packages/PackageUtils.java).
 - [`src/main/java/com/jawnos/shared/termux/TermuxUtils.java`](src/main/java/com/jawnos/shared/termux/TermuxUtils.java).
+- [`src/main/java/com/jawnos/shared/crash/TermuxCrashUtils.java`](src/main/java/com/jawnos/shared/crash/TermuxCrashUtils.java).
+- [`src/main/java/com/jawnos/shared/notification/TermuxNotificationUtils.java`](src/main/java/com/jawnos/shared/notification/TermuxNotificationUtils.java).
+- [`src/main/java/com/jawnos/shared/file/TermuxFileUtils.java`](src/main/java/com/jawnos/shared/file/TermuxFileUtils.java).

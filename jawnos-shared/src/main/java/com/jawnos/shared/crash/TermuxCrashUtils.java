@@ -7,12 +7,14 @@ import androidx.annotation.NonNull;
 import com.jawnos.shared.termux.TermuxConstants;
 import com.jawnos.shared.termux.TermuxUtils;
 
+/**
+ * Installs the crash handler for the JawnOS app and tells it what to write.
+ *
+ * The original termux-shared file also carried the plugin-app assumptions;
+ * this is the same adapter without them. CrashHandler itself is MIT.
+ */
 public class TermuxCrashUtils implements CrashHandler.CrashHandlerClient {
 
-    /**
-     * Set default uncaught crash handler of current thread to {@link CrashHandler} for Termux app
-     * and its plugin to log crashes at {@link TermuxConstants#TERMUX_CRASH_LOG_FILE_PATH}.
-     */
     public static void setCrashHandler(@NonNull final Context context) {
         CrashHandler.setCrashHandler(context, new TermuxCrashUtils());
     }
@@ -27,5 +29,4 @@ public class TermuxCrashUtils implements CrashHandler.CrashHandlerClient {
     public String getAppInfoMarkdownString(Context context) {
         return TermuxUtils.getAppInfoMarkdownString(context, true);
     }
-
 }

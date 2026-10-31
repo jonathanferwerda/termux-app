@@ -1,38 +1,33 @@
 package com.jawnos.shared.notification;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
-import com.jawnos.shared.settings.preferences.TermuxAppSharedPreferences;
-import com.jawnos.shared.settings.preferences.TermuxPreferenceConstants;
 import com.jawnos.shared.termux.TermuxConstants;
 
+/**
+ * Hands out notification ids that the app is not already using.
+ *
+ * The original termux-shared file kept the counter in the Termux app's shared
+ * preferences because plugins shared a uid. JawnOS is one app, so the counter
+ * lives in its own small preference file and skips the two reserved ids.
+ */
 public class TermuxNotificationUtils {
-    /**
-     * Try to get the next unique notification id that isn't already being used by the app.
-     *
-     * Termux app and its plugin must use unique notification ids from the same pool due to usage of android:sharedUserId.
-     * https://commonsware.com/blog/2017/06/07/jobscheduler-job-ids-libraries.html
-     *
-     * @param context The {@link Context} for operations.
-     * @return Returns the notification id that should be safe to use.
-     */
+
+    private static final String PREFS = "jawnos_notifications";
+    private static final String KEY_LAST_ID = "last_notification_id";
+    private static final int DEFAULT_ID = 1000;
+
     public synchronized static int getNextNotificationId(final Context context) {
-        if (context == null) return TermuxPreferenceConstants.TERMUX_APP.DEFAULT_VALUE_KEY_LAST_NOTIFICATION_ID;
-
-        TermuxAppSharedPreferences preferences = TermuxAppSharedPreferences.build(context);
-        if (preferences == null) return TermuxPreferenceConstants.TERMUX_APP.DEFAULT_VALUE_KEY_LAST_NOTIFICATION_ID;
-
-        int lastNotificationId = preferences.getLastNotificationId();
-
-        int nextNotificationId = lastNotificationId + 1;
-        while(nextNotificationId == TermuxConstants.TERMUX_APP_NOTIFICATION_ID || nextNotificationId == TermuxConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID) {
-            nextNotificationId++;
+        if (context == null) return DEFAULT_ID;
+        SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int next = preferences.getInt(KEY_LAST_ID, DEFAULT_ID) + 1;
+        while (next == TermuxConstants.TERMUX_APP_NOTIFICATION_ID
+            || next == TermuxConstants.TERMUX_RUN_COMMAND_NOTIFICATION_ID) {
+            next++;
         }
-
-        if (nextNotificationId == Integer.MAX_VALUE || nextNotificationId < 0)
-            nextNotificationId = TermuxPreferenceConstants.TERMUX_APP.DEFAULT_VALUE_KEY_LAST_NOTIFICATION_ID;
-
-        preferences.setLastNotificationId(nextNotificationId);
-        return nextNotificationId;
+        if (next == Integer.MAX_VALUE || next < 0) next = DEFAULT_ID;
+        preferences.edit().putInt(KEY_LAST_ID, next).apply();
+        return next;
     }
 }
