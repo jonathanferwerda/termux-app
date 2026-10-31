@@ -236,6 +236,11 @@ public final class SessionService extends Service {
     }
 
     private Process spawn() {
+        // A package update moves nativeLibraryDir and leaves every link the
+        // previous update made pointing at a deleted directory. Repair them
+        // before exec'ing perl; an APK update does not stop the tree, so this
+        // is the first moment the new directory is visible. ensure never throws.
+        JawnRuntimeBins.ensure(this);
         File dir = new File(JawnLauncher.getJawnDirPath(this));
         File perl = new File(JawnConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/perl");
         File runtime = runtimeDir();

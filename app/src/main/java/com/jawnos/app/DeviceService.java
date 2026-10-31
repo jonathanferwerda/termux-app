@@ -1,5 +1,6 @@
 package com.jawnos.app;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.NotificationChannel;
@@ -9,6 +10,8 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.Image;
 import android.media.ImageReader;
@@ -132,13 +135,57 @@ public class DeviceService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(NOTIFICATION_ID, notification());
+        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
 
         token = ensureToken();
         clients = Executors.newFixedThreadPool(MAX_CLIENTS);
         acceptor = new Thread(this::acceptLoop, "jawn-device-accept");
         acceptor.start();
         Log.i(LOG_TAG, "device bridge listening on 127.0.0.1:" + PORT);
+    }
+
+    /** Start the bridge notification with one explicit foreground type.
+     *
+     *  targetSdk 34+ checks every type named at the moment the service turns
+     *  foreground. The two-argument startForeground() claims EVERY type the
+     *  manifest declares for this service, which includes microphone and
+     *  camera; without those runtime grants Android 16 kills the process with
+     *  "Starting FGS with type microphone ... requires permissions". The bridge
+     *  only needs dataSync to exist, so it says so, and widens the type for the
+     *  length of a capture.
+     */
+    private void startForegroundCompat(int type) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFICATION_ID, notification(), type);
+            }
+            else {
+                startForeground(NOTIFICATION_ID, notification());
+            }
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "startForeground(type=" + type + ") failed", t);
+        }
+    }
+
+    /** Add camera or microphone for the duration of a capture, but only when
+     *  the matching runtime grant is held. Returns true when it was applied. */
+    private boolean escalateForeground(int type, String permission) {
+        if (Build.VERSION.SDK_INT < 30) return false;
+        try {
+            if (permission != null && checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                return false;
+            }
+            startForeground(NOTIFICATION_ID, notification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC | type);
+            return true;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "foreground type escalation failed", t);
+            return false;
+        }
+    }
+
+    private void deescalateForeground() {
+        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
     }
 
     @Override
@@ -460,8 +507,15 @@ public class DeviceService extends Service {
                 reply.put("result", record(request.optJSONObject("args")));
             }
             else if ("camera.photo".equals(method)) {
-                reply.put("ok", true);
-                reply.put("result", cameraPhoto(request.optJSONObject("args")));
+                boolean escalated = escalateForeground(
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA, Manifest.permission.CAMERA);
+                try {
+                    reply.put("ok", true);
+                    reply.put("result", cameraPhoto(request.optJSONObject("args")));
+                }
+                finally {
+                    if (escalated) deescalateForeground();
+                }
             }
             else if ("auth.fingerprint".equals(method)) {
                 reply.put("ok", true);
@@ -1013,6 +1067,7 @@ public class DeviceService extends Service {
         if (path.isEmpty()) throw new IllegalArgumentException("no path");
         stopRecording();
 
+        escalateForeground(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE, Manifest.permission.RECORD_AUDIO);
         MediaRecorder fresh = new MediaRecorder();
         fresh.setAudioSource(MediaRecorder.AudioSource.MIC);
         fresh.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
@@ -1033,6 +1088,7 @@ public class DeviceService extends Service {
         try { recorder.stop(); } catch (Throwable t) { Log.w(LOG_TAG, "recorder stop", t); }
         try { recorder.release(); } catch (Throwable ignored) {}
         recorder = null;
+        deescalateForeground();
     }
 
     // --- media, share, open ------------------------------------------------

@@ -1350,3 +1350,18 @@ work and a full-width build has crashed it (2026-10-10).
      `--restore-only DIR` to resume after an install that failed midway.
      Cut-over: the tablet moved from the debug key to this one with its
      114,600 appointments and identity intact. Build 1235.
+
+126. M5b — the app targets 36 and execs its runtime from jniLibs. The build
+     moved to AGP 8.7.3 / Gradle 8.9 / JDK 17 / compileSdk 36 / targetSdk 36
+     (minSdk 26; `nonTransitiveRClass=false` because jawnos-shared references
+     appcompat's R, and the signing/`debuggable` blocks are unchanged). The
+     runtime's 67 executables now ship as `jniLibs/arm64-v8a/lib<slug>.so`
+     (32.2 MB) with a 258-line `assets/runtime-bins.txt` naming 191 symlinks;
+     `JawnRuntimeBins.ensure()` re-points `$PREFIX/bin` and `$PREFIX/libexec`
+     at the current `nativeLibraryDir` on every app start. targetSdk 34+ also
+     required foreground-service types: the bridge starts as `dataSync` and
+     widens to camera/microphone only for a capture (with the runtime grant),
+     and the manifest gained `FOREGROUND_SERVICE_CONNECTED_DEVICE` for the BLE
+     daemon. Proven on the phone: `bin/perl` is a symlink into
+     `/data/app/.../lib/arm64/`, `perl -v` runs through it, the tree came up
+     (20 processes), status good, `/manager` answered 200. Builds 1236-1239.

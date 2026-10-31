@@ -17,6 +17,13 @@ public class JawnApplication extends Application {
         // Set log level for the app
         setLogLevel();
 
+        // M5: targetSdk 36 stops us exec'ing a file the app wrote into its
+        // data dir, so the runtime's executables arrive as native libraries.
+        // nativeLibraryDir moves on every APK update, so re-point the links
+        // here, before anything starts the tree. It is a no-op when the APK
+        // carries no runtime-bins.txt.
+        JawnRuntimeBins.ensure(this);
+
         // The device bridge and the BLE daemon are services in this process.
         // A package update kills the app while the exec'd perl tree survives,
         // so the tree stays "good" but every bridged device call is gone. An
