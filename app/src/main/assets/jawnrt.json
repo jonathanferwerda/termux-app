@@ -1,16 +1,16 @@
 {
    "abi" : {
       "aarch64" : {
-         "file" : "jawnrt-aarch64-0.1.1655.zip",
-         "sha256" : "14836fb0b0e96b35fc398a8db37d100e8d10e9626cb2ce160526350d954c040a",
-         "size" : 115202845,
-         "version" : "0.1.1655"
+         "file" : "jawnrt-aarch64-0.1.1670.zip",
+         "sha256" : "08991f7dd11caf11549e3fc01b8955cbb1c0a1d79a160043e057fe0f8622ffdf",
+         "size" : 100536230,
+         "version" : "0.1.1670"
       },
       "x86_64" : {
-         "file" : "jawnrt-x86_64-0.1.1655.zip",
-         "sha256" : "312833a7aaa53c57d78a3aeb8f84d6380e277f1c04de9274eefe9c6fe7370397",
-         "size" : 105001603,
-         "version" : "0.1.1655"
+         "file" : "jawnrt-x86_64-0.1.1670.zip",
+         "sha256" : "414794bc22ffe652a7720ab0b3b6f0f07d8f0ebc0e236fba357879d9149ca9c3",
+         "size" : 105002518,
+         "version" : "0.1.1670"
       }
    }
 }
