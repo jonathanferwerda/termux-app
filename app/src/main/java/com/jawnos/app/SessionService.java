@@ -136,6 +136,12 @@ public final class SessionService extends Service {
     // ---------------------------------------------------------------- supervisor
 
     private void ensureSupervisor() {
+        // The system can restart this service (a package update, a reboot)
+        // without going through JawnLauncher.startJawn, and then the device
+        // bridge and the BLE daemon were never started: the tree's interface
+        // report stayed empty and BLE never connected. They ride with the tree.
+        JawnLauncher.startDeviceService(this);
+        if (JawnLauncher.isBleWithJawn(this)) JawnLauncher.startBle(this);
         synchronized (lock) {
             if (supervisor != null && supervisor.isAlive()) return;
             supervisor = new Supervisor();

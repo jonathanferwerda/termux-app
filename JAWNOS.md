@@ -1182,3 +1182,13 @@ work and a full-width build has crashed it (2026-10-10).
      The phone and tablet were migrated with it on 2026-10-31. The app gate asks
      for the device unlock again afterwards: the Keystore key dies with the
      uninstall.
+
+113. M1/M4 — `network.interfaces`, and the bridge rides with the tree. The
+     runtime has no `ifconfig` and `ip addr` cannot bind a netlink socket as an
+     app uid (SELinux), so `subs::network_interface_reporter()` saw no interfaces
+     on either device and the `devices` row carried `{}`. The bridge answers
+     `network.interfaces` from `NetworkInterface` (ordinary socket API, no
+     permission) plus the active network's `LinkProperties` for the default
+     gateway. `SessionService.ensureSupervisor()` also starts the device bridge
+     and the BLE daemon, so a system restart after a package update no longer
+     leaves them down while the tree is up. Build 1219.

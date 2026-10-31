@@ -33,6 +33,10 @@ import android.graphics.ImageFormat;
 import android.os.BatteryManager;
 import android.os.ParcelFileDescriptor;
 import android.os.Build;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.RouteInfo;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -63,8 +67,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -72,6 +79,7 @@ import java.security.SecureRandom;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -232,6 +240,10 @@ public class DeviceService extends Service {
             else if ("battery.status".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", battery());
+            }
+            else if ("network.interfaces".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", networkInterfaces());
             }
             else if ("toast.show".equals(method)) {
                 JSONObject args = request.optJSONObject("args");
@@ -399,6 +411,92 @@ public class DeviceService extends Service {
             Log.w(LOG_TAG, "battery read failed", t);
         }
         return result;
+    }
+
+    /** The interfaces and IPv4 addresses, read through the Java API.
+     *
+     *  The runtime has no ifconfig, and `ip addr` cannot bind a netlink socket
+     *  as an app uid (SELinux), so the tree's network report was empty on the
+     *  phone and tablet and nothing knew its own address. NetworkInterface uses
+     *  the ordinary socket API and needs no permission; the default gateway
+     *  comes from the active network's LinkProperties. The shape is the tree's
+     *  NIC report: one object per interface name. */
+    private JSONObject networkInterfaces() {
+        JSONObject out = new JSONObject();
+        JSONObject interfaces = new JSONObject();
+        try {
+            String gateway = defaultGateway();
+            Enumeration<NetworkInterface> nis = NetworkInterface.getNetworkInterfaces();
+            while (nis != null && nis.hasMoreElements()) {
+                NetworkInterface ni = nis.nextElement();
+                try {
+                    if (!ni.isUp() || ni.isLoopback()) continue;
+                } catch (Exception ignored) {
+                    continue;
+                }
+                String ip = null, netmask = null, broadcast = null;
+                for (InterfaceAddress ia : ni.getInterfaceAddresses()) {
+                    InetAddress a = ia.getAddress();
+                    if (!(a instanceof Inet4Address)) continue;
+                    ip = a.getHostAddress();
+                    netmask = netmaskFor(ia.getNetworkPrefixLength());
+                    if (ia.getBroadcast() != null) broadcast = ia.getBroadcast().getHostAddress();
+                    break;
+                }
+                if (ip == null) continue;
+                JSONObject o = new JSONObject();
+                o.put("nic", ni.getName());
+                o.put("ip", ip);
+                if (netmask != null) o.put("netmask", netmask);
+                if (broadcast != null) o.put("broadcast", broadcast);
+                if (gateway != null) o.put("gw", gateway);
+                try {
+                    byte[] mac = ni.getHardwareAddress();
+                    if (mac != null && mac.length == 6) {
+                        StringBuilder sb = new StringBuilder();
+                        for (byte b : mac) {
+                            if (sb.length() > 0) sb.append(':');
+                            sb.append(String.format("%02x", b & 0xff));
+                        }
+                        o.put("mac", sb.toString());
+                    }
+                } catch (Exception ignored) { }
+                interfaces.put(ni.getName(), o);
+            }
+            out.put("interfaces", interfaces);
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "network.interfaces read failed", t);
+            try { out.put("interfaces", interfaces); } catch (Exception ignored) { }
+            try { out.put("error", String.valueOf(t.getMessage())); } catch (Exception ignored) { }
+        }
+        return out;
+    }
+
+    private String defaultGateway() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return null;
+            for (Network n : cm.getAllNetworks()) {
+                LinkProperties lp = cm.getLinkProperties(n);
+                if (lp == null) continue;
+                for (RouteInfo r : lp.getRoutes()) {
+                    if (!r.isDefaultRoute()) continue;
+                    InetAddress gw = r.getGateway();
+                    if (gw instanceof Inet4Address && !gw.isAnyLocalAddress()) {
+                        return gw.getHostAddress();
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    private static String netmaskFor(int prefix) {
+        if (prefix <= 0) return "0.0.0.0";
+        if (prefix >= 32) return "255.255.255.255";
+        int mask = 0xffffffff << (32 - prefix);
+        return ((mask >>> 24) & 0xff) + "." + ((mask >>> 16) & 0xff) + "."
+            + ((mask >>> 8) & 0xff) + "." + (mask & 0xff);
     }
 
     private static String status(int value) {
