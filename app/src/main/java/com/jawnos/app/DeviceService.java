@@ -289,6 +289,66 @@ public class DeviceService extends Service {
                     reply.put("result", made);
                 }
             }
+            else if ("image.identify".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageIdentify(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not identify the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.convert".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageConvert(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not convert the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.gray".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageGray(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not read the image as gray");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.normalize".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageNormalize(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not normalise the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.montage".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageMontage(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not make the montage");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
             else if ("battery.status".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", battery());
@@ -1770,6 +1830,30 @@ public class DeviceService extends Service {
         }
     }
 
+    /** Decode a plain image, sampling no finer than `target` in either axis,
+     *  with no EXIF rotation and no fit-shrink. The conversion paths do their
+     *  own geometry and only need enough pixels to fill the output, so a 35 MP
+     *  scan is not loaded whole. target <= 0 means 2048. */
+    private static Bitmap decodeSampled(java.io.File file, int target) {
+        try {
+            if (target <= 0) target = 2048;
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= target && bounds.outHeight / (sample * 2) >= target) {
+                sample *= 2;
+            }
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Decode a picture, honouring its EXIF orientation and never loading more
      *  pixels than the thumbnail needs. */
     private static Bitmap decodePicture(java.io.File file, int max) {
@@ -1821,6 +1905,460 @@ public class DeviceService extends Service {
         return scaled;
     }
 
+
+    /** Raw width, height and kind of a picture, a video or a PDF's first page.
+     *
+     *  Dimensions are the ones the file stores: EXIF rotation is not applied,
+     *  which is what `magick identify` reports.
+     */
+    private JSONObject imageIdentify(JSONObject args) {
+        try {
+            String path = args.optString("path", "");
+            File file = new File(path);
+            if (!file.isFile()) return null;
+
+            JSONObject result = new JSONObject();
+            if (isVideo(file)) {
+                int[] size = videoFrameSize(file);
+                if (size == null) return null;
+                result.put("width", size[0]);
+                result.put("height", size[1]);
+                result.put("kind", "video");
+                return result;
+            }
+            if (!"pdf".equals(extensionOf(path))) {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(path, bounds);
+                if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                    result.put("width", bounds.outWidth);
+                    result.put("height", bounds.outHeight);
+                    result.put("kind", "image");
+                    return result;
+                }
+            }
+            int[] size = pdfPageSize(file);
+            if (size == null) return null;
+            result.put("width", size[0]);
+            result.put("height", size[1]);
+            result.put("kind", "pdf");
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.identify failed", t);
+            return null;
+        }
+    }
+
+    /** Decode a picture, a video frame or a PDF page, scale it down to the
+     *  requested bounds and write it at args.format/args.quality.
+     *
+     *  `magick convert` does not honour EXIF unless asked, so auto_orient is
+     *  off by default and only decodeOriented is used when it is set.
+     */
+    private JSONObject imageConvert(JSONObject args) {
+        Bitmap bitmap = null;
+        Bitmap scaled = null;
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", "");
+            if (out.isEmpty()) return null;
+            File source = new File(path);
+            if (!source.isFile()) return null;
+
+            int maxWidth = args.optInt("max_width", 0);
+            int maxHeight = args.optInt("max_height", 0);
+            int quality = args.optInt("quality", 90);
+            String format = args.optString("format", "");
+            if (format.isEmpty()) format = extensionOf(out);
+            int target = Math.max(1024, Math.max(maxWidth, maxHeight));
+
+            if (isVideo(source)) {
+                bitmap = videoFrame(source);
+            }
+            else if ("pdf".equals(extensionOf(path))) {
+                bitmap = decodePdfNatural(source);
+            }
+            else if (truthy(args, "auto_orient")) {
+                bitmap = decodeOriented(source, target);
+            }
+            else {
+                bitmap = decodeSampled(source, target);
+            }
+            if (bitmap == null) return null;
+
+            double scale = 1.0;
+            if (maxWidth > 0) scale = Math.min(scale, (double) maxWidth / bitmap.getWidth());
+            if (maxHeight > 0) scale = Math.min(scale, (double) maxHeight / bitmap.getHeight());
+            int width = Math.max(1, (int) Math.round(bitmap.getWidth() * scale));
+            int height = Math.max(1, (int) Math.round(bitmap.getHeight() * scale));
+
+            scaled = bitmap;
+            if (width != bitmap.getWidth() || height != bitmap.getHeight()) {
+                scaled = Bitmap.createScaledBitmap(bitmap, width, height, true);
+                if (scaled != bitmap) {
+                    bitmap.recycle();
+                    bitmap = null;
+                }
+            }
+
+            boolean written = writeBitmap(scaled, new File(out), format, quality);
+            scaled.recycle();
+            scaled = null;
+            bitmap = null;
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", width);
+            result.put("height", height);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.convert failed", t);
+            return null;
+        } finally {
+            if (bitmap != null) bitmap.recycle();
+            if (scaled != null) scaled.recycle();
+        }
+    }
+
+    /** The picture as exactly width × height bytes of 8-bit luminance.
+     *
+     *  This replaces `magick <file> -resize WxH! -colorspace Gray -depth 8
+     *  gray:-`. Transparent pixels are flattened onto white first; the scale
+     *  is exact, ignoring the aspect ratio; alpha is not part of the result.
+     */
+    private JSONObject imageGray(JSONObject args) {
+        Bitmap bitmap = null;
+        Bitmap flat = null;
+        Bitmap scaled = null;
+        try {
+            String path = args.optString("path", "");
+            int width = args.optInt("width", 0);
+            int height = args.optInt("height", 0);
+            if (width <= 0 || height <= 0) return null;
+            File source = new File(path);
+            if (!source.isFile()) return null;
+
+            bitmap = decodeUnoriented(source);
+            if (bitmap == null) return null;
+
+            int sourceWidth = bitmap.getWidth();
+            int sourceHeight = bitmap.getHeight();
+            int pixelCount = sourceWidth * sourceHeight;
+            int[] pixels = new int[pixelCount];
+            bitmap.getPixels(pixels, 0, sourceWidth, 0, 0, sourceWidth, sourceHeight);
+            bitmap.recycle();
+            bitmap = null;
+
+            for (int i = 0; i < pixelCount; i++) {
+                int colour = pixels[i];
+                int alpha = (colour >>> 24) & 0xFF;
+                int red = (colour >> 16) & 0xFF;
+                int green = (colour >> 8) & 0xFF;
+                int blue = colour & 0xFF;
+                if (alpha != 255) {
+                    red = (red * alpha + 255 * (255 - alpha)) / 255;
+                    green = (green * alpha + 255 * (255 - alpha)) / 255;
+                    blue = (blue * alpha + 255 * (255 - alpha)) / 255;
+                }
+                pixels[i] = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
+            flat = Bitmap.createBitmap(pixels, sourceWidth, sourceHeight, Bitmap.Config.ARGB_8888);
+            pixels = null;
+
+            scaled = flat;
+            if (sourceWidth != width || sourceHeight != height) {
+                scaled = Bitmap.createScaledBitmap(flat, width, height, true);
+                if (scaled != flat) {
+                    flat.recycle();
+                    flat = null;
+                }
+            }
+
+            int[] outPixels = new int[width * height];
+            scaled.getPixels(outPixels, 0, width, 0, 0, width, height);
+            byte[] gray = new byte[width * height];
+            for (int i = 0; i < outPixels.length; i++) {
+                int colour = outPixels[i];
+                int red = (colour >> 16) & 0xFF;
+                int green = (colour >> 8) & 0xFF;
+                int blue = colour & 0xFF;
+                gray[i] = (byte) ((red * 299 + green * 587 + blue * 114) / 1000);
+            }
+
+            JSONObject result = new JSONObject();
+            result.put("data", Base64.encodeToString(gray, Base64.NO_WRAP));
+            result.put("width", width);
+            result.put("height", height);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.gray failed", t);
+            return null;
+        } finally {
+            if (bitmap != null) bitmap.recycle();
+            if (flat != null) flat.recycle();
+            if (scaled != null) scaled.recycle();
+        }
+    }
+
+    /** Greyscale, stretch the levels, trim the corner-coloured border and fit
+     *  within `max`, writing a PNG.
+     *
+     *  The tree's fallback runs `magick <src> -colorspace Gray -normalize -trim
+     *  +repage -resize 1024x1024> <dst>` with no deskew; this is the same
+     *  pipeline in pixels. The trim compares each pixel with the TOP-LEFT one.
+     */
+    private JSONObject imageNormalize(JSONObject args) {
+        Bitmap cropped = null;
+        Bitmap scaled = null;
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", "");
+            int max = args.optInt("max", 1024);
+            if (out.isEmpty()) return null;
+            if (max <= 0) max = 1024;
+            File source = new File(path);
+            if (!source.isFile()) return null;
+
+            Bitmap bitmap = decodeSampled(source, Math.max(1024, max));
+            if (bitmap == null) return null;
+
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+            int pixelCount = width * height;
+            int[] pixels = new int[pixelCount];
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+            bitmap.recycle();
+
+            byte[] gray = new byte[pixelCount];
+            int minimum = 255;
+            int maximum = 0;
+            for (int i = 0; i < pixelCount; i++) {
+                int colour = pixels[i];
+                int value = (((colour >> 16) & 0xFF) * 299
+                        + ((colour >> 8) & 0xFF) * 587
+                        + (colour & 0xFF) * 114) / 1000;
+                gray[i] = (byte) value;
+                if (value < minimum) minimum = value;
+                if (value > maximum) maximum = value;
+            }
+            pixels = null;
+
+            if (maximum > minimum) {
+                int span = maximum - minimum;
+                for (int i = 0; i < pixelCount; i++) {
+                    gray[i] = (byte) (((gray[i] & 0xFF) - minimum) * 255 / span);
+                }
+            }
+            int corner = gray[0] & 0xFF;
+
+            int left = 0;
+            int top = 0;
+            int right = width - 1;
+            int bottom = height - 1;
+            int boxLeft = width;
+            int boxTop = height;
+            int boxRight = -1;
+            int boxBottom = -1;
+            for (int y = 0; y < height; y++) {
+                int row = y * width;
+                for (int x = 0; x < width; x++) {
+                    if ((gray[row + x] & 0xFF) != corner) {
+                        if (x < boxLeft) boxLeft = x;
+                        if (x > boxRight) boxRight = x;
+                        if (y < boxTop) boxTop = y;
+                        if (y > boxBottom) boxBottom = y;
+                    }
+                }
+            }
+            if (boxRight >= boxLeft && boxBottom >= boxTop) {
+                left = boxLeft;
+                top = boxTop;
+                right = boxRight;
+                bottom = boxBottom;
+            }
+            int cropWidth = right - left + 1;
+            int cropHeight = bottom - top + 1;
+
+            int[] croppedPixels = new int[cropWidth * cropHeight];
+            for (int y = 0; y < cropHeight; y++) {
+                int from = (top + y) * width + left;
+                int to = y * cropWidth;
+                for (int x = 0; x < cropWidth; x++) {
+                    int value = gray[from + x] & 0xFF;
+                    croppedPixels[to + x] = 0xFF000000 | (value << 16) | (value << 8) | value;
+                }
+            }
+            cropped = Bitmap.createBitmap(croppedPixels, cropWidth, cropHeight, Bitmap.Config.ARGB_8888);
+            croppedPixels = null;
+
+            double scale = Math.min(1.0, Math.min((double) max / cropWidth, (double) max / cropHeight));
+            int outWidth = Math.max(1, (int) Math.round(cropWidth * scale));
+            int outHeight = Math.max(1, (int) Math.round(cropHeight * scale));
+            scaled = cropped;
+            if (outWidth != cropWidth || outHeight != cropHeight) {
+                scaled = Bitmap.createScaledBitmap(cropped, outWidth, outHeight, true);
+                if (scaled != cropped) {
+                    cropped.recycle();
+                    cropped = null;
+                }
+            }
+
+            boolean written = writeBitmap(scaled, new File(out), "png", 100);
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", scaled.getWidth());
+            result.put("height", scaled.getHeight());
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.normalize failed", t);
+            return null;
+        } finally {
+            if (cropped != null) cropped.recycle();
+            if (scaled != null) scaled.recycle();
+        }
+    }
+
+    /** Place pictures left to right, top aligned and with no gaps, on a
+     *  transparent canvas, and write the PNG.
+     */
+    private JSONObject imageMontage(JSONObject args) {
+        ArrayList<Bitmap> pictures = new ArrayList<Bitmap>();
+        Bitmap canvasBitmap = null;
+        try {
+            String out = args.optString("out", "");
+            JSONArray paths = args.optJSONArray("paths");
+            if (out.isEmpty() || paths == null) return null;
+
+            int totalWidth = 0;
+            int tallest = 0;
+            for (int i = 0; i < paths.length(); i++) {
+                String path = paths.optString(i, "");
+                if (path.isEmpty()) continue;
+                File file = new File(path);
+                if (!file.isFile()) continue;
+                Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                if (bitmap == null) continue;
+                pictures.add(bitmap);
+                totalWidth += bitmap.getWidth();
+                if (bitmap.getHeight() > tallest) tallest = bitmap.getHeight();
+            }
+            if (pictures.isEmpty() || totalWidth <= 0 || tallest <= 0) return null;
+
+            canvasBitmap = Bitmap.createBitmap(totalWidth, tallest, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(canvasBitmap);
+            int x = 0;
+            for (Bitmap picture : pictures) {
+                canvas.drawBitmap(picture, x, 0, null);
+                x += picture.getWidth();
+            }
+
+            boolean written = writeBitmap(canvasBitmap, new File(out), "png", 100);
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", totalWidth);
+            result.put("height", tallest);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.montage failed", t);
+            return null;
+        } finally {
+            for (Bitmap picture : pictures) picture.recycle();
+            if (canvasBitmap != null) canvasBitmap.recycle();
+        }
+    }
+
+    /** Raw dimensions of a video's picture, as the retriever reports them. */
+    private static int[] videoFrameSize(java.io.File file) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(file.getAbsolutePath());
+            int width = 0;
+            int height = 0;
+            try {
+                width = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
+            } catch (Throwable ignored) { }
+            try {
+                height = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            } catch (Throwable ignored) { }
+            if (width <= 0 || height <= 0) return null;
+            return new int[] { width, height };
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { retriever.release(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** Raw width and height of a PDF's first page, in points. */
+    private static int[] pdfPageSize(java.io.File file) {
+        ParcelFileDescriptor fd = null;
+        PdfRenderer renderer = null;
+        try {
+            fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            renderer = new PdfRenderer(fd);
+            if (renderer.getPageCount() < 1) return null;
+            PdfRenderer.Page page = renderer.openPage(0);
+            try {
+                int width = page.getWidth();
+                int height = page.getHeight();
+                if (width <= 0 || height <= 0) return null;
+                return new int[] { width, height };
+            } finally {
+                page.close();
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { if (renderer != null) renderer.close(); } catch (Throwable ignored) { }
+            try { if (fd != null) fd.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** The first frame of a video, at the size the file stores. */
+    private static Bitmap videoFrame(java.io.File file) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(file.getAbsolutePath());
+            Bitmap bitmap = retriever.getFrameAtTime();
+            if (bitmap == null) bitmap = retriever.getFrameAtTime(0);
+            return bitmap;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { retriever.release(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** A PDF page at its natural size: decodePdfPage fits a square, so it is
+     *  given the page's own longest side and does not scale. */
+    private static Bitmap decodePdfNatural(java.io.File file) {
+        int[] size = pdfPageSize(file);
+        if (size == null) return null;
+        return decodePdfPage(file, Math.max(size[0], size[1]));
+    }
+
+    /** An image, a video's first frame or a PDF's first page with no EXIF
+     *  rotation — the raw pixels a colour-space conversion wants. */
+    private static Bitmap decodeUnoriented(java.io.File file) {
+        if (isVideo(file)) return videoFrame(file);
+        if ("pdf".equals(extensionOf(file.getName()))) return decodePdfNatural(file);
+        return BitmapFactory.decodeFile(file.getAbsolutePath());
+    }
+
+    /** A JS-style truthy argument: true, a non-zero number or "true"/"1"/... */
+    private static boolean truthy(JSONObject args, String key) {
+        Object value = args == null ? null : args.opt(key);
+        if (value == null || value == JSONObject.NULL) return false;
+        if (value instanceof Boolean) return (Boolean) value;
+        if (value instanceof Number) return ((Number) value).doubleValue() != 0;
+        String text = String.valueOf(value).trim().toLowerCase();
+        return text.equals("true") || text.equals("1") || text.equals("yes") || text.equals("on");
+    }
 
     /** Fill a square of `size` from the centre of the picture, then write it.
      *

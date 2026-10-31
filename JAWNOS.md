@@ -1306,3 +1306,20 @@ work and a full-width build has crashed it (2026-10-10).
      card's display copy use the same bridge first. Verified on the tablet: a
      16x8 half-red/half-blue PNG through `image.cover` at 4 came back 4x4 with
      red at 0,0 and blue at 3,3. Build 1230.
+
+123. M3 — the rest of the image work moves into the bridge. Five methods:
+     `image.identify` (raw pixel dimensions for an image, a video frame or a
+     PDF page), `image.convert` (decode image/PDF/video and re-encode at a
+     chosen format, quality and bounds; EXIF only when auto_orient is set,
+     matching magick), `image.gray` (exact WxH 8-bit luminance bytes, alpha
+     flattened onto white — the dhash input), `image.normalize` (grayscale,
+     level stretch, trim the corner-coloured border, fit within a cap, PNG),
+     and `image.montage` (left-to-right, top aligned, transparent). Decodes
+     are sampled so a 35 MP scan does not load whole. The tree asks these
+     first for: scan pages (JPEG and Raw), scanner TIFF pages, market receipt
+     store and preview, MMS shrink (auto-orient, 1280x960, q82), the map guess
+     crop and both guess dimensions, the spread card montage, both crest
+     colour files, crest normalization and the crest dhash. Magick remains the
+     desktop fallback everywhere. Verified on the tablet: identify 16x8,
+     convert 8x4 JPEG, gray exactly 72 bytes, normalize 4x4, montage 24x8 with
+     red at x=0, blue at x=15 and red at x=16. Build 1231.
