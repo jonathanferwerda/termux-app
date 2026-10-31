@@ -28,6 +28,10 @@ import android.hardware.camera2.CaptureRequest;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
+import android.graphics.Canvas;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Paint;
 import android.graphics.pdf.PdfRenderer;
 import android.graphics.ImageFormat;
 import android.os.BatteryManager;
@@ -255,6 +259,18 @@ public class DeviceService extends Service {
                 if (made == null) {
                     reply.put("ok", false);
                     reply.put("error", "could not save the image");
+                }
+                else {
+                    reply.put("ok", true);
+                    reply.put("result", made);
+                }
+            }
+            else if ("image.edit".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                JSONObject made = imageEdit(args == null ? new JSONObject() : args);
+                if (made == null) {
+                    reply.put("ok", false);
+                    reply.put("error", "could not edit the image");
                 }
                 else {
                     reply.put("ok", true);
@@ -1871,6 +1887,309 @@ public class DeviceService extends Service {
             Log.w(LOG_TAG, "image.save failed", t);
             return null;
         }
+    }
+
+    /** Apply the palette's edit steps to a picture, natively.
+     *
+     *  `/manager/palette` used to shell out once per step:
+     *  `magick <file> -<duty> <value> <file>`. These are the same steps in
+     *  Bitmap and Canvas terms, so the palette keeps working on a phone where
+     *  magick is not installed. `fill` is accepted and left alone: under magick
+     *  the bare `-fill` only set a setting and changed no pixel. An unknown
+     *  duty is named in `skipped` instead of failing the whole list.
+     */
+    private JSONObject imageEdit(JSONObject args) {
+        Bitmap bitmap = null;
+        try {
+            String path = args.optString("path", "");
+            String out = args.optString("out", path);
+            JSONArray steps = args.optJSONArray("duties");
+            bitmap = BitmapFactory.decodeFile(path);
+            if (bitmap == null) return null;
+
+            JSONArray skipped = new JSONArray();
+            int applied = 0;
+            if (steps != null) {
+                for (int i = 0; i < steps.length(); i++) {
+                    JSONObject step = steps.optJSONObject(i);
+                    if (step == null) continue;
+                    String duty = step.optString("duty", "");
+                    String value = step.optString("value", "");
+                    Bitmap next;
+                    try {
+                        next = applyImageDuty(bitmap, duty, value);
+                    } catch (Throwable t) {
+                        next = null;
+                    }
+                    if (next == null) {
+                        skipped.put(duty);
+                        continue;
+                    }
+                    if (next != bitmap) bitmap.recycle();
+                    bitmap = next;
+                    applied++;
+                }
+            }
+
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+            boolean written = writeBitmap(bitmap, new File(out), extensionOf(out), 92);
+            if (!written) return null;
+
+            JSONObject result = new JSONObject();
+            result.put("path", out);
+            result.put("width", width);
+            result.put("height", height);
+            result.put("applied", applied);
+            result.put("skipped", skipped);
+            return result;
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "image.edit failed", t);
+            return null;
+        } finally {
+            if (bitmap != null) bitmap.recycle();
+        }
+    }
+
+    /** One palette step; null means the duty is unknown and the picture is left alone. */
+    private static Bitmap applyImageDuty(Bitmap bitmap, String duty, String value) {
+        switch (duty) {
+            case "rotate":
+                return rotateBitmap(bitmap, dutyNumber(value, 90));
+            case "crop":
+                return cropBitmap(bitmap, value);
+            case "modulate":
+                return colorizedBitmap(bitmap, brightnessMatrix(dutyNumber(value, 100)));
+            case "level":
+                return colorizedBitmap(bitmap, levelMatrix(dutyNumber(value, 0)));
+            case "black-threshold":
+                return thresholdBitmap(bitmap, dutyNumber(value, 50));
+            case "gaussian-blur":
+                return blurBitmap(bitmap, dutyNumber(value, 3));
+            case "sharpen":
+                return sharpenBitmap(bitmap, dutyNumber(value, 2));
+            case "fill":
+                // magick's bare -fill changed no pixel, so neither does this
+                return bitmap;
+            default:
+                return null;
+        }
+    }
+
+    /** The first number in a step value, so "25%", "3" and " 90 " all read. */
+    private static double dutyNumber(String value, double fallback) {
+        if (value == null) return fallback;
+        java.util.regex.Matcher match = java.util.regex.Pattern
+            .compile("[-+]?[0-9]*\\.?[0-9]+")
+            .matcher(value.trim());
+        if (!match.find()) return fallback;
+        try {
+            return Double.parseDouble(match.group());
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    private static Bitmap rotateBitmap(Bitmap bitmap, double degrees) {
+        double turn = degrees % 360;
+        if (turn == 0) return bitmap;
+        Matrix matrix = new Matrix();
+        matrix.postRotate((float) turn);
+        Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+        return rotated == null ? bitmap : rotated;
+    }
+
+    /** magick's crop geometry: WxH+X+Y, with a negative offset allowed. */
+    private static Bitmap cropBitmap(Bitmap bitmap, String geometry) {
+        java.util.regex.Matcher match = java.util.regex.Pattern
+            .compile("^\\s*([0-9]+)x([0-9]+)([+-][0-9]+)([+-][0-9]+)\\s*$")
+            .matcher(geometry == null ? "" : geometry);
+        if (!match.find()) return null;
+        int width = Integer.parseInt(match.group(1));
+        int height = Integer.parseInt(match.group(2));
+        int x = Integer.parseInt(match.group(3));
+        int y = Integer.parseInt(match.group(4));
+        if (width < 1 || height < 1) return null;
+        int left = Math.max(0, x);
+        int top = Math.max(0, y);
+        int right = Math.min(bitmap.getWidth(), x + width);
+        int bottom = Math.min(bitmap.getHeight(), y + height);
+        if (right - left < 1 || bottom - top < 1) return null;
+        if (left == 0 && top == 0 && right == bitmap.getWidth() && bottom == bitmap.getHeight()) {
+            return bitmap;
+        }
+        return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top);
+    }
+
+    private static Bitmap colorizedBitmap(Bitmap bitmap, ColorMatrix matrix) {
+        Bitmap out = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        if (out == null) return null;
+        Canvas canvas = new Canvas(out);
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        paint.setColorFilter(new ColorMatrixColorFilter(matrix));
+        canvas.drawBitmap(bitmap, 0, 0, paint);
+        return out;
+    }
+
+    /** magick -modulate <percent>: brightness about the black point. */
+    private static ColorMatrix brightnessMatrix(double percent) {
+        float scale = (float) Math.max(0.0, percent / 100.0);
+        return new ColorMatrix(new float[] {
+            scale, 0, 0, 0, 0,
+            0, scale, 0, 0, 0,
+            0, 0, scale, 0, 0,
+            0, 0, 0, 1, 0,
+        });
+    }
+
+    /** magick -level <percent>%: raise the black point, keep white at white. */
+    private static ColorMatrix levelMatrix(double percent) {
+        double black = Math.min(0.95, Math.max(0.0, percent / 100.0));
+        float scale = (float) (1.0 / (1.0 - black));
+        float offset = (float) (-black * 255.0 / (1.0 - black));
+        return new ColorMatrix(new float[] {
+            scale, 0, 0, 0, offset,
+            0, scale, 0, 0, offset,
+            0, 0, scale, 0, offset,
+            0, 0, 0, 1, 0,
+        });
+    }
+
+    /** magick -black-threshold: pixels at or below the luma limit become black. */
+    private static Bitmap thresholdBitmap(Bitmap bitmap, double percent) {
+        int limit = (int) Math.round(Math.min(100.0, Math.max(0.0, percent)) * 255 / 100.0);
+        Bitmap out = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        if (out == null) return null;
+        int width = out.getWidth();
+        int height = out.getHeight();
+        int[] pixels = new int[width];
+        for (int y = 0; y < height; y++) {
+            out.getPixels(pixels, 0, width, 0, y, width, 1);
+            boolean touched = false;
+            for (int x = 0; x < width; x++) {
+                int p = pixels[x];
+                int luma = (((p >> 16) & 0xff) * 299 + ((p >> 8) & 0xff) * 587 + (p & 0xff) * 114) / 1000;
+                if (luma <= limit) {
+                    pixels[x] = (p >>> 24) << 24;
+                    touched = true;
+                }
+            }
+            if (touched) out.setPixels(pixels, 0, width, 0, y, width, 1);
+        }
+        return out;
+    }
+
+    /** magick -gaussian-blur <sigma>: three box passes stand in for the Gaussian. */
+    private static Bitmap blurBitmap(Bitmap bitmap, double sigma) {
+        int radius = (int) Math.max(1, Math.round(sigma));
+        Bitmap out = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        if (out == null) return null;
+        int width = out.getWidth();
+        int height = out.getHeight();
+        int[] pixels = new int[width * height];
+        int[] scratch = new int[pixels.length];
+        out.getPixels(pixels, 0, width, 0, 0, width, height);
+        for (int pass = 0; pass < 3; pass++) {
+            boxBlurPass(pixels, scratch, width, height, radius, true);
+            boxBlurPass(scratch, pixels, width, height, radius, false);
+        }
+        out.setPixels(pixels, 0, width, 0, 0, width, height);
+        return out;
+    }
+
+    /** A running-sum box blur along one axis; runs in O(pixels), not O(pixels * radius). */
+    private static void boxBlurPass(int[] src, int[] dst, int width, int height, int radius, boolean horizontal) {
+        int span = radius * 2 + 1;
+        int lines = horizontal ? height : width;
+        int length = horizontal ? width : height;
+        for (int line = 0; line < lines; line++) {
+            long a = 0;
+            long r = 0;
+            long g = 0;
+            long b = 0;
+            for (int k = -radius; k <= radius; k++) {
+                int index = horizontal
+                    ? line * width + clampIndex(k, width)
+                    : clampIndex(k, height) * width + line;
+                int p = src[index];
+                a += (p >>> 24);
+                r += (p >> 16) & 0xff;
+                g += (p >> 8) & 0xff;
+                b += p & 0xff;
+            }
+            for (int i = 0; i < length; i++) {
+                int index = horizontal ? line * width + i : i * width + line;
+                dst[index] = ((int) (a / span) << 24)
+                    | ((int) (r / span) << 16)
+                    | ((int) (g / span) << 8)
+                    | (int) (b / span);
+                int leaving = horizontal
+                    ? src[line * width + clampIndex(i - radius, width)]
+                    : src[clampIndex(i - radius, height) * width + line];
+                int entering = horizontal
+                    ? src[line * width + clampIndex(i + radius + 1, width)]
+                    : src[clampIndex(i + radius + 1, height) * width + line];
+                a += (entering >>> 24) - (leaving >>> 24);
+                r += ((entering >> 16) & 0xff) - ((leaving >> 16) & 0xff);
+                g += ((entering >> 8) & 0xff) - ((leaving >> 8) & 0xff);
+                b += (entering & 0xff) - (leaving & 0xff);
+            }
+        }
+    }
+
+    private static int clampIndex(int index, int size) {
+        if (index < 0) return 0;
+        if (index >= size) return size - 1;
+        return index;
+    }
+
+    /** magick -sharpen <sigma>: a 3x3 kernel whose strength follows sigma. */
+    private static Bitmap sharpenBitmap(Bitmap bitmap, double sigma) {
+        double amount = Math.min(0.25, Math.max(0.05, sigma / 16.0));
+        float center = (float) (1.0 + 8.0 * amount);
+        float edge = (float) -amount;
+        float[] kernel = {
+            edge, edge, edge,
+            edge, center, edge,
+            edge, edge, edge,
+        };
+        Bitmap out = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        if (out == null) return null;
+        int width = out.getWidth();
+        int height = out.getHeight();
+        int[] src = new int[width * height];
+        int[] dst = new int[src.length];
+        out.getPixels(src, 0, width, 0, 0, width, height);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                float a = 0;
+                float r = 0;
+                float g = 0;
+                float b = 0;
+                int k = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    int row = clampIndex(y + dy, height) * width;
+                    for (int dx = -1; dx <= 1; dx++, k++) {
+                        int p = src[row + clampIndex(x + dx, width)];
+                        float w = kernel[k];
+                        a += (p >>> 24) * w;
+                        r += ((p >> 16) & 0xff) * w;
+                        g += ((p >> 8) & 0xff) * w;
+                        b += (p & 0xff) * w;
+                    }
+                }
+                dst[y * width + x] = (clampChannel(a) << 24) | (clampChannel(r) << 16)
+                    | (clampChannel(g) << 8) | clampChannel(b);
+            }
+        }
+        out.setPixels(dst, 0, width, 0, 0, width, height);
+        return out;
+    }
+
+    private static int clampChannel(float value) {
+        if (value <= 0) return 0;
+        if (value >= 255) return 255;
+        return Math.round(value);
     }
 
     private static int sampleSize(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {

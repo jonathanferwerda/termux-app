@@ -1280,3 +1280,17 @@ work and a full-width build has crashed it (2026-10-10).
      every bridged device call and BLE link is gone. Verified on the tablet:
      a 400x200 PNG became 100x50 through the bridge, in place, and
      `magick identify` confirmed it. Builds 1226-1228.
+
+121. M3 — `image.edit`, the palette's duties in the app. `/manager/palette`
+     ran one `magick <file> -<duty> <value> <file>` per step; the bridge now
+     applies the whole list in one call: rotate (Matrix), crop (magick's
+     WxH+X+Y geometry, bounds-clamped), modulate (brightness ColorMatrix),
+     level (black-point ColorMatrix), black-threshold (per-pixel luma),
+     gaussian-blur (three separating box passes, O(pixels)), and sharpen (a
+     3x3 kernel whose strength follows sigma). `fill` is accepted and changes
+     nothing, which is what the bare `-fill` did under magick. An unknown duty
+     is named in `skipped` instead of failing the list. The route asks the
+     bridge first and keeps its magick loop for a desktop. Verified on the
+     tablet: an 8x8 two-colour checkerboard through rotate+blur came back 8x8
+     with 9 colours, and crop 4x4+2+2 with modulate 150 came back 4x4. Build
+     1229.
