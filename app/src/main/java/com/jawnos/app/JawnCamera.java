@@ -17,8 +17,11 @@ import java.io.FileInputStream;
  * OS video recorder (the viewfinder the user actually sees, and the camera's own
  * processing) instead of the device blindly shelling it to termux-camera-photo.
  *
- * The page is exposed window.JawnCamera; a capture comes back as base64 over
- * window.__jawnCameraResult, which the web side posts to /manager/take_picture.
+ * The page is exposed window.JawnCamera. A capture is moved into the shared
+ * Termux home (home/.jawn/captures) and window.__jawnCameraResult receives its
+ * path; the web side posts that small reference to /manager/take_picture. A tiny
+ * file also carries base64, but a normal photo and every video travel only as a
+ * path because the WebView bridge cannot move their base64.
  * Reading and writing are the OS apps' business; this only hands over the file.
  */
 public class JawnCamera {
@@ -31,7 +34,10 @@ public class JawnCamera {
     private static final int REQ_PHOTO = 7101;
     private static final int REQ_VIDEO = 7102;
     private static final String AUTHORITY_SUFFIX = ".jawnupdates";
-    private static final long MAX_BYTES = 80L * 1024 * 1024;
+    /** Small captures may also ride inline; a normal photo never does. */
+    private static final long INLINE_BYTES = 256L * 1024;
+    /** The Termux home is getFilesDir()/home, and the manager shares its uid. */
+    private static final String STAGE_DIR = "home/.jawn/captures";
 
     private final Activity activity;
     private final Poster poster;
@@ -119,21 +125,46 @@ public class JawnCamera {
             return true;
         }
         String mime = "photo".equals(kind) ? "image/jpeg" : "video/mp4";
-        String b64 = readBase64(f);
-        if (b64 == null) {
-            emit("{\"ok\":false,\"error\":\"capture too large\"}");
-            return true;
-        }
+        // A real photo's base64 is several megabytes, which evaluateJavascript
+        // cannot carry across the WebView's binder transaction. Stage the file
+        // in the shared home and hand the page only its path; the manager moves
+        // it into the appointment's folder and files it like any other capture.
+        File staged = stageCapture(f);
+        String b64 = staged.length() <= INLINE_BYTES ? readBase64(staged) : null;
         emit("{\"ok\":true,\"kind\":" + js(kind) + ",\"mime\":" + js(mime)
-            + ",\"name\":" + js(f.getName()) + ",\"data\":" + js(b64) + "}");
+            + ",\"name\":" + js(staged.getName())
+            + ",\"path\":" + js(staged.getAbsolutePath())
+            + (b64 == null ? "" : ",\"data\":" + js(b64)) + "}");
         return true;
+    }
+
+    /** Move the OS capture into the directory Termux and the app share. */
+    private File stageCapture(File f) {
+        try {
+            File dir = new File(activity.getFilesDir(), STAGE_DIR);
+            if (!dir.exists()) dir.mkdirs();
+            File out = new File(dir, f.getName());
+            if (f.renameTo(out)) return out;
+            FileInputStream in = new FileInputStream(f);
+            java.io.FileOutputStream os = new java.io.FileOutputStream(out);
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            in.close();
+            os.close();
+            if (out.length() > 0) {
+                f.delete();
+                return out;
+            }
+        } catch (Throwable ignored) {}
+        return f;
     }
 
     /** The file as base64, or null when it is too big to hand over the bridge. */
     private String readBase64(File f) {
         try {
             long len = f.length();
-            if (len <= 0 || len > MAX_BYTES) return null;
+            if (len <= 0 || len > INLINE_BYTES) return null;
             byte[] buf = new byte[(int) len];
             FileInputStream in = new FileInputStream(f);
             int off = 0;

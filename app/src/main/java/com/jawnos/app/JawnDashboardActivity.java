@@ -191,8 +191,7 @@ public class JawnDashboardActivity extends Activity {
 
         // ---- app ----
         LinearLayout app = card(root, "App");
-        fullButton(app, "Update app", false, () -> offerUpdate(JawnUpdater.PRODUCT_APP));
-        fullButton(app, "Update API", false, () -> offerUpdate(JawnUpdater.PRODUCT_API));
+        fullButton(app, "Update app", false, () -> offerUpdate());
 
         // ---- tailnet ----
         LinearLayout tailnet = card(root, "Tailnet");
@@ -463,16 +462,13 @@ public class JawnDashboardActivity extends Activity {
             + "   ·   port " + JawnLauncher.getJawnPort(this)
             + "   ·   v" + JawnLauncher.getJawnVersion(this));
         status.append("\n" + JawnLauncher.getJawnDirPath(this));
-        JawnUpdater.Release up = JawnUpdater.updateAvailable(this, JawnUpdater.PRODUCT_APP);
-        status.append("\napp " + JawnUpdater.installedVersionCode(this, JawnUpdater.PRODUCT_APP)
+        JawnUpdater.Release up = JawnUpdater.updateAvailable(this);
+        status.append("\napp " + JawnUpdater.installedVersionCode(this)
             + (up == null ? " (up to date)" : " -> " + up.versionCode + " available"));
-        JawnUpdater.Release ua = JawnUpdater.updateAvailable(this, JawnUpdater.PRODUCT_API);
-        status.append("\napi " + JawnUpdater.installedVersionCode(this, JawnUpdater.PRODUCT_API)
-            + (ua == null ? " (up to date)" : " -> " + ua.versionCode + " available"));
     }
 
-    /** Install the newest staged APK of a product - one tap, with a fresh pull first. */
-    private void offerUpdate(final String product) {
+    /** Install the newest staged APK - one tap, with a fresh pull first. */
+    private void offerUpdate() {
         toast("checking for an update...");
         new Thread(new Runnable() {
             public void run() {
@@ -481,7 +477,7 @@ public class JawnDashboardActivity extends Activity {
                 // "up to date" the moment a newer build sits on a peer.
                 JawnUpdater.sync(self);
                 for (int i = 0; i < 30; i++) {
-                    final JawnUpdater.Release r = JawnUpdater.updateAvailable(self, product);
+                    final JawnUpdater.Release r = JawnUpdater.updateAvailable(self);
                     if (r != null) {
                         ui.post(new Runnable() { public void run() { installUpdate(r); } });
                         return;
@@ -489,7 +485,7 @@ public class JawnDashboardActivity extends Activity {
                     try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
                 }
                 ui.post(new Runnable() { public void run() {
-                    toast(JawnUpdater.labelForProduct(product) + " is up to date");
+                    toast("app is up to date");
                 } });
             }
         }).start();
