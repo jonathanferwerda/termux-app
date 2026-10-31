@@ -1086,3 +1086,10 @@ work and a full-width build has crashed it (2026-10-10).
      is the same length, so no ELF offset moves); proven with an empty
      environment. Rehearsed migration A: backup out of com.termux, wipe, install
      com.jawnos, import — the house came back with the same 114,390 appointments.
+
+106. M4 — /sdcard is the file store. The app declared `MANAGE_EXTERNAL_STORAGE`
+     but never asked, so `/sdcard` was denied to the app's uid and every
+     `~/storage/*` link dangled. `JawnPermissionsActivity` now opens "All files
+     access" for the package (and asks for the media permissions on 13+), and
+     `JawnFirstRun` makes the twelve `~/storage/*` links in the app's own home
+     the way termux-setup-storage did, skipping any target this device lacks.

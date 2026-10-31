@@ -137,6 +137,10 @@ final class JawnFirstRun {
             if (code != null) writeUnlockCode(code);
         }
 
+        // /sdcard is the house's file store and the settings point through
+        // ~/storage/shared; termux-setup-storage used to make these links.
+        linkExternalStorage(home);
+
         if (!JawnLauncher.jawnIsUp(context)) {
             report.progress("Starting JawnOS...");
             JawnLauncher.startJawn(context);
@@ -324,4 +328,44 @@ final class JawnFirstRun {
             return !activity.isFinishing() && !activity.isDestroyed();
         }
     }
+    /** The external-storage links a Termux session used to get from
+     *  termux-setup-storage, made in the app's own home. A link whose target is
+     *  not on this device is skipped rather than left dangling. */
+    private static final String[][] STORAGE_LINKS = {
+        { "shared", "/sdcard" },
+        { "downloads", "/sdcard/Download" },
+        { "dcim", "/sdcard/DCIM" },
+        { "pictures", "/sdcard/Pictures" },
+        { "music", "/sdcard/Music" },
+        { "movies", "/sdcard/Movies" },
+        { "documents", "/sdcard/Documents" },
+        { "podcasts", "/sdcard/Podcasts" },
+        { "alarms", "/sdcard/Alarms" },
+        { "notifications", "/sdcard/Notifications" },
+        { "ringtones", "/sdcard/Ringtones" },
+        { "audiobooks", "/sdcard/Audiobooks" },
+    };
+
+    private static void linkExternalStorage(File home) {
+        File storage = new File(home, "storage");
+        if (!storage.isDirectory() && !storage.mkdirs()) return;
+        for (String[] link : STORAGE_LINKS) {
+            File target = new File(link[1]);
+            if (!target.isDirectory()) continue;
+            java.nio.file.Path path = new File(storage, link[0]).toPath();
+            try {
+                if (java.nio.file.Files.isSymbolicLink(path)) {
+                    java.nio.file.Path current = java.nio.file.Files.readSymbolicLink(path);
+                    if (link[1].equals(current.toString())) continue;
+                    java.nio.file.Files.delete(path);
+                }
+                if (!java.nio.file.Files.exists(path)) {
+                    java.nio.file.Files.createSymbolicLink(path, target.toPath());
+                }
+            } catch (Throwable ignored) {
+                // a link this app may not make is not a provisioning failure
+            }
+        }
+    }
+
 }

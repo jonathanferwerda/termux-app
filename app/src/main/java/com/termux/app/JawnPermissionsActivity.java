@@ -92,6 +92,16 @@ public class JawnPermissionsActivity extends Activity {
             l.add("android.permission.BLUETOOTH_SCAN");
             l.add("android.permission.BLUETOOTH_CONNECT");
         }
+        // The house keeps its files on /sdcard. Android 13 split the old storage
+        // permission into media types, and anything outside those needs "all
+        // files access", which is a settings screen, not a dialog (see below).
+        if (Build.VERSION.SDK_INT >= 33) {
+            l.add("android.permission.READ_MEDIA_IMAGES");
+            l.add("android.permission.READ_MEDIA_VIDEO");
+            l.add("android.permission.READ_MEDIA_AUDIO");
+        } else {
+            l.add(android.Manifest.permission.READ_EXTERNAL_STORAGE);
+        }
         return l.toArray(new String[0]);
     }
 
@@ -102,6 +112,13 @@ public class JawnPermissionsActivity extends Activity {
         }
         if (!missing.isEmpty()) {
             requestPermissions(missing.toArray(new String[0]), REQUEST_CODE);
+            return;
+        }
+        // /sdcard is read through the file system, not MediaStore, so a media
+        // permission is not enough: the house needs "all files access".
+        if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
+            open(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.parse("package:" + getPackageName()));
             return;
         }
         // The foreground permissions are in place. The one the termux-* commands
