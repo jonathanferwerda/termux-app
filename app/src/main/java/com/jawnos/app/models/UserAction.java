@@ -1,11 +1,10 @@
 package com.jawnos.app.models;
 
+/** The user actions that can name a report the app writes or shares. */
 public enum UserAction {
 
     ABOUT("about"),
-    CRASH_REPORT("crash report"),
-    PLUGIN_EXECUTION_COMMAND("plugin execution command"),
-    REPORT_ISSUE_FROM_TRANSCRIPT("report issue from transcript");
+    CRASH_REPORT("crash report");
 
     private final String name;
 
@@ -16,5 +15,4 @@ public enum UserAction {
     public String getName() {
         return name;
     }
-
 }

@@ -1256,3 +1256,15 @@ work and a full-width build has crashed it (2026-10-10).
      defaults read com.jawnos). `grep -r com.termux app/src jawnos-shared/src`
      is empty. The app module is still termux-app-derived code, so the APK
      stays GPL-3; this is the naming, not a relicense. Build 1224.
+
+119. M4 — the last three termux-derived app files are original JawnOS code.
+     `UserAction` is a two-value enum (about, crash report) with the dead
+     plugin/transcript actions gone; `HelpActivity` (an upstream wiki viewer
+     nothing referenced) is deleted; and `JawnDocumentsProvider` is rewritten
+     with home-relative, traversal-safe document ids (`home:<path>`) instead of
+     raw absolute paths, a bounded search that refuses symlinks out of the home,
+     and null-safe directory listings. A normalised similarity pass against
+     upstream termux-app now finds no app file above 0.5 and only the enum's
+     boilerplate at 0.79; every other file is below 0.2. The APK's licence is
+     still GPL-3.0-only: similarity is evidence, not a clean-room proof, and
+     the relicense is a decision for the source owner. Build 1225.
