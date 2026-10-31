@@ -1205,3 +1205,16 @@ work and a full-width build has crashed it (2026-10-10).
      `TermuxPreferenceConstants`, `TermuxShellEnvironmentClient`,
      `TermuxShellUtils` and `TermuxUtils`. They are the rewrite list before the
      app can be BSD-2. Build 1220.
+
+115. M4 — five more GPL-3-only files are gone, and two are ours now.
+     Deleted `SELinuxUtils`, `PermissionUtils` and `ReflectionUtils` (the
+     SELinux lines left `AndroidUtils` and `TermuxShellUtils`; `ShareUtils`
+     uses `checkSelfPermission`/`ActivityCompat`; `PackageUtils` no longer
+     needs hidden-API reflection). `PackageUtils` and `TermuxUtils` were
+     rewritten as original BSD-2 code: the former answers only this app's
+     package (no reflection, no SELinux), and the latter describes JawnOS
+     instead of Termux/plugins/wiki/donation, so the Termux donation
+     preference and its XML entry are gone. Seven GPL-3-only originals remain:
+     `TermuxCrashUtils`, `TermuxFileUtils`, `TermuxNotificationUtils`,
+     `TermuxAppSharedPreferences`, `TermuxPreferenceConstants`,
+     `TermuxShellEnvironmentClient`, `TermuxShellUtils`. Build 1221.

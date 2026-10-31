@@ -2,7 +2,6 @@ package com.jawnos.shared.termux;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
 import android.os.Build;
 import android.system.Os;
 import android.system.OsConstants;
@@ -10,8 +9,6 @@ import android.system.OsConstants;
 import androidx.annotation.NonNull;
 
 import com.google.common.base.Joiner;
-import com.jawnos.shared.android.SELinuxUtils;
-import com.jawnos.shared.data.DataUtils;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.markdown.MarkdownUtils;
 import com.jawnos.shared.packages.PackageUtils;
@@ -37,9 +34,6 @@ public class AndroidUtils {
      */
     public static String getAppInfoMarkdownString(@NonNull final Context context) {
         StringBuilder markdownString = new StringBuilder();
-        ApplicationInfo applicationInfo = context.getApplicationInfo();
-        if (applicationInfo == null) return null;
-
         AndroidUtils.appendPropertyToMarkdown(markdownString,"APP_NAME", PackageUtils.getAppNameForPackage(context));
         AndroidUtils.appendPropertyToMarkdown(markdownString,"PACKAGE_NAME", PackageUtils.getPackageNameForPackage(context));
         AndroidUtils.appendPropertyToMarkdown(markdownString,"VERSION_NAME", PackageUtils.getVersionNameForPackage(context));
@@ -50,13 +44,6 @@ public class AndroidUtils {
         if (PackageUtils.isAppInstalledOnExternalStorage(context)) {
             AndroidUtils.appendPropertyToMarkdown(markdownString,"IS_INSTALLED_ON_EXTERNAL_STORAGE", true);
         }
-
-        AndroidUtils.appendPropertyToMarkdown(markdownString,"SE_PROCESS_CONTEXT", SELinuxUtils.getContext());
-        AndroidUtils.appendPropertyToMarkdown(markdownString,"SE_FILE_CONTEXT", SELinuxUtils.getFileContext(context.getFilesDir().getAbsolutePath()));
-
-        String seInfoUser = PackageUtils.getApplicationInfoSeInfoUserForPackage(applicationInfo);
-        AndroidUtils.appendPropertyToMarkdown(markdownString,"SE_INFO", PackageUtils.getApplicationInfoSeInfoForPackage(applicationInfo) +
-            (DataUtils.isNullOrEmpty(seInfoUser) ? "" : seInfoUser));
 
         String filesDir = context.getFilesDir().getAbsolutePath();
         if (!filesDir.equals("/data/user/0/" + context.getPackageName() + "/files") &&

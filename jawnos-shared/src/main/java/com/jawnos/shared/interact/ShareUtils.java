@@ -18,7 +18,6 @@ import com.jawnos.shared.data.IntentUtils;
 import com.jawnos.shared.file.FileUtils;
 import com.jawnos.shared.logger.Logger;
 import com.jawnos.shared.models.errors.Error;
-import com.jawnos.shared.packages.PermissionUtils;
 
 import java.nio.charset.Charset;
 
@@ -197,14 +196,14 @@ public class ShareUtils {
         // If path is under primary external storage directory, then check for missing permissions.
         if ((FileUtils.isPathInDirPath(filePath, Environment.getExternalStorageDirectory().getAbsolutePath(), true) ||
             FileUtils.isPathInDirPath(filePath, "/sdcard", true)) &&
-            !PermissionUtils.checkPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+            context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             Logger.logErrorAndShowToast(context, LOG_TAG, context.getString(R.string.msg_storage_permission_not_granted));
 
             if (storagePermissionRequestCode >= 0) {
                 if (context instanceof AppCompatActivity)
-                    PermissionUtils.requestPermission(((AppCompatActivity) context), Manifest.permission.WRITE_EXTERNAL_STORAGE, storagePermissionRequestCode);
+                    androidx.core.app.ActivityCompat.requestPermissions(((AppCompatActivity) context), new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, storagePermissionRequestCode);
                 else if (context instanceof Activity)
-                    PermissionUtils.requestPermission(((Activity) context), Manifest.permission.WRITE_EXTERNAL_STORAGE, storagePermissionRequestCode);
+                    androidx.core.app.ActivityCompat.requestPermissions(((Activity) context), new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, storagePermissionRequestCode);
             }
 
             return;

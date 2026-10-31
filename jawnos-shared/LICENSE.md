@@ -63,3 +63,12 @@ The `jawnos-shared` library is released under [GPLv3 only](https://www.gnu.org/l
 
 - [`src/main/java/com/jawnos/shared/shell/StreamGobbler.java`](src/main/java/com/jawnos/shared/shell/StreamGobbler.java) uses code from [libsuperuser ](https://github.com/Chainfire/libsuperuser).
 ##
+
+#### [BSD-2-Clause](https://opensource.org/licenses/BSD-2-Clause) — JawnOS rewrites
+
+These files were rewritten for JawnOS and contain no termux-shared code; they
+are BSD-2-Clause like the rest of the JawnOS tree, although the library as a
+whole still carries GPL-3.0-only files until the last one is rewritten.
+
+- [`src/main/java/com/jawnos/shared/packages/PackageUtils.java`](src/main/java/com/jawnos/shared/packages/PackageUtils.java).
+- [`src/main/java/com/jawnos/shared/termux/TermuxUtils.java`](src/main/java/com/jawnos/shared/termux/TermuxUtils.java).

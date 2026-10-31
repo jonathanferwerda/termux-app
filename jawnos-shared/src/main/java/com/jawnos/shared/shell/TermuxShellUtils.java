@@ -6,8 +6,6 @@ import android.os.Build;
 
 import androidx.annotation.NonNull;
 
-import com.jawnos.shared.android.SELinuxUtils;
-import com.jawnos.shared.data.DataUtils;
 import com.jawnos.shared.models.errors.Error;
 import com.jawnos.shared.termux.TermuxConstants;
 import com.jawnos.shared.file.FileUtils;
@@ -77,11 +75,6 @@ public class TermuxShellUtils {
                 environment.add("TERMUX_APP__DATA_DIR=" + applicationInfo.dataDir);
                 environment.add("TERMUX_APP__LEGACY_DATA_DIR=" + "/data/data/" + applicationInfo.packageName);
 
-                environment.add("TERMUX_APP__SE_FILE_CONTEXT=" + SELinuxUtils.getFileContext(applicationInfo.dataDir));
-
-                String seInfoUser = PackageUtils.getApplicationInfoSeInfoUserForPackage(applicationInfo);
-                environment.add("TERMUX_APP__SE_INFO=" + PackageUtils.getApplicationInfoSeInfoForPackage(applicationInfo) +
-                    (DataUtils.isNullOrEmpty(seInfoUser) ? "" : seInfoUser));
             }
 
         } catch (final Exception e) {
@@ -93,8 +86,6 @@ public class TermuxShellUtils {
         environment.add("TERMUX__HOME=" + TermuxConstants.TERMUX_HOME_DIR_PATH);
         environment.add("PREFIX=" + TermuxConstants.TERMUX_PREFIX_DIR_PATH);
         environment.add("TERMUX__PREFIX=" + TermuxConstants.TERMUX_PREFIX_DIR_PATH);
-
-        environment.add("TERMUX__SE_PROCESS_CONTEXT=" + SELinuxUtils.getContext());
 
         environment.add("BOOTCLASSPATH=" + System.getenv("BOOTCLASSPATH"));
         environment.add("ANDROID_ROOT=" + System.getenv("ANDROID_ROOT"));
