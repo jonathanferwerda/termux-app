@@ -1382,3 +1382,11 @@ work and a full-width build has crashed it (2026-10-10).
      is never touched. `SessionService.spawn()` waits for the check before
      exec'ing perl, so the swap never happens under a live tree, and a matching
      marker is one small file read. Builds 1245-1246.
+
+128. **The printer service declares its foreground type.** targetSdk 36 refuses
+     `startForeground` on a service with no `android:foregroundServiceType`;
+     `JawnPrinterService` had none, so the first queued print after a cold start
+     threw `MissingForegroundServiceTypeException` and took the whole app
+     process down with it - the tablet showed "JawnOS keeps stopping" and the
+     tree could not be spawned at all (2026-10-31). It claims `dataSync`, the
+     same long-lived listener shape as `SessionService`. Build 1247.

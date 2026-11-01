@@ -435,7 +435,15 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/jawn_printer_info" />
         </receiver>
 
-        <service android:name=".app.JawnPrinterService" android:exported="false" />
+        <!-- targetSdk 36: a service that calls startForeground must declare a type.
+             The printer server is a long-lived network listener, the same shape as
+             SessionService, so it claims dataSync. Without this the first print
+             request crashed the whole app process with
+             MissingForegroundServiceTypeException (the tablet, 2026-10-31). -->
+        <service
+            android:name=".app.JawnPrinterService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <receiver android:name=".shared.activities.ReportActivity$ReportActivityBroadcastReceiver" android:exported="false" />
 
