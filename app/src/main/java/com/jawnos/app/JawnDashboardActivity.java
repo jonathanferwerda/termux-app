@@ -25,6 +25,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+
 import com.jawnos.R;
 
 /**
@@ -68,6 +73,10 @@ public class JawnDashboardActivity extends Activity {
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        // Android 15+ draws the window edge-to-edge whether or not the app opts
+        // in. Opt in everywhere and pad the scrolling column below by the bars
+        // and the cutout, so the header and the last card stay clear of them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().setStatusBarColor(GROUND);
         getWindow().setNavigationBarColor(GROUND);
 
@@ -78,6 +87,12 @@ public class JawnDashboardActivity extends Activity {
         root.setPadding(dp(18), dp(22), dp(18), dp(30));
         sv.addView(root);
         setContentView(sv);
+        ViewCompat.setOnApplyWindowInsetsListener(sv, (v, insets) -> {
+            Insets bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
+        });
 
         header(root);
 

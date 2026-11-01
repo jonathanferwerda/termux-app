@@ -11,8 +11,14 @@ import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import java.util.ArrayList;
 
@@ -31,6 +37,10 @@ public class JawnPermissionsActivity extends Activity {
 
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        // Android 15+ draws the window edge-to-edge even when the app has not
+        // opted in; the scrolling column below is padded by the bars and the
+        // cutout so the title and the last button are never hidden under them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
         ll.setPadding(30, 30, 30, 30);
@@ -65,7 +75,15 @@ public class JawnPermissionsActivity extends Activity {
             }
         });
 
-        setContentView(ll);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(ll);
+        setContentView(sv);
+        ViewCompat.setOnApplyWindowInsetsListener(sv, (v, insets) -> {
+            Insets bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
+        });
     }
 
     protected void onResume() {
@@ -93,19 +111,19 @@ public class JawnPermissionsActivity extends Activity {
         // every post as "by user request".
         if (Build.VERSION.SDK_INT >= 33) {
             l.add("android.permission.POST_NOTIFICATIONS");
+            // Android 13 also gates Wi-Fi scan results and the current SSID
+            // behind this permission; the Network app reads both.
+            l.add("android.permission.NEARBY_WIFI_DEVICES");
         }
         if (Build.VERSION.SDK_INT >= 31) {
             l.add("android.permission.BLUETOOTH_SCAN");
             l.add("android.permission.BLUETOOTH_CONNECT");
         }
-        // The house keeps its files on /sdcard. Android 13 split the old storage
-        // permission into media types, and anything outside those needs "all
-        // files access", which is a settings screen, not a dialog (see below).
-        if (Build.VERSION.SDK_INT >= 33) {
-            l.add("android.permission.READ_MEDIA_IMAGES");
-            l.add("android.permission.READ_MEDIA_VIDEO");
-            l.add("android.permission.READ_MEDIA_AUDIO");
-        } else {
+        // The house keeps its files on /sdcard and reads them through the file
+        // system under "all files access" (requested below), not MediaStore, so
+        // Android 13's split media permissions add nothing - and, never declared
+        // in the manifest, they could only report "missing" forever.
+        if (Build.VERSION.SDK_INT < 33) {
             l.add(android.Manifest.permission.READ_EXTERNAL_STORAGE);
         }
         return l.toArray(new String[0]);

@@ -16,6 +16,14 @@
          Wi-Fi/VPN panel; it never claims a connection it did not make. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- The Network app lists nearby networks and the SSID of the one in use
+         (JawnNetwork: getScanResults/getConnectionInfo). Apps targeting
+         Android 13+ need this for those APIs; neverForLocation is safe because
+         the app's place comes from the GPS service, not from Wi-Fi. -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="33" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
@@ -434,6 +442,7 @@
         <service
             android:name=".app.JawnTailnetService"
             android:exported="false"
+            android:foregroundServiceType="dataSync"
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
@@ -464,7 +473,8 @@
         <activity
             android:name=".app.JawnPermissionsActivity"
             android:exported="false"
-            android:label="JawnOS permissions" />
+            android:label="JawnOS permissions"
+            android:theme="@style/Theme.Termux.JawnDashboard" />
 
         <!-- The M2 supervisor: forks jawn itself (perl ./jawn) with one pipe into
              ~/manager.log, keeps one master alive, and replaces Termux's login

@@ -25,6 +25,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -86,6 +91,12 @@ public class JawnWebViewActivity extends Activity {
 
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        // Android 15+ forces edge-to-edge. Opt in everywhere and pad the
+        // WebView by the bars it would otherwise sit under, so the page's own
+        // taskbar and bottom row are not hidden by the status/navigation bar or
+        // the cutout. While immersive() has the bars hidden the system-bar
+        // insets are zero, so full screen still fills the display.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         showWhenLockedIfAsked(getIntent());
         // Deliberately no FLAG_KEEP_SCREEN_ON: this is a UI, not a kiosk.
         // Holding the screen awake while it idles was the phone's biggest heat
@@ -153,6 +164,12 @@ public class JawnWebViewActivity extends Activity {
         root.addView(web, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
+        });
 
         // The manager UI is static while it idles; a 120 Hz panel redrawing
         // it 120 times a second is battery and heat for no visible gain.
@@ -260,10 +277,19 @@ public class JawnWebViewActivity extends Activity {
      *  only when it does not, which is where the animation runs. */
     private String destination() {
         int port = JawnLauncher.getJawnPort(this);
-        if (JawnLauncher.getJawnLoopback(this) && JawnLauncher.getStoredDeviceUuid(this).isEmpty()) {
+        if (JawnLauncher.getJawnLoopback(this) && JawnLauncher.getStoredDeviceUuid(this).isEmpty()
+                && JawnLauncher.getJawnDomain(this).length() > 0
+                && JawnLauncher.portOpen(JawnLauncher.getJawnDomain(this), port, 900)) {
             // Loopback has no localStorage from the domain origin. Open the
             // domain form once so onPageFinished can copy the paired-device id
             // into JawnAppStorage, then move to loopback for good.
+            //
+            // Only when the domain actually answers. The house names resolve
+            // through the tailnet, so on plain wifi this host is unknown; an
+            // unconditional trip there after a reinstall (which clears the
+            // device id) left the view on the splash until the person turned
+            // the VPN on. With the domain silent, a fresh install goes straight
+            // to loopback, which is where the id is minted anyway.
             migrateThenLoopback = true;
             return JawnLauncher.getDomainUiUrl(this, port);
         }
@@ -473,15 +499,19 @@ public class JawnWebViewActivity extends Activity {
         // screen; otherwise the view fills the screen.
         if (JawnLauncher.areSystemBarsShown(this)) {
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
-            return;
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                  View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
-        getWindow().getDecorView().setSystemUiVisibility(
-              View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            | View.SYSTEM_UI_FLAG_FULLSCREEN
-            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        // Regaining focus (returning from the permission screen, the tailnet
+        // login, ...) can deliver a transient zero-inset pass; ask again so the
+        // bars/cutout padding is never left at zero while the bars are shown.
+        getWindow().getDecorView().requestApplyInsets();
     }
 
     /** A full-screen alarm intent brings the Clock over the lock screen. */
