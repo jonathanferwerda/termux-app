@@ -1365,3 +1365,19 @@ work and a full-width build has crashed it (2026-10-10).
      daemon. Proven on the phone: `bin/perl` is a symlink into
      `/data/app/.../lib/arm64/`, `perl -v` runs through it, the tree came up
      (20 processes), status good, `/manager` answered 200. Builds 1236-1239.
+
+127. The runtime pin now upgrades an existing install. The installer ran only on
+     first run, so a pin change in `assets/jawnrt.json` never reached a device:
+     the phone kept 0.1.1697 (no `libtermux-auth.so`, so its sshd would not
+     start) while the APK pinned 0.1.1706. Every install now writes
+     `$PREFIX/.jawnrt-version` (version + sha256, temp file then rename), and
+     `JawnApplication.onCreate` compares it with the pin on a background thread.
+     On a mismatch `JawnRuntime.sync()` follows the `app_migrate.pl
+     --restore-only` order: stop the tree (the supervisor's INT, then a SIGKILL
+     mop-up after 30 s - a package update can leave a tree whose app process is
+     gone), download to a temp file, verify the sha256, unpack into
+     `files/usr-staging`, write the marker there, then rename `files/usr` aside
+     and the staging prefix in, restoring the old prefix if the second rename
+     fails. `files/home` is never touched. `SessionService.spawn()` waits for
+     the check before exec'ing perl, so the swap never happens under a live
+     tree, and a matching marker is one small file read. Build 1245.

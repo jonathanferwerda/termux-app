@@ -13,14 +13,20 @@ import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import android.system.Os;
+import android.system.OsConstants;
 
 import com.jawnos.shared.jawnos.JawnConstants;
 
@@ -39,11 +45,31 @@ import com.jawnos.shared.jawnos.JawnConstants;
  * (Java's ZipEntry does not expose the external attributes, so the central
  * directory is parsed here) and symlinks (stored as a regular entry whose body
  * is the link target, with S_IFLNK set in that mode).
+ *
+ * The manifest is checked on every app start, not only on first run: see
+ * {@link #syncInBackground}. A pin change must upgrade an existing install,
+ * and it does so before the tree is exec'd, preserving files/home.
  */
 public final class JawnRuntime {
 
     private static final String MANIFEST = "jawnrt.json";
     private static final String BASE = "https://github.com/jonathanferwerda/jawnos/releases/download/releases/";
+
+    // Written into $PREFIX after a successful install. The installer used to
+    // run only on first run, so without this record the app cannot tell "the
+    // pinned runtime is already here" from "this install predates the pin".
+    // The pin change on the phone (0.1.1697 -> 0.1.1706, libtermux-auth.so)
+    // is exactly the update this marker makes possible.
+    private static final String MARKER = ".jawnrt-version";
+    private static final String UPDATE_LOCK = ".jawnrt-update.lock";
+    private static final String PREVIOUS_PREFIX = "usr-previous";
+
+    private static final long TREE_STOP_MS = 30000L;
+
+    /** Set while the start-time pin check (and any re-install) runs. The tree's
+     *  supervisor waits on this, so the prefix is never swapped under it. */
+    private static volatile boolean sSyncing;
+    private static volatile CountDownLatch sStartGate;
 
     /** Called between steps so the installer can update its progress text. */
     public interface Progress {
@@ -95,11 +121,161 @@ public final class JawnRuntime {
         JSONObject pinned = entry(context);
         if (pinned == null) throw new RuntimeException("no runtime for this device's ABI (" + abiName() + ")");
 
-        File cache = new File(context.getCacheDir(), pinned.getString("file"));
         String want = pinned.getString("sha256");
+        File archive = verifiedArchive(context, pinned, want, progress);
 
+        step(progress, "Unpacking the runtime");
+        File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
+        if (prefix.exists() && !delete(prefix)) {
+            throw new RuntimeException("could not clear the existing prefix at " + prefix);
+        }
+        if (!prefix.mkdirs() && !prefix.isDirectory()) {
+            throw new RuntimeException("could not create the prefix at " + prefix);
+        }
+        unpack(archive, prefix);
+        writeRuntimeInfo(prefix, pinned.optString("version", ""), want);
+        // A first run is also an install: record the pin so the next app start
+        // does not re-download a runtime it already has.
+        writeMarker(prefix, pinned.optString("version", ""), want);
+    }
+
+    // ---------------------------------------------------- start-time pin check
+
+    /** True while the pin check or a re-install is running. */
+    public static boolean isSyncing() { return sSyncing; }
+
+    /**
+     * Check the APK's pinned runtime against the prefix in the background.
+     * Called from {@link JawnApplication#onCreate}. A matching marker costs one
+     * small file read; a mismatch is handled by {@link #sync}, which the tree's
+     * supervisor waits for before exec'ing perl.
+     */
+    public static void syncInBackground(final Context context) {
+        final Context app = context.getApplicationContext();
+        synchronized (JawnRuntime.class) {
+            if (sStartGate != null) return;
+            sStartGate = new CountDownLatch(1);
+            Thread t = new Thread(new Runnable() {
+                public void run() {
+                    sSyncing = true;
+                    try {
+                        sync(app, null);
+                    } catch (Throwable e) {
+                        JawnLog.append("runtime: pin check/update failed: " + e);
+                    } finally {
+                        sSyncing = false;
+                        sStartGate.countDown();
+                    }
+                }
+            }, "jawnrt-sync");
+            t.setDaemon(true);
+            t.start();
+        }
+    }
+
+    /**
+     * Block until the start-time check has finished. Only the tree's supervisor
+     * calls this, on its own thread, immediately before exec'ing perl. An
+     * interrupt (a stop or restart) does not release it early: a tree must not
+     * start on a prefix that is being renamed.
+     */
+    public static void awaitForStart(Context context) {
+        syncInBackground(context);
+        CountDownLatch gate = sStartGate;
+        if (gate == null) return;
+        boolean interrupted = false;
+        while (true) {
+            try {
+                gate.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    /**
+     * Bring the installed runtime up to the APK's pin. Returns true when a new
+     * runtime was unpacked.
+     *
+     * Follows the order app_migrate.pl --restore-only uses for data: stop the
+     * tree, download to a temp file, verify the sha256, unpack into a staging
+     * prefix, and only then swap. {@code files/home} is never touched - the
+     * swap renames {@code files/usr} alone, and the old prefix stays until the
+     * new one has been renamed in.
+     */
+    public static boolean sync(Context context, Progress progress) throws Exception {
+        final JSONObject pinned = entry(context);
+        if (pinned == null) return false;
+        final String version = pinned.optString("version", "");
+        final String want = pinned.getString("sha256");
+        final File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
+
+        if (installedMatches(prefix, version, want)) return false;
+        // No usable prefix: first run installs it through JawnInstaller, which
+        // writes the marker at the end. Nothing to upgrade yet.
+        if (!prefix.isDirectory() || !hasRuntime(prefix)) return false;
+
+        final File files = new File(JawnConstants.TERMUX_FILES_DIR_PATH);
+        // One updater at a time, even across the app's processes (`:browser`).
+        try (RandomAccessFile lockFile = new RandomAccessFile(new File(files, UPDATE_LOCK), "rw");
+             FileChannel channel = lockFile.getChannel();
+             FileLock lock = channel.lock()) {
+            // Another process may have finished while we waited for the lock.
+            if (installedMatches(prefix, version, want)) return false;
+
+            final boolean restart = JawnLauncher.shouldKeepRunning(context);
+            step(progress, "Stopping the house to update its runtime");
+            stopTree(context);
+
+            File archive = verifiedArchive(context, pinned, want, progress);
+
+            step(progress, "Unpacking the runtime");
+            File staging = new File(JawnConstants.TERMUX_STAGING_PREFIX_DIR_PATH);
+            if (staging.exists() && !delete(staging)) {
+                throw new RuntimeException("could not clear the staging prefix at " + staging);
+            }
+            if (!staging.mkdirs() && !staging.isDirectory()) {
+                throw new RuntimeException("could not create the staging prefix at " + staging);
+            }
+            unpack(archive, staging);
+            if (!hasRuntime(staging)) {
+                delete(staging);
+                throw new RuntimeException("the unpacked runtime is incomplete");
+            }
+            writeRuntimeInfo(staging, version, want);
+            writeMarker(staging, version, want);
+
+            step(progress, "Switching the runtime in");
+            final File previous = new File(files, PREVIOUS_PREFIX);
+            swap(prefix, staging, previous);
+
+            // The prefix's executables are links into nativeLibraryDir; a fresh
+            // prefix has none yet, so re-point them before the tree starts.
+            JawnRuntimeBins.ensure(context);
+
+            JawnLog.append("runtime: installed " + version + " ("
+                + want.substring(0, Math.min(12, want.length())) + "...)");
+            // 100+ MB of old prefix is no longer needed, and deleting it must
+            // not hold up the tree. It is outside the live prefix.
+            Thread cleanup = new Thread(new Runnable() {
+                public void run() { delete(previous); }
+            }, "jawnrt-cleanup");
+            cleanup.setDaemon(true);
+            cleanup.start();
+
+            if (restart && JawnLauncher.shouldKeepRunning(context)) {
+                JawnLauncher.startJawn(context);
+            }
+            return true;
+        }
+    }
+
+    private static File verifiedArchive(Context context, JSONObject pinned, String want, Progress progress) throws Exception {
+        File cache = new File(context.getCacheDir(), pinned.getString("file"));
         if (!cache.isFile() || !want.equalsIgnoreCase(sha256(cache))) {
-            progress.step("Downloading the runtime");
+            step(progress, "Downloading the runtime");
             download(BASE + pinned.getString("file"), cache);
             String got = sha256(cache);
             if (!want.equalsIgnoreCase(got)) {
@@ -108,27 +284,171 @@ public final class JawnRuntime {
                 throw new RuntimeException("runtime download failed its checksum (want " + want + ", got " + got + ")");
             }
         }
+        return cache;
+    }
 
-        progress.step("Unpacking the runtime");
-        File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
-        if (prefix.exists() && !delete(prefix)) {
-            throw new RuntimeException("could not clear the existing prefix at " + prefix);
-        }
-        if (!prefix.mkdirs() && !prefix.isDirectory()) {
-            throw new RuntimeException("could not create the prefix at " + prefix);
-        }
-        unpack(cache, prefix);
+    /** The marker records what was actually unpacked. Version and sha are both
+     *  checked because a rebuilt archive can keep the version string. */
+    private static boolean installedMatches(File prefix, String version, String sha) {
+        File marker = new File(prefix, MARKER);
+        if (!marker.isFile()) return false;   // an install that predates the marker
+        String text = read(marker);
+        if (text == null) return false;
+        String installedVersion = field(text, "version");
+        String installedSha = field(text, "sha256");
+        return (version.isEmpty() || version.equals(installedVersion))
+            && installedSha != null && sha.equalsIgnoreCase(installedSha);
+    }
 
+    private static boolean hasRuntime(File dir) {
+        return new File(dir, "lib/perl5").isDirectory()
+            && new File(dir, "etc").isDirectory();
+    }
+
+    /**
+     * Record the installed pin atomically: a temp file is fsynced and renamed,
+     * so a crash never leaves a half marker claiming a runtime that is not
+     * actually in place. This is what makes a pin change reach an existing
+     * install instead of only a fresh one.
+     */
+    private static void writeMarker(File prefix, String version, String sha) throws Exception {
+        File marker = new File(prefix, MARKER);
+        File tmp = new File(prefix, MARKER + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(tmp)) {
+            out.write(("version=" + version + "\nsha256=" + sha + "\n").getBytes("UTF-8"));
+            out.getFD().sync();
+        }
+        if (!tmp.renameTo(marker)) {
+            marker.delete();
+            if (!tmp.renameTo(marker)) throw new RuntimeException("could not write " + marker);
+        }
+    }
+
+    private static void writeRuntimeInfo(File prefix, String version, String sha) throws Exception {
         // Tell the tree that this prefix is a finished runtime: scripts/
         // jawnos_deps.pl --install then reports and does nothing, because the
         // archive carries every module and tool and there is no package
         // manager here to install with.
         File etc = new File(prefix, "etc");
-        if (!etc.isDirectory()) etc.mkdirs();
-        try (FileOutputStream out = new FileOutputStream(new File(etc, "jawnos-runtime.json"))) {
-            out.write(("{\"product\":\"runtime\",\"version\":\"" + pinned.optString("version", "")
-                + "\",\"abi\":\"" + abiName() + "\",\"sha256\":\"" + want + "\"}\n").getBytes("UTF-8"));
+        if (!etc.isDirectory() && !etc.mkdirs()) {
+            throw new RuntimeException("could not create " + etc);
         }
+        try (FileOutputStream out = new FileOutputStream(new File(etc, "jawnos-runtime.json"))) {
+            out.write(("{\"product\":\"runtime\",\"version\":\"" + version
+                + "\",\"abi\":\"" + abiName() + "\",\"sha256\":\"" + sha + "\"}\n").getBytes("UTF-8"));
+        }
+    }
+
+    /**
+     * Put the staged prefix in place. The old prefix is renamed aside first and
+     * restored if the new one cannot be moved in, so {@code files/usr} is never
+     * missing or half written. {@code files/home} is not involved.
+     */
+    private static void swap(File prefix, File staging, File previous) throws Exception {
+        if (previous.exists() && !delete(previous)) {
+            throw new RuntimeException("could not clear " + previous);
+        }
+        if (prefix.exists() && !prefix.renameTo(previous)) {
+            throw new RuntimeException("could not move the old runtime aside");
+        }
+        if (!staging.renameTo(prefix)) {
+            if (previous.exists()) previous.renameTo(prefix);
+            throw new RuntimeException("could not move the new runtime into place");
+        }
+    }
+
+    /**
+     * Stop the tree before the swap. The app's supervisor is asked first, so
+     * the master gets its usual INT and the tree writes out its WAL. An APK
+     * update can leave a tree whose app process is gone, so whatever is still
+     * running after the grace period is SIGKILLed - the same order
+     * app_migrate.pl uses before it touches a prefix or a database.
+     */
+    private static void stopTree(Context context) throws Exception {
+        try {
+            JawnLauncher.stopJawnTree(context);
+        } catch (Throwable t) {
+            JawnLog.append("runtime: could not ask the supervisor to stop: " + t);
+        }
+        long deadline = System.currentTimeMillis() + TREE_STOP_MS;
+        while (treeIsRunning() && System.currentTimeMillis() < deadline) sleep(250);
+        if (!treeIsRunning()) return;
+
+        JawnLog.append("runtime: the tree is still up; killing it before the swap");
+        long hardStop = deadline + 15000L;
+        while (treeIsRunning() && System.currentTimeMillis() < hardStop) {
+            killTreeProcesses();
+            sleep(500);
+        }
+        if (treeIsRunning()) {
+            throw new RuntimeException("the jawn tree is still running; not swapping the runtime");
+        }
+    }
+
+    /** pids whose command line names one of the tree's programs. The app and
+     *  the tree share a uid, so /proc is readable; this needs no external pkill
+     *  and works even after an APK update moved nativeLibraryDir. */
+    private static List<Integer> treePids() {
+        List<Integer> pids = new ArrayList<>();
+        File[] all = new File("/proc").listFiles();
+        if (all == null) return pids;
+        for (File dir : all) {
+            String name = dir.getName();
+            if (name.isEmpty() || !Character.isDigit(name.charAt(0))) continue;
+            FileInputStream in = null;
+            try {
+                byte[] buf = new byte[4096];
+                in = new FileInputStream(new File(dir, "cmdline"));
+                int n = in.read(buf);
+                if (n <= 0) continue;
+                if (isTreeCommand(new String(buf, 0, n, "UTF-8"))) pids.add(Integer.parseInt(name));
+            } catch (Throwable ignored) {
+                // a process that exited between listing and reading
+            } finally {
+                if (in != null) try { in.close(); } catch (Throwable ignored) { }
+            }
+        }
+        return pids;
+    }
+
+    private static boolean treeIsRunning() { return !treePids().isEmpty(); }
+
+    private static boolean isTreeCommand(String cmd) {
+        return cmd.contains("President.pl") || cmd.contains("Manager.pl")
+            || cmd.contains("Websocket.pl") || cmd.contains("Alarm.pl")
+            || cmd.contains("Music.pl") || cmd.contains("teletype.pl")
+            || cmd.contains("watch.pl") || cmd.contains("pen.pl")
+            || cmd.contains("./jawn");
+    }
+
+    private static void killTreeProcesses() {
+        for (int pid : treePids()) {
+            try { Os.kill(pid, OsConstants.SIGKILL); } catch (Throwable ignored) { }
+        }
+    }
+
+    private static void step(Progress progress, String what) {
+        if (progress != null) progress.step(what);
+    }
+
+    private static void sleep(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    }
+
+    private static String read(File file) {
+        try (FileInputStream in = new FileInputStream(file)) {
+            return new String(readAll(in), "UTF-8");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String field(String text, String name) {
+        for (String line : text.split("\n")) {
+            int at = line.indexOf('=');
+            if (at > 0 && line.substring(0, at).trim().equals(name)) return line.substring(at + 1).trim();
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ unpack

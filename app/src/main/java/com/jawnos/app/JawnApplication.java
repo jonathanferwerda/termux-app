@@ -24,6 +24,15 @@ public class JawnApplication extends Application {
         // carries no runtime-bins.txt.
         JawnRuntimeBins.ensure(this);
 
+        // The pin in assets/jawnrt.json is what an install should run, but the
+        // installer only ever ran on first run. Compare it with the marker the
+        // last install wrote and unpack the pinned runtime if it moved. This is
+        // on a background thread so the splash stays responsive; the tree's
+        // supervisor waits for it (JawnRuntime.awaitForStart) before it execs
+        // perl, so the prefix is never swapped under a live tree. A matching
+        // pin is one small file read.
+        JawnRuntime.syncInBackground(this);
+
         // The device bridge and the BLE daemon are services in this process.
         // A package update kills the app while the exec'd perl tree survives,
         // so the tree stays "good" but every bridged device call is gone. An

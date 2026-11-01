@@ -327,8 +327,10 @@ public class JawnLauncher {
         }, 800);
     }
 
-    /** Tear down the running tree and stop the service, but leave BLE alone. */
-    private static void stopJawnTree(Context context) {
+    /** Tear down the running tree and stop the service, but leave BLE alone.
+     *  Public because the runtime update must stop the tree before it swaps
+     *  {@code files/usr}; it does not change the keep-running preference. */
+    public static void stopJawnTree(Context context) {
         // The supervisor sends the master its INT, waits out the tree's own
         // teardown and runs the killer as mop-up, then stops itself.
         SessionService.stop(context);

@@ -165,6 +165,7 @@ public final class SessionService extends Service {
                 }
                 Process p = spawn();
                 if (p == null) {
+                    if (!wantRunning) break;
                     JawnLog.append("supervisor: could not start perl; giving up");
                     wantRunning = false;
                     break;
@@ -236,6 +237,11 @@ public final class SessionService extends Service {
     }
 
     private Process spawn() {
+        // A pin change downloads, verifies and swaps the prefix before the tree
+        // may start. Wait it out; a null return here is retried by the loop.
+        JawnRuntime.awaitForStart(this);
+        if (!wantRunning || JawnRuntime.isSyncing()) return null;
+
         // A package update moves nativeLibraryDir and leaves every link the
         // previous update made pointing at a deleted directory. Repair them
         // before exec'ing perl; an APK update does not stop the tree, so this
