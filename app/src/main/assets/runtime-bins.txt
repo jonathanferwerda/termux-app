@@ -256,3 +256,8 @@ libexec/git-core/git-whatchanged	link	bin/git
 libexec/git-core/git-worktree	link	bin/git
 libexec/git-core/git-write-tree	link	bin/git
 libexec/git-core/scalar	link	bin/scalar
+libexec/ssh-keysign	file	libexec_ssh_keysign
+libexec/ssh-pkcs11-helper	file	libexec_ssh_pkcs11_helper
+libexec/ssh-sk-helper	file	libexec_ssh_sk_helper
+libexec/sshd-auth	file	libexec_sshd_auth
+libexec/sshd-session	file	libexec_sshd_session
