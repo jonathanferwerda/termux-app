@@ -101,7 +101,22 @@ public final class SessionService extends Service {
         sRestarts = 0;
         tornDown = false;
         createChannel();
-        startForeground(NOTIFICATION_ID, notification("starting"));
+        startForegroundCompat(notification("starting"));
+    }
+
+
+    /** A long-lived local server has no dataSync budget: Android 15 cuts a
+     *  dataSync foreground service off after roughly six hours a day and then
+     *  crashes the whole app. specialUse is the type for a service of this
+     *  shape (a local server the person asked to keep running). */
+    private void startForegroundCompat(Notification n) {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIFICATION_ID, n,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        }
+        else {
+            startForeground(NOTIFICATION_ID, n);
+        }
     }
 
     @Override

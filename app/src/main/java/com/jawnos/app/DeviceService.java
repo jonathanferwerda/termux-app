@@ -135,7 +135,7 @@ public class DeviceService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
 
         token = ensureToken();
         clients = Executors.newFixedThreadPool(MAX_CLIENTS);
@@ -176,7 +176,7 @@ public class DeviceService extends Service {
                 return false;
             }
             startForeground(NOTIFICATION_ID, notification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC | type);
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE | type);
             return true;
         } catch (Throwable t) {
             Log.w(LOG_TAG, "foreground type escalation failed", t);
@@ -185,7 +185,7 @@ public class DeviceService extends Service {
     }
 
     private void deescalateForeground() {
-        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
     @Override

@@ -1390,3 +1390,12 @@ work and a full-width build has crashed it (2026-10-10).
      process down with it - the tablet showed "JawnOS keeps stopping" and the
      tree could not be spawned at all (2026-10-31). It claims `dataSync`, the
      same long-lived listener shape as `SessionService`. Build 1247.
+
+129. **The long-lived services claim `specialUse`.** targetSdk 36 runs Android
+     15's dataSync budget: a dataSync foreground service is cut off after about
+     six hours in a day, and Android then throws
+     `ForegroundServiceDidNotStopInTimeException` and kills the app - the
+     tablet lost its tree this way (2026-10-31). `SessionService`, the device
+     bridge and the tailnet service now declare `specialUse` (with the subtype
+     property and the `FOREGROUND_SERVICE_SPECIAL_USE` grant) while the device
+     bridge still widens to microphone/camera for a capture. Build 1249.

@@ -40,6 +40,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- targetSdk 34+: a specialUse foreground service needs its own grant. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -451,11 +453,14 @@
         <service
             android:name=".app.JawnTailnetService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="specialUse"
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="jawnos-tailnet" />
         </service>
 
         <!-- The GPS-provider foreground service. It is the only writer of this
@@ -491,7 +496,11 @@
         <service
             android:name=".app.SessionService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="jawnos-house-server" />
+        </service>
 
         <!-- The BLE bridge (the retired API app's service moved in): loopback JSON on
              127.0.0.1:45999, the v2 multi-link NUS daemon scripts/jawn-bt
@@ -506,7 +515,11 @@
         <service
             android:name=".app.DeviceService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|microphone|camera" />
+            android:foregroundServiceType="specialUse|microphone|camera">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="jawnos-device-bridge" />
+        </service>
 
         <!-- Reads the shade for termux-notification-list; connects only after
              the person grants Notification access. -->

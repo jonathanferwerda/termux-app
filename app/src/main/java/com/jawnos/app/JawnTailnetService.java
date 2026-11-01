@@ -61,6 +61,21 @@ public class JawnTailnetService extends VpnService implements IPNService {
         watchNetwork();
     }
 
+
+    /** A long-lived local server has no dataSync budget: Android 15 cuts a
+     *  dataSync foreground service off after roughly six hours a day and then
+     *  crashes the whole app. specialUse is the type for a service of this
+     *  shape (a local server the person asked to keep running). */
+    private void startForegroundCompat(Notification n) {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIF_ID, n,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        }
+        else {
+            startForeground(NOTIF_ID, n);
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
@@ -70,7 +85,7 @@ public class JawnTailnetService extends VpnService implements IPNService {
             return START_NOT_STICKY;
         }
         if (ACTION_FOREGROUND_ONLY.equals(action)) {
-            startForeground(NOTIF_ID, notification("Waiting for approval"));
+            startForegroundCompat(notification("Waiting for approval"));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(action) && !JawnTailnetController.isEnabled(this)) {
@@ -80,7 +95,7 @@ public class JawnTailnetService extends VpnService implements IPNService {
             stopSelf();
             return START_NOT_STICKY;
         }
-        startForeground(NOTIF_ID, notification("Starting"));
+        startForegroundCompat(notification("Starting"));
         // the local API calls can wait on the backend; keep the UI thread free
         if (ACTION_START.equals(action)) {
             new Thread(() -> controller.start(), "jawn-tailnet-start").start();
