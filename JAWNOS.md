@@ -1377,7 +1377,8 @@ work and a full-width build has crashed it (2026-10-10).
      mop-up after 30 s - a package update can leave a tree whose app process is
      gone), download to a temp file, verify the sha256, unpack into
      `files/usr-staging`, write the marker there, then rename `files/usr` aside
-     and the staging prefix in, restoring the old prefix if the second rename
-     fails. `files/home` is never touched. `SessionService.spawn()` waits for
-     the check before exec'ing perl, so the swap never happens under a live
-     tree, and a matching marker is one small file read. Build 1245.
+     and the staging prefix in; a failed second rename, or an app death between
+     the two renames, restores the old prefix on the next start. `files/home`
+     is never touched. `SessionService.spawn()` waits for the check before
+     exec'ing perl, so the swap never happens under a live tree, and a matching
+     marker is one small file read. Builds 1245-1246.

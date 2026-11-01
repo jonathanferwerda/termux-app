@@ -213,17 +213,23 @@ public final class JawnRuntime {
         final File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
 
         if (installedMatches(prefix, version, want)) return false;
-        // No usable prefix: first run installs it through JawnInstaller, which
-        // writes the marker at the end. Nothing to upgrade yet.
-        if (!prefix.isDirectory() || !hasRuntime(prefix)) return false;
 
         final File files = new File(JawnConstants.TERMUX_FILES_DIR_PATH);
+        final File previous = new File(files, PREVIOUS_PREFIX);
+        // No prefix and nothing set aside: first run installs it through
+        // JawnInstaller, which writes the marker at the end.
+        if (!prefix.isDirectory() && !previous.isDirectory()) return false;
+        if (prefix.isDirectory() && !hasRuntime(prefix) && !previous.isDirectory()) return false;
+
         // One updater at a time, even across the app's processes (`:browser`).
         try (RandomAccessFile lockFile = new RandomAccessFile(new File(files, UPDATE_LOCK), "rw");
              FileChannel channel = lockFile.getChannel();
              FileLock lock = channel.lock()) {
+            // A crash between the two swap renames leaves the old prefix aside.
+            recoverInterruptedSwap(prefix, previous);
             // Another process may have finished while we waited for the lock.
             if (installedMatches(prefix, version, want)) return false;
+            if (!prefix.isDirectory() || !hasRuntime(prefix)) return false;
 
             final boolean restart = JawnLauncher.shouldKeepRunning(context);
             step(progress, "Stopping the house to update its runtime");
@@ -248,7 +254,6 @@ public final class JawnRuntime {
             writeMarker(staging, version, want);
 
             step(progress, "Switching the runtime in");
-            final File previous = new File(files, PREVIOUS_PREFIX);
             swap(prefix, staging, previous);
 
             // The prefix's executables are links into nativeLibraryDir; a fresh
@@ -321,6 +326,18 @@ public final class JawnRuntime {
         if (!tmp.renameTo(marker)) {
             marker.delete();
             if (!tmp.renameTo(marker)) throw new RuntimeException("could not write " + marker);
+        }
+    }
+
+    /** A process death between swap's two renames leaves files/usr absent and
+     *  files/usr-previous holding the old runtime. Put the old prefix back, so
+     *  a crash never leaves the device with no runtime to start. */
+    private static void recoverInterruptedSwap(File prefix, File previous) {
+        if (prefix.isDirectory() || !previous.isDirectory()) return;
+        if (previous.renameTo(prefix)) {
+            JawnLog.append("runtime: restored the previous prefix after an interrupted swap");
+        } else {
+            JawnLog.append("runtime: could not restore " + previous);
         }
     }
 
