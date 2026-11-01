@@ -51,10 +51,26 @@ public class JawnLauncher {
      *  that has been set up keeps the everyday launch path untouched. */
     public static boolean isJawnInstalled(Context context) {
         File dir = new File(getJawnDirPath(context));
-        return new File(dir, "jawn").isFile()
-            && new File(dir, "President.pl").isFile()
+        return treeIsComplete(dir)
             && configIsUsable(new File(dir, "config.json"))
             && nonEmptyFile(new File(dir, "database/jawnos.db"));
+    }
+
+    /** The tree's three moving parts: the master, the service layer it starts
+     *  and the setup script. President.pl moved into perl/ in v0.1.1730 (the
+     *  root tidy) and {@code ./jawn} execs {@code ./perl/President.pl}; the old
+     *  root copy is still accepted so a tree fetched before that change reads
+     *  as an install rather than a failed download. Both gates that ask "is the
+     *  tree here" use this one test, so they cannot drift apart again. */
+    static boolean treeIsComplete(File dir) {
+        return new File(dir, "jawn").isFile()
+            && hasPresident(dir)
+            && new File(dir, "scripts/jawnos_setup.pl").isFile();
+    }
+
+    private static boolean hasPresident(File dir) {
+        return new File(dir, "perl/President.pl").isFile()
+            || new File(dir, "President.pl").isFile();
     }
 
     /** The same test the server makes before it skips its setup wizard. */

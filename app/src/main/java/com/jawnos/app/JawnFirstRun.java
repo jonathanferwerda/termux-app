@@ -83,7 +83,7 @@ final class JawnFirstRun {
         File home = new File(JawnConstants.TERMUX_HOME_DIR_PATH);
         File dir = new File(JawnLauncher.getJawnDirPath(context));
 
-        if (!treeIsComplete(dir)) {
+        if (!JawnLauncher.treeIsComplete(dir)) {
             boolean resume = isOurCheckout(dir);
             if (dir.exists() && !isEmptyDirectory(dir) && !resume) {
                 throw new SetupException("The folder " + dir.getAbsolutePath() + " has files in it but is not a JawnOS install. Move it aside, then tap Try again.");
@@ -107,7 +107,7 @@ final class JawnFirstRun {
                 r = run(context, "export GIT_TERMINAL_PROMPT=0; git clone --depth 1 --branch " + BRANCH
                         + " " + quote(REPO) + " " + quote(dir.getAbsolutePath()), home, CLONE_TIMEOUT_MS);
             }
-            if (r.exitCode != 0 || !treeIsComplete(dir)) {
+            if (r.exitCode != 0 || !JawnLauncher.treeIsComplete(dir)) {
                 throw new SetupException("Could not fetch JawnOS." + detail(r));
             }
         }
@@ -185,12 +185,6 @@ final class JawnFirstRun {
         } catch (IOException ignored) {
         }
         return false;
-    }
-
-    private static boolean treeIsComplete(File dir) {
-        return new File(dir, "jawn").isFile()
-            && new File(dir, "President.pl").isFile()
-            && new File(dir, "scripts/jawnos_setup.pl").isFile();
     }
 
     private static boolean isEmptyDirectory(File dir) {
