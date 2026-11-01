@@ -1863,24 +1863,94 @@ public class DeviceService extends Service {
             Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
             if (bitmap == null) return null;
 
-            int degrees = 0;
-            try {
-                ExifInterface exif = new ExifInterface(file.getAbsolutePath());
-                int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
-                if (orientation == ExifInterface.ORIENTATION_ROTATE_90) degrees = 90;
-                else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) degrees = 180;
-                else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) degrees = 270;
-            } catch (Throwable ignored) { }
+            return applyExifOrientation(bitmap, file);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
-            if (degrees != 0) {
-                Matrix matrix = new Matrix();
-                matrix.postRotate(degrees);
-                Bitmap turned = Bitmap.createBitmap(bitmap, 0, 0,
-                        bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-                if (turned != bitmap) bitmap.recycle();
-                bitmap = turned;
-            }
+
+    /** Apply the EXIF orientation to a decoded bitmap, all eight values.
+     *  BitmapFactory does not rotate, and writeBitmap re-encodes without the
+     *  metadata, so a phone photo came back sideways once it was resized. */
+    private static Bitmap applyExifOrientation(Bitmap bitmap, java.io.File file) {
+        if (bitmap == null || file == null) return bitmap;
+        int orientation = exifOrientation(file);
+        return applyExifOrientation(bitmap, orientation);
+    }
+
+    /** The EXIF orientation value, or NORMAL when there is none. */
+    private static int exifOrientation(java.io.File file) {
+        try {
+            ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+            return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (Throwable ignored) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    /** Apply an already-read EXIF orientation value. */
+    private static Bitmap applyExifOrientation(Bitmap bitmap, int orientation) {
+        if (bitmap == null) return bitmap;
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.postRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.postScale(1, -1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.postRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.postRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.postRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.postRotate(-90);
+                break;
+            default:
+                return bitmap;
+        }
+        try {
+            Bitmap turned = Bitmap.createBitmap(bitmap, 0, 0,
+                    bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            if (turned != bitmap) bitmap.recycle();
+            return turned;
+        } catch (Throwable t) {
             return bitmap;
+        }
+    }
+
+    /** Decode a picture through its EXIF orientation, sampling so the decoded
+     *  pixels still cover targetWidth × targetHeight (both axes). */
+    private static Bitmap decodeOrientedSize(java.io.File file, int targetWidth, int targetHeight) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+            int orientation = exifOrientation(file);
+            boolean swap = orientation == ExifInterface.ORIENTATION_TRANSPOSE
+                    || orientation == ExifInterface.ORIENTATION_ROTATE_90
+                    || orientation == ExifInterface.ORIENTATION_TRANSVERSE
+                    || orientation == ExifInterface.ORIENTATION_ROTATE_270;
+            int width = swap ? bounds.outHeight : bounds.outWidth;
+            int height = swap ? bounds.outWidth : bounds.outHeight;
+            int sample = sampleSize(width, height, Math.max(1, targetWidth), Math.max(1, targetHeight));
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+            if (bitmap == null) return null;
+            return applyExifOrientation(bitmap, orientation);
         } catch (Throwable t) {
             return null;
         }
@@ -2484,12 +2554,25 @@ public class DeviceService extends Service {
             File source = new File(path);
             if (!source.isFile()) return null;
 
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, bounds);
-            int sourceWidth = bounds.outWidth;
-            int sourceHeight = bounds.outHeight;
-            if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+            // Decode through the EXIF orientation, so both the pixels and the
+            // dimensions the target is computed from are the ones a person sees.
+            // The sampler is told both target axes, so a very large photo is not
+            // decoded whole for a 4K target.
+            Bitmap bitmap;
+            if (width > 0 && height > 0) {
+                bitmap = decodeOrientedSize(source, width, height);
+            }
+            else {
+                bitmap = decodeOriented(source, Math.max(1024, max));
+            }
+            if (bitmap == null) return null;
+
+            int sourceWidth = bitmap.getWidth();
+            int sourceHeight = bitmap.getHeight();
+            if (sourceWidth <= 0 || sourceHeight <= 0) {
+                bitmap.recycle();
+                return null;
+            }
 
             if (width <= 0 && height <= 0 && max > 0) {
                 width = max;
@@ -2505,10 +2588,6 @@ public class DeviceService extends Service {
             int targetWidth = Math.max(1, (int) Math.round(sourceWidth * scale));
             int targetHeight = Math.max(1, (int) Math.round(sourceHeight * scale));
 
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = sampleSize(sourceWidth, sourceHeight, targetWidth, targetHeight);
-            Bitmap bitmap = BitmapFactory.decodeFile(path, options);
-            if (bitmap == null) return null;
             Bitmap scaled = bitmap;
             if (bitmap.getWidth() != targetWidth || bitmap.getHeight() != targetHeight) {
                 scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
@@ -2535,7 +2614,7 @@ public class DeviceService extends Service {
             String path = args.optString("path", "");
             String out = args.optString("out", "");
             if (out.isEmpty()) return null;
-            Bitmap bitmap = BitmapFactory.decodeFile(path);
+            Bitmap bitmap = decodeOriented(new File(path), 4096);
             if (bitmap == null) return null;
             String format = args.optString("format", extensionOf(out));
             int quality = args.optInt("quality", 90);
@@ -2571,7 +2650,7 @@ public class DeviceService extends Service {
             String path = args.optString("path", "");
             String out = args.optString("out", path);
             JSONArray steps = args.optJSONArray("duties");
-            bitmap = BitmapFactory.decodeFile(path);
+            bitmap = decodeOriented(new File(path), 4096);
             if (bitmap == null) return null;
 
             JSONArray skipped = new JSONArray();

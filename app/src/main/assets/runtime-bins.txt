@@ -1,4 +1,5 @@
 bin/[	link	bin/coreutils
+bin/animate	link	bin/magick
 bin/awk	link	bin/gawk
 bin/base64	link	bin/coreutils
 bin/basename	link	bin/coreutils
@@ -6,6 +7,10 @@ bin/bash	file	bin_bash
 bin/cat	link	bin/coreutils
 bin/chmod	link	bin/coreutils
 bin/chown	link	bin/coreutils
+bin/compare	link	bin/magick
+bin/composite	link	bin/magick
+bin/conjure	link	bin/magick
+bin/convert	link	bin/magick
 bin/coreutils	file	bin_coreutils
 bin/cp	link	bin/coreutils
 bin/curl	file	bin_curl
@@ -13,6 +18,7 @@ bin/cut	link	bin/coreutils
 bin/dash	file	bin_dash
 bin/date	link	bin/coreutils
 bin/dirname	link	bin/coreutils
+bin/display	link	bin/magick
 bin/echo	link	bin/coreutils
 bin/egrep	file	bin_egrep
 bin/env	link	bin/coreutils
@@ -29,12 +35,17 @@ bin/gzip	file	bin_gzip
 bin/head	link	bin/coreutils
 bin/hostname	file	bin_hostname
 bin/id	link	bin/coreutils
+bin/identify	link	bin/magick
+bin/import	link	bin/magick
 bin/ip	file	bin_ip
 bin/kill	link	bin/coreutils
 bin/killall	file	bin_killall
 bin/ln	link	bin/coreutils
 bin/ls	link	bin/coreutils
+bin/magick	file	bin_magick
 bin/mkdir	link	bin/coreutils
+bin/mogrify	link	bin/magick
+bin/montage	link	bin/magick
 bin/mv	link	bin/coreutils
 bin/nohup	link	bin/coreutils
 bin/openssl	file	bin_openssl
@@ -62,9 +73,11 @@ bin/ssh-keygen	file	bin_ssh_keygen
 bin/sshd	file	bin_sshd
 bin/sshpass	file	bin_sshpass
 bin/stat	link	bin/coreutils
+bin/stream	link	bin/magick
 bin/tail	link	bin/coreutils
 bin/tar	file	bin_tar
 bin/tee	link	bin/coreutils
+bin/tesseract	file	bin_tesseract
 bin/test	link	bin/coreutils
 bin/timeout	link	bin/coreutils
 bin/touch	link	bin/coreutils

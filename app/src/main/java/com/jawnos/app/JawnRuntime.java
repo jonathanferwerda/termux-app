@@ -3,6 +3,7 @@ package com.jawnos.app;
 import android.content.Context;
 import android.os.Build;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -137,6 +138,9 @@ public final class JawnRuntime {
         // A first run is also an install: record the pin so the next app start
         // does not re-download a runtime it already has.
         writeMarker(prefix, pinned.optString("version", ""), want);
+        // Optional parts are separate downloads; start them once the core is
+        // in place and let the tree come up without waiting for them.
+        syncPartsInBackground(context);
     }
 
     // ---------------------------------------------------- start-time pin check
@@ -166,6 +170,10 @@ public final class JawnRuntime {
                         sSyncing = false;
                         sStartGate.countDown();
                     }
+                    // Parts are optional and must never hold up the tree's start:
+                    // the gate above is already open, and a failed download only
+                    // means the feature keeps its fallback until the next start.
+                    syncPartsInBackground(app);
                 }
             }, "jawnrt-sync");
             t.setDaemon(true);
@@ -275,6 +283,190 @@ public final class JawnRuntime {
             }
             return true;
         }
+    }
+
+    // ------------------------------------------------------ optional parts
+    // A part is a second archive in the same pin ("parts": {abi: {name: {...}}}).
+    // It carries libraries and data only; its executables ride in the APK as
+    // jniLibs like the core's. The marker lists the paths the part owns, so an
+    // update can remove what the new version no longer carries without ever
+    // touching a core file.
+
+    private static final String PART_MARKER_PREFIX = ".jawnrt-part-";
+    private static volatile boolean sPartsSyncing;
+
+    /** The parts offered for this device's ABI, or null when the pin has none. */
+    private static JSONObject parts(Context context) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (InputStream in = context.getAssets().open(MANIFEST)) {
+                copy(in, out);
+            }
+            JSONObject manifest = new JSONObject(out.toString("UTF-8"));
+            JSONObject parts = manifest.optJSONObject("parts");
+            if (parts == null) return null;
+            return parts.optJSONObject(abiName());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Install any missing or updated part on a daemon thread. Never awaited by
+     * the tree's supervisor: an optional feature that is not downloaded yet
+     * keeps its fallback, and the next start tries again.
+     */
+    public static void syncPartsInBackground(final Context context) {
+        final Context app = context.getApplicationContext();
+        synchronized (JawnRuntime.class) {
+            if (sPartsSyncing) return;
+            sPartsSyncing = true;
+        }
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    syncParts(app, null);
+                } catch (Throwable e) {
+                    JawnLog.append("runtime part: failed: " + e);
+                } finally {
+                    synchronized (JawnRuntime.class) { sPartsSyncing = false; }
+                }
+            }
+        }, "jawnrt-parts");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Install every part whose marker does not match the pin. Returns true
+     *  when at least one archive was unpacked. */
+    public static boolean syncParts(Context context, Progress progress) throws Exception {
+        JSONObject parts = parts(context);
+        if (parts == null) return false;
+        File prefix = new File(JawnConstants.TERMUX_PREFIX_DIR_PATH);
+        if (!prefix.isDirectory() || !hasRuntime(prefix)) return false;
+        String core = installedVersion(prefix);
+        boolean changed = false;
+        java.util.Iterator<String> names = parts.keys();
+        while (names.hasNext()) {
+            String name = names.next();
+            JSONObject pin = parts.optJSONObject(name);
+            if (pin == null) continue;
+            String minCore = pin.optString("min_core", "");
+            if (minCore.length() > 0 && core.length() > 0 && versionOlder(core, minCore)) {
+                JawnLog.append("runtime part " + name + ": needs core " + minCore + ", have " + core);
+                continue;
+            }
+            try {
+                if (installPart(context, prefix, name, pin, progress)) changed = true;
+            } catch (Throwable e) {
+                // One optional part must not stop the other, and must not fail
+                // the app: its feature simply keeps its fallback.
+                JawnLog.append("runtime part " + name + ": " + e);
+            }
+        }
+        if (changed) JawnRuntimeBins.ensure(context);
+        return changed;
+    }
+
+    private static boolean installPart(Context context, File prefix, String name,
+                                       JSONObject pin, Progress progress) throws Exception {
+        String file = pin.getString("file");
+        String want = pin.getString("sha256");
+        String version = pin.optString("version", "");
+        File marker = new File(prefix, PART_MARKER_PREFIX + name);
+        if (partMatches(marker, version, want)) return false;
+
+        File cache = new File(context.getCacheDir(), file);
+        if (!cache.isFile() || !want.equalsIgnoreCase(sha256(cache))) {
+            step(progress, "Downloading the " + name + " runtime");
+            download(BASE + file, cache);
+            String got = sha256(cache);
+            if (!want.equalsIgnoreCase(got)) {
+                cache.delete();
+                throw new RuntimeException("download failed its checksum (want "
+                        + want + ", got " + got + ")");
+            }
+        }
+
+        // The old marker's path list is this part's ownership record. A path the
+        // new archive drops is removed after the new files land; core paths are
+        // never in the list.
+        List<String> stale = new ArrayList<>();
+        if (marker.isFile()) {
+            String old = read(marker);
+            if (old != null) {
+                for (String line : old.split("\n")) {
+                    if (line.startsWith("path=")) stale.add(line.substring(5));
+                }
+            }
+        }
+
+        step(progress, "Unpacking the " + name + " runtime");
+        unpack(cache, prefix);
+
+        List<String> keep = new ArrayList<>();
+        JSONArray provides = pin.optJSONArray("provides");
+        if (provides != null) {
+            for (int i = 0; i < provides.length(); i++) keep.add(provides.optString(i));
+        }
+        for (String path : stale) {
+            if (path.length() == 0 || keep.contains(path)) continue;
+            File old = new File(JawnConstants.TERMUX_FILES_DIR_PATH, path);
+            if (old.isFile() || java.nio.file.Files.isSymbolicLink(old.toPath())) old.delete();
+        }
+        writePartMarker(marker, version, want, keep);
+        JawnLog.append("runtime part: installed " + name + " " + version);
+        return true;
+    }
+
+    private static boolean partMatches(File marker, String version, String sha) {
+        if (!marker.isFile()) return false;
+        String text = read(marker);
+        if (text == null) return false;
+        String installedVersion = field(text, "version");
+        String installedSha = field(text, "sha256");
+        return (version.isEmpty() || version.equals(installedVersion))
+            && installedSha != null && sha.equalsIgnoreCase(installedSha);
+    }
+
+    private static void writePartMarker(File marker, String version, String sha,
+                                        List<String> provides) throws Exception {
+        File tmp = new File(marker.getPath() + ".tmp");
+        StringBuilder text = new StringBuilder();
+        text.append("version=").append(version).append("\n");
+        text.append("sha256=").append(sha).append("\n");
+        for (String path : provides) text.append("path=").append(path).append("\n");
+        try (FileOutputStream out = new FileOutputStream(tmp)) {
+            out.write(text.toString().getBytes("UTF-8"));
+            out.getFD().sync();
+        }
+        if (!tmp.renameTo(marker)) {
+            marker.delete();
+            if (!tmp.renameTo(marker)) throw new RuntimeException("could not write " + marker);
+        }
+    }
+
+    /** The core version recorded by the last successful install, or "". */
+    private static String installedVersion(File prefix) {
+        String text = read(new File(prefix, MARKER));
+        if (text == null) return "";
+        String version = field(text, "version");
+        return version == null ? "" : version;
+    }
+
+    /** Numeric-segment comparison; a missing segment is zero. */
+    private static boolean versionOlder(String have, String want) {
+        String[] a = have.split("[^0-9]+");
+        String[] b = want.split("[^0-9]+");
+        int n = Math.max(a.length, b.length);
+        for (int i = 0; i < n; i++) {
+            int x = 0;
+            int y = 0;
+            try { if (i < a.length && a[i].length() > 0) x = Integer.parseInt(a[i]); } catch (Throwable ignored) { }
+            try { if (i < b.length && b[i].length() > 0) y = Integer.parseInt(b[i]); } catch (Throwable ignored) { }
+            if (x != y) return x < y;
+        }
+        return false;
     }
 
     private static File verifiedArchive(Context context, JSONObject pinned, String want, Progress progress) throws Exception {
