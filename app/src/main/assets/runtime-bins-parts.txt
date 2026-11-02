@@ -22,8 +22,8 @@ media	bin/display	link
 core	bin/echo	link
 core	bin/egrep	file
 core	bin/env	link
-core	bin/ffmpeg	file
-core	bin/ffprobe	file
+video	bin/ffmpeg	file
+video	bin/ffprobe	file
 core	bin/fgrep	file
 core	bin/find	file
 core	bin/gawk	file
