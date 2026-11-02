@@ -46,6 +46,14 @@ public class JawnApplication extends Application {
         // always produce, so heal them here; both starts are idempotent.
         JawnLauncher.startDeviceService(this);
         if (JawnLauncher.isBleWithJawn(this)) JawnLauncher.startBle(this);
+
+        // A process start is the one event every path shares: an APK update, a
+        // wake, a person opening the app. If the tailnet should be up, ask the
+        // service to check itself - it resumes only what is down, so a healthy
+        // tunnel is never torn down here.
+        if (JawnTailnetController.isEnabled(this) && JawnTailnetController.isAutoconnect(this)) {
+            JawnTailnetController.supervise(this);
+        }
     }
 
     private void setLogLevel() {

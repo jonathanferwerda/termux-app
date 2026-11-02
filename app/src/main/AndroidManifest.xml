@@ -147,6 +147,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- An APK update kills the process; the sticky VPN service is not
+             restarted for a package replace, so ask the tunnel back here.
+             MY_PACKAGE_REPLACED is a protected broadcast: only the system sends it. -->
+        <receiver android:name=".app.JawnUpdateReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Wake the host from outside the app (adb or an on-phone
              automation). JawnWakeReceiver accepts only the shell UID and its
              own; jawn is then started if it is down. -->

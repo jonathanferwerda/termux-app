@@ -557,6 +557,20 @@ public class JawnTailnetController {
         ContextCompat.startForegroundService(context, i);
     }
 
+    /** Ask the service to check itself. Unlike startService this never tears a
+     *  healthy tunnel down: the service resumes only what is not running, and
+     *  stops itself when nothing is enabled. Safe to call on every process
+     *  start (an update, a wake, a person opening the app). */
+    public static void supervise(Context context) {
+        Intent i = new Intent(context, JawnTailnetService.class);
+        i.setAction(JawnTailnetService.ACTION_SUPERVISE);
+        try {
+            ContextCompat.startForegroundService(context, i);
+        } catch (RuntimeException ignored) {
+            // a background start can be refused; the next event retries
+        }
+    }
+
     public static void stopService(Context context) {
         Intent i = new Intent(context, JawnTailnetService.class);
         i.setAction(JawnTailnetService.ACTION_STOP);
