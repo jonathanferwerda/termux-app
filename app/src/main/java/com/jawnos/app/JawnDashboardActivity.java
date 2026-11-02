@@ -67,6 +67,10 @@ public class JawnDashboardActivity extends Activity {
     private CheckBox lockScreen;
     private boolean resumed = false;
     private TextView tailnetStatus;
+    private CheckBox tailnetAutoconnect;
+    // The switch is written back from the controller on resume; that write must
+    // not read as a person turning auto-connect on (which would start the tunnel).
+    private boolean tailnetSwitchSyncing = false;
     private static final int REQ_VPN = 0x4A41;
     private long startRequestedAt = 0;
     private final JawnDashboardActivity self = this;
@@ -202,8 +206,17 @@ public class JawnDashboardActivity extends Activity {
         tailnetStatus.setTextColor(DIM);
         tailnetStatus.setTextSize(13);
         tailnetStatus.setPadding(dp(2), 0, 0, dp(6));
-        tailnetStatus.setText(JawnTailnetController.statusText(this));
         tailnet.addView(tailnetStatus);
+        // The standing choice sits between the live line and the actions it
+        // governs: whether the tunnel comes back on its own.
+        tailnetAutoconnect = new CheckBox(this);
+        tailnetAutoconnect.setText("Auto-connect tailnet");
+        tailnetAutoconnect.setTextColor(TEXT);
+        tailnetAutoconnect.setButtonTintList(ColorStateList.valueOf(ACCENT));
+        tailnetAutoconnect.setChecked(JawnTailnetController.isAutoconnect(this));
+        tailnetAutoconnect.setOnCheckedChangeListener((button, on) -> setTailnetAutoconnect(on));
+        tailnet.addView(tailnetAutoconnect);
+        refreshTailnetStatus();
         fullButton(tailnet, "Join / connect", true, () -> joinTailnet());
         fullButton(tailnet, "Approve device", false, () -> openTailnetLogin());
         fullButton(tailnet, "Stop tailnet", false, () -> stopTailnet());
@@ -213,7 +226,8 @@ public class JawnDashboardActivity extends Activity {
         android.content.SharedPreferences p = getSharedPreferences(JawnTailnetController.PREFS, MODE_PRIVATE);
         android.widget.EditText input = new android.widget.EditText(this);
         input.setHint("preauth key (blank = browser approval)");
-        input.setText(p.getString("auth_key", ""));
+        // Never paint a stored key back onto the screen; the field starts
+        // empty, and empty still means browser approval below.
         input.setTextSize(12);
         new android.app.AlertDialog.Builder(this)
             .setTitle("Join the house tailnet")
@@ -235,15 +249,103 @@ public class JawnDashboardActivity extends Activity {
     }
 
     private void startTailnet() {
-        tailnetStatus.setText("Starting tailnet...");
         JawnTailnetController.startService(this);
+        // The service owns the status pref; refresh rather than invent a state.
+        refreshTailnetStatus();
         toast("Starting tailnet");
     }
 
     private void stopTailnet() {
         JawnTailnetController.stopService(this);
-        tailnetStatus.setText("Stopping tailnet...");
+        refreshTailnetStatus();
         toast("Stopping tailnet");
+    }
+
+    /** Persist the switch and honour it. On starts the tunnel only once the
+     *  person has joined - the join stays their decision; off stops future
+     *  attempts and leaves a live tunnel alone. */
+    private void setTailnetAutoconnect(boolean on) {
+        if (tailnetSwitchSyncing) return;
+        JawnTailnetController.setAutoconnect(this, on);
+        if (!on) {
+            toast("Auto-connect off - the tunnel stays as it is");
+        } else if (JawnTailnetController.isEnabled(this)) {
+            JawnTailnetController.startService(this);
+            toast("Auto-connect on - bringing the tailnet up");
+        } else {
+            toast("Auto-connect on - tap Join / connect once to join");
+        }
+        refreshTailnetStatus();
+    }
+
+    /** Mirror a value the controller changed behind this screen (boot, the
+     *  service, another entry point) without firing the listener. */
+    private void syncTailnetSwitch() {
+        if (tailnetAutoconnect == null) return;
+        boolean on = JawnTailnetController.isAutoconnect(this);
+        if (tailnetAutoconnect.isChecked() == on) return;
+        tailnetSwitchSyncing = true;
+        tailnetAutoconnect.setChecked(on);
+        tailnetSwitchSyncing = false;
+    }
+
+    /** One plain sentence for the controller's status, with a tap on the two
+     *  states that need the person. The controller is the only source: its
+     *  status text carries the token (off, starting, connected, needs_key,
+     *  ...) and nothing is cached here. */
+    private void refreshTailnetStatus() {
+        if (tailnetStatus == null) return;
+        String raw = JawnTailnetController.statusText(this);
+        String state = tailnetState(raw);
+        String wording;
+        int colour;
+        switch (state) {
+            case "connected":
+                wording = "Connected to the house tailnet"; colour = GREEN; break;
+            case "starting":
+                wording = "Starting - the tunnel is coming up"; colour = AMBER; break;
+            case "needs_key":
+                wording = "Needs a house key - tap to join"; colour = AMBER; break;
+            case "needs_approval":
+                wording = "Waiting for approval - tap Approve device"; colour = AMBER; break;
+            case "no_network":
+                wording = "No network - reconnects when one returns"; colour = AMBER; break;
+            case "error":
+                wording = "Could not connect - see Log"; colour = RED; break;
+            case "disconnected":
+                wording = "Disconnected - auto-connect brings it back"; colour = RED; break;
+            case "off":
+                wording = "Off - not joined to the tailnet"; colour = DIM; break;
+            default:
+                wording = raw; colour = DIM; break;
+        }
+        if (!wording.equals(String.valueOf(tailnetStatus.getText()))) tailnetStatus.setText(wording);
+        tailnetStatus.setTextColor(colour);
+        boolean key = state.equals("needs_key");
+        boolean approval = state.equals("needs_approval");
+        View.OnClickListener tap = null;
+        if (key) tap = v -> joinTailnet();
+        else if (approval) tap = v -> openTailnetLogin();
+        tailnetStatus.setClickable(key || approval);
+        tailnetStatus.setOnClickListener(tap);
+    }
+
+    /** The controller's status token, read out of its status text. Longest
+     *  match first so "disconnected" is not read as "connected"; the spaced
+     *  form is accepted too so a prettified token still matches. */
+    private static String tailnetState(String text) {
+        String t = text == null ? "" : text.toLowerCase(java.util.Locale.US);
+        // statusText is "Node: <name> \u2022 <status>"; only the status half
+        // counts, so a machine called "office" cannot be read as switched off.
+        int bullet = t.lastIndexOf('\u2022');
+        if (bullet >= 0) t = t.substring(bullet + 1);
+        String[] known = { "needs_approval", "needs_key", "no_network",
+                           "disconnected", "connected", "starting", "error", "off" };
+        for (String s : known) {
+            if (t.contains(s) || t.contains(s.replace('_', ' '))) return s;
+        }
+        // Before the token set the line said "not joined" when disabled.
+        return t.contains("not joined") ? "off" : "";
     }
 
     private void openTailnetLogin() {
@@ -398,7 +500,8 @@ public class JawnDashboardActivity extends Activity {
 
     protected void onResume() {
         super.onResume();
-        if (tailnetStatus != null) tailnetStatus.setText(JawnTailnetController.statusText(this));
+        syncTailnetSwitch();
+        refreshTailnetStatus();
         resumed = true;
         updateEnvStatus();
         pollNow();
@@ -457,6 +560,8 @@ public class JawnDashboardActivity extends Activity {
         jawnDot.setBackground(dot(colour));
         bleState.setText("BLE bridge  —  " + (bleUp ? "running" : "stopped"));
         bleDot.setBackground(dot(bleUp ? GREEN : DIM));
+        // The tunnel changes state on its own; repaint its line with the rest.
+        refreshTailnetStatus();
     }
 
     private void updateEnvStatus() {

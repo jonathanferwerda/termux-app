@@ -17,7 +17,17 @@ public class JawnBootReceiver extends BroadcastReceiver {
         Logger.logInfo(LOG_TAG, "BOOT_COMPLETED received");
         // The next Clock alarm lives in a file on disk; arm it again.
         JawnClockAlarm.sync(context);
-        if (JawnTailnetController.isEnabled(context)) JawnTailnetController.startService(context);
+        // Whether the tunnel may heal itself is the service's decision, not
+        // this receiver's: the service reads the stored enabled and autoconnect
+        // choices, and the last status, before it starts anything. A refused
+        // foreground start here must not cost the boot its jawn start.
+        if (JawnTailnetController.isEnabled(context)) {
+            try {
+                JawnTailnetController.startService(context);
+            } catch (RuntimeException e) {
+                Logger.logInfo(LOG_TAG, "tailnet start refused at boot: " + e.getClass().getSimpleName());
+            }
+        }
         if (!JawnLauncher.isAutostartEnabled(context)) {
             Logger.logInfo(LOG_TAG, "Autostart disabled; not starting jawn");
             return;

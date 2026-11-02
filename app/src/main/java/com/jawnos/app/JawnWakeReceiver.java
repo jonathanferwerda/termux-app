@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Process;
 
+import androidx.core.content.ContextCompat;
+
 /**
  * Wake the host from outside the app. A peer with adb (or an on-phone
  * automation) sends:
@@ -65,6 +67,20 @@ public class JawnWakeReceiver extends BroadcastReceiver {
         JawnLog.append("wake: starting jawn (uid " + uid + ")");
         JawnLauncher.setKeepRunning(context, true);
         JawnLauncher.startJawnBackground(context);
+        // A peer waking the phone is also the chance to heal a tunnel that died
+        // quietly: the service reads the stored enabled and autoconnect choices
+        // and the last status, and only then chases it. Started after jawn,
+        // because an app with a foreground service is allowed to start another
+        // one and a broadcast receiver on its own is background.
+        if (JawnTailnetController.isEnabled(context)) {
+            try {
+                Intent tailnet = new Intent(context, JawnTailnetService.class);
+                tailnet.setAction(JawnTailnetService.ACTION_SUPERVISE);
+                ContextCompat.startForegroundService(context, tailnet);
+            } catch (RuntimeException e) {
+                JawnLog.append("wake: tailnet check refused (" + e.getClass().getSimpleName() + ")");
+            }
+        }
     }
 
     /** The sender's uid, or -1 when the platform cannot say (API < 34). */

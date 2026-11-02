@@ -11,6 +11,8 @@ import androidx.core.content.ContextCompat;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 
@@ -31,6 +33,35 @@ public class JawnTailnetController {
     public static final String PREFS = "jawn_tailnet";
     public static final String CONTROL_URL = "https://thejunderground.com";
 
+    // The one status vocabulary. The dashboard, the manager's tailnet panel and
+    // the retry loop all read these strings, so nothing may invent a new one:
+    // setStatus() records an unknown value as "error" instead.
+    public static final String OFF = "off";
+    public static final String STARTING = "starting";
+    public static final String CONNECTED = "connected";
+    public static final String DISCONNECTED = "disconnected";
+    public static final String NEEDS_APPROVAL = "needs_approval";
+    public static final String NEEDS_KEY = "needs_key";
+    public static final String NO_NETWORK = "no_network";
+    public static final String ERROR = "error";
+
+    // The prefs contract inside "jawn_tailnet". The auth key is device-local
+    // and the only secret here: it is never written to the status file, a log,
+    // or the APK.
+    private static final String K_ENABLED = "enabled";
+    private static final String K_AUTOCONNECT = "autoconnect";
+    private static final String K_AUTH_KEY = "auth_key";
+    private static final String K_STATUS = "status";
+    private static final String K_LAST_OK_AT = "last_ok_at";
+    private static final String K_ATTEMPTS = "attempts";
+    private static final String K_NEXT_RETRY_AT = "next_retry_at";
+
+    // The Go state directory, so whoever inspects the tailnet finds the health
+    // next to it. Rewritten atomically on every status change; the Perl
+    // manager reads it to see why the tunnel is down.
+    private static final String STATUS_DIR = "tailnet";
+    private static final String STATUS_FILE = "status.json";
+
     private static final String TAG = "JawnTailnet";
     // One lifecycle step at a time. A network-change restart runs on its own
     // thread, and a second one overlapping its stop made the Go backend abort
@@ -39,6 +70,11 @@ public class JawnTailnetController {
     private static Application app;
     private static NotificationManager watcher;
     private static volatile String loginUrl = "";
+    // The last BackendState the Go client reported, by name ("Running", ...).
+    // Memory only: prefs has a fixed key set and this fills the status file's
+    // "backend" field.
+    private static volatile String lastBackend = "NoState";
+    private static final Object STATUS_FILE_LOCK = new Object();
 
     private final Context context;
     private final IPNService service;
@@ -64,6 +100,9 @@ public class JawnTailnetController {
     public void startWatching() {
         Application application = ensureApp(context);
         if (watcher != null) return;
+        // Refresh the file as watching starts: the panel should see a current
+        // "at" even when nothing has changed since the last process died.
+        publishStatus(context);
         watcher = application.watchNotifications(0, new NotificationCallback() {
             @Override
             public void onNotify(byte[] data) {
@@ -78,11 +117,15 @@ public class JawnTailnetController {
                             ((JawnTailnetService) service).notifyLogin(url);
                         }
                     }
-                    String state = o.optString("State", "");
-                    if ("Running".equals(state) || "5".equals(state)) {
-                        setStatus(context, "connected");
-                    } else if ("Stopped".equals(state) || "3".equals(state)) {
-                        setStatus(context, "disconnected");
+                    // The callback reports the whole lifecycle, not just
+                    // running/stopped, and sends the numeric enum codes as
+                    // strings. Map every state we know; an unknown one leaves
+                    // the previous status alone rather than guessing.
+                    String backend = o.optString("BackendState", o.optString("State", ""));
+                    if (!backend.isEmpty()) {
+                        lastBackend = backendName(backend);
+                        String mapped = statusForBackend(backend, hasKey(context));
+                        if (mapped != null) setStatus(context, mapped);
                     }
                 } catch (Exception ignored) {
                     // a notification we do not understand is not fatal
@@ -100,7 +143,15 @@ public class JawnTailnetController {
     private void startLocked() {
         Application application = ensureApp(context);
         String name = nodeName(context);
-        String key = prefs().getString("auth_key", "");
+        String key = prefs().getString(K_AUTH_KEY, "");
+        boolean haveKey = key != null && !key.isEmpty();
+        noteAttempt(context);
+        // A node key on disk outlives the process, so an empty auth_key alone
+        // does not prove this device cannot join. Ask the backend first: with
+        // neither a node key nor a preauth key the start below can only sit at
+        // NeedsLogin, and saying so now is the only honest status available.
+        boolean missingKey = !haveNodeKey(application) && !haveKey;
+        if (missingKey) setStatus(context, NEEDS_KEY);
         try {
             // PATCH takes ipn.MaskedPrefs: a value is only applied when its
             // <Field>Set flag is true, so without these the whole edit is
@@ -139,29 +190,37 @@ public class JawnTailnetController {
             // then tears down, and a slow register can be cancelled mid-flight.
             prefsObject.put("WantRunning", true);
             String startJson = "{\"UpdatePrefs\":" + prefsObject.toString()
-                    + (key == null || key.isEmpty() ? "" : ",\"AuthKey\":\"" + json(key) + "\"")
+                    + (haveKey ? ",\"AuthKey\":\"" + json(key) + "\"" : "")
                     + "}";
             call(application, "POST", "start", startJson);
+            // Start with a key can create a node key, so re-read: the state it
+            // landed in decides whether an interactive login is still needed.
             // A fresh profile has no node key, and start alone leaves it at
             // NeedsLogin. `tailscale up` calls StartLoginInteractive in exactly
             // this case (HaveNodeKey false). The auth key travels with that
             // login, so this is what presents it to the control server; without
             // a key it is also what returns the browser approval URL.
-            boolean haveNodeKey = false;
+            JSONObject after = null;
             try {
-                JSONObject status = new JSONObject(call(application, "GET", "status", null));
-                haveNodeKey = status.optBoolean("HaveNodeKey", false);
+                after = readStatus(application);
             } catch (Exception ignored) {
                 // a status we cannot parse just means we ask to log in
             }
-            if (!haveNodeKey) {
+            boolean nodeKey = after != null && after.optBoolean("HaveNodeKey", false);
+            if (!nodeKey) {
                 call(application, "POST", "login-interactive", null);
             }
             Libtailscale.requestVPN(service);
-            prefs().edit().putBoolean("enabled", true).putString("status", "starting").apply();
+            prefs().edit().putBoolean(K_ENABLED, true).apply();
+            String backend = after == null ? "" : after.optString("BackendState", "");
+            if (!backend.isEmpty()) lastBackend = backendName(backend);
+            String mapped = statusForBackend(backend, haveKey);
+            setStatus(context, mapped != null ? mapped : (missingKey ? NEEDS_KEY : STARTING));
         } catch (Exception e) {
-            Log.e(TAG, "start failed", e);
-            prefs().edit().putString("status", "error: " + e.getMessage()).apply();
+            // Never log the message or the stack: the request body carried the
+            // auth key and a Go error can quote it.
+            Log.e(TAG, "start failed: " + e.getClass().getSimpleName());
+            setStatus(context, ERROR);
         }
     }
 
@@ -178,7 +237,11 @@ public class JawnTailnetController {
         } catch (Exception ignored) {
         }
         Libtailscale.serviceDisconnect(service);
-        prefs().edit().putBoolean("enabled", false).putString("status", "off").apply();
+        // A person stopping the tunnel clears the retry budget: autoconnect
+        // must not treat the next boot as a failure to recover from.
+        prefs().edit().putBoolean(K_ENABLED, false)
+                .putInt(K_ATTEMPTS, 0).putLong(K_NEXT_RETRY_AT, 0L).apply();
+        setStatus(context, OFF);
     }
 
     /** Re-establish an already-joined tunnel after Android restarted the
@@ -233,20 +296,124 @@ public class JawnTailnetController {
     }
 
     private SharedPreferences prefs() {
+        return prefs(context);
+    }
+
+    private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** GET /status parsed. Throws when the local API is not up; callers that
+     *  can live without it swallow that, because an unreadable status is not a
+     *  reason to fail the start. */
+    private static JSONObject readStatus(Application application) throws Exception {
+        return new JSONObject(call(application, "GET", "status", null));
+    }
+
+    private static boolean haveNodeKey(Application application) {
+        try {
+            return readStatus(application).optBoolean("HaveNodeKey", false);
+        } catch (Exception ignored) {
+            // no answer means "cannot tell"; the prefs key decides
+            return false;
+        }
+    }
+
+    /** The health object, small on purpose: the Perl manager reads it to see
+     *  why the tunnel is down. It never carries the auth key or a login URL. */
+    private static String buildStatusJson(Context context) {
+        SharedPreferences p = prefs(context);
+        String state = p.getString(K_STATUS, OFF);
+        if (!isStatus(state)) state = ERROR;
+        try {
+            JSONObject o = new JSONObject();
+            o.put("state", state);
+            o.put("online", CONNECTED.equals(state));
+            o.put("has_key", hasKey(context));
+            o.put("attempts", p.getInt(K_ATTEMPTS, 0));
+            o.put("at", System.currentTimeMillis());
+            o.put("backend", lastBackend);
+            o.put("next_retry_at", p.getLong(K_NEXT_RETRY_AT, 0L));
+            return o.toString();
+        } catch (Exception e) {
+            return "{\"state\":\"" + state + "\",\"online\":" + CONNECTED.equals(state)
+                    + ",\"has_key\":" + hasKey(context)
+                    + ",\"attempts\":" + p.getInt(K_ATTEMPTS, 0)
+                    + ",\"at\":" + System.currentTimeMillis()
+                    + ",\"backend\":\"" + lastBackend + "\",\"next_retry_at\":"
+                    + p.getLong(K_NEXT_RETRY_AT, 0L) + "}";
+        }
+    }
+
+    /** Write the status file atomically: a temp file in the same directory,
+     *  then a rename, so a reader never sees a half-written JSON. */
+    private static void publishStatus(Context context) {
+        final String body = buildStatusJson(context);
+        File target = new File(new File(context.getFilesDir(), STATUS_DIR), STATUS_FILE);
+        File dir = target.getParentFile();
+        if (dir == null) return;
+        synchronized (STATUS_FILE_LOCK) {
+            dir.mkdirs();
+            File temp = new File(dir, STATUS_FILE + ".tmp");
+            FileOutputStream out = null;
+            try {
+                out = new FileOutputStream(temp);
+                out.write(body.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                try {
+                    out.getFD().sync();
+                } catch (Exception ignored) {
+                    // durability is nice; the atomic rename is what matters
+                }
+                out.close();
+                out = null;
+                if (!temp.renameTo(target)) {
+                    // POSIX rename replaces the target; the delete is only for a
+                    // filesystem where rename-to-existing fails.
+                    target.delete();
+                    temp.renameTo(target);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "tailnet status file write failed", e);
+            } finally {
+                if (out != null) {
+                    try {
+                        out.close();
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
     }
 
     public static String getLoginUrl() {
         return loginUrl;
     }
 
-    /** The tailnet as the remote_control VPN button needs it: the peers, which
-     *  of them offer an exit node, and which one this device is using now. */
+    /** The tunnel's health for the WebView bridge: the same object the status
+     *  file holds, plus the peer list the remote_control VPN button still
+     *  reads from this one call. */
     public static String statusJson(Context context) {
+        JSONObject result;
+        try {
+            result = new JSONObject(buildStatusJson(context));
+        } catch (Exception e) {
+            result = new JSONObject();
+        }
+        // Peers only exist while the Go client is up; asking for them with the
+        // tunnel off would start a backend just to say "nothing", so skip it.
+        if (app == null && !isEnabled(context)) {
+            try {
+                result.put("available", false);
+                result.put("exit", "");
+                result.put("peers", new JSONArray());
+            } catch (Exception ignored) {
+            }
+            return result.toString();
+        }
         try {
             Application application = ensureApp(context);
-            String raw = call(application, "GET", "status", null);
-            JSONObject status = new JSONObject(raw == null || raw.isEmpty() ? "{}" : raw);
+            JSONObject status = readStatus(application);
             JSONObject peers = status.optJSONObject("Peer");
             JSONArray out = new JSONArray();
             String exit = "";
@@ -266,25 +433,21 @@ public class JawnTailnetController {
                     if (peer.optBoolean("ExitNode", false)) exit = ip;
                 }
             }
-            JSONObject result = new JSONObject();
             result.put("available", peers != null);
             result.put("exit", exit);
             result.put("peers", out);
             result.put("haveNodeKey", status.optBoolean("HaveNodeKey", false));
-            return result.toString();
         } catch (Exception e) {
             Log.e(TAG, "tailnet status failed", e);
             try {
-                JSONObject result = new JSONObject();
                 result.put("available", false);
                 result.put("exit", "");
                 result.put("peers", new JSONArray());
                 result.put("error", String.valueOf(e.getMessage()));
-                return result.toString();
             } catch (Exception ignored) {
-                return "{\"available\":false,\"exit\":\"\",\"peers\":[]}";
             }
         }
+        return result.toString();
     }
 
     /** Choose an exit node ("" clears it) through the embedded client's local
@@ -352,8 +515,40 @@ public class JawnTailnetController {
     }
 
     public static boolean isEnabled(Context context) {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean("enabled", false);
+        return prefs(context).getBoolean(K_ENABLED, false);
+    }
+
+    /** The self-healing switch. On by default: a dropped tunnel should come
+     *  back without anyone opening the dashboard. */
+    public static boolean isAutoconnect(Context context) {
+        return prefs(context).getBoolean(K_AUTOCONNECT, true);
+    }
+
+    public static void setAutoconnect(Context context, boolean on) {
+        prefs(context).edit().putBoolean(K_AUTOCONNECT, on).apply();
+        // Turning it back on should not wait out a backoff set while it was off.
+        if (on) setNextRetry(context, 0L); else publishStatus(context);
+    }
+
+    /** Whether this device holds a preauth key. A node key already on disk can
+     *  still start the tunnel without one, so this is not the whole story. */
+    public static boolean hasKey(Context context) {
+        String key = prefs(context).getString(K_AUTH_KEY, "");
+        return key != null && !key.isEmpty();
+    }
+
+    /** Store a device-local preauth key ("" clears it). The key never leaves
+     *  this pref: not the status file, not a log. */
+    public static void setKey(Context context, String key) {
+        String value = key == null ? "" : key.trim();
+        prefs(context).edit().putString(K_AUTH_KEY, value).apply();
+        if (!value.isEmpty() && NEEDS_KEY.equals(getStatus(context))) {
+            // A key just arrived, so the next attempt is worth making now; the
+            // status stays needs_key until that attempt reports otherwise.
+            setNextRetry(context, 0L);
+        } else {
+            publishStatus(context);
+        }
     }
 
     public static void startService(Context context) {
@@ -368,15 +563,99 @@ public class JawnTailnetController {
         context.startService(i);
     }
 
+    public static String getStatus(Context context) {
+        String status = prefs(context).getString(K_STATUS, OFF);
+        return isStatus(status) ? status : ERROR;
+    }
+
+    /** Record a status and rewrite the status file. The value must be one of
+     *  the constants above; anything else is recorded as "error" so the panel
+     *  never has to understand a private dialect. */
     public static void setStatus(Context context, String status) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString("status", status).apply();
+        String next = status;
+        if (!isStatus(next)) {
+            Log.w(TAG, "unknown tailnet status ignored");
+            next = ERROR;
+        }
+        SharedPreferences.Editor edit = prefs(context).edit().putString(K_STATUS, next);
+        if (CONNECTED.equals(next)) {
+            // last_ok_at separates "connected now" from "was joined two days
+            // ago", and a success resets the retry budget.
+            edit.putLong(K_LAST_OK_AT, System.currentTimeMillis());
+            edit.putInt(K_ATTEMPTS, 0);
+            edit.putLong(K_NEXT_RETRY_AT, 0L);
+        }
+        edit.apply();
+        publishStatus(context);
+    }
+
+    public static boolean isStatus(String status) {
+        return OFF.equals(status) || STARTING.equals(status) || CONNECTED.equals(status)
+                || DISCONNECTED.equals(status) || NEEDS_APPROVAL.equals(status)
+                || NEEDS_KEY.equals(status) || NO_NETWORK.equals(status) || ERROR.equals(status);
+    }
+
+    /** Map a Go BackendState (enum name, or the numeric code it also sends:
+     *  1=NoState, 2=NeedsLogin, 3=NeedsMachineAuth, 4=Stopped, 5=Running) onto
+     *  the status vocabulary. Returns null for a state we do not map, so the
+     *  caller can leave the last good status alone. */
+    public static String statusForBackend(String backend, boolean hasKey) {
+        if (backend == null) return null;
+        String s = backend.trim();
+        if (s.isEmpty()) return null;
+        if ("Running".equalsIgnoreCase(s) || "5".equals(s)) return CONNECTED;
+        if ("Starting".equalsIgnoreCase(s) || "NoState".equalsIgnoreCase(s) || "1".equals(s)) {
+            return STARTING;
+        }
+        if ("Stopped".equalsIgnoreCase(s) || "4".equals(s)) return DISCONNECTED;
+        if ("NeedsLogin".equalsIgnoreCase(s) || "2".equals(s)) {
+            // A key in hand means the login is waiting on the control server's
+            // approval; no key means this device has nothing to log in with.
+            return hasKey ? NEEDS_APPROVAL : NEEDS_KEY;
+        }
+        // NeedsMachineAuth is the server holding the node for a person to
+        // approve, which looks the same from here as an approval URL.
+        if ("NeedsMachineAuth".equalsIgnoreCase(s) || "3".equals(s)) return NEEDS_APPROVAL;
+        return null;
+    }
+
+    private static String backendName(String raw) {
+        String s = raw == null ? "" : raw.trim();
+        if ("1".equals(s)) return "NoState";
+        if ("2".equals(s)) return "NeedsLogin";
+        if ("3".equals(s)) return "NeedsMachineAuth";
+        if ("4".equals(s)) return "Stopped";
+        if ("5".equals(s)) return "Running";
+        return s;
+    }
+
+    public static long lastOkAt(Context context) {
+        return prefs(context).getLong(K_LAST_OK_AT, 0L);
+    }
+
+    /** 0 means "no retry scheduled", so a caller may attempt immediately. */
+    public static long nextRetryAt(Context context) {
+        return prefs(context).getLong(K_NEXT_RETRY_AT, 0L);
+    }
+
+    public static void setNextRetry(Context context, long at) {
+        prefs(context).edit().putLong(K_NEXT_RETRY_AT, at).apply();
+        publishStatus(context);
+    }
+
+    /** Count one start attempt, so a log that keeps repeating is visible as a
+     *  number rather than inferred from timestamps. */
+    public static void noteAttempt(Context context) {
+        SharedPreferences p = prefs(context);
+        p.edit().putInt(K_ATTEMPTS, p.getInt(K_ATTEMPTS, 0) + 1).apply();
+        publishStatus(context);
     }
 
     public static String statusText(Context context) {
-        SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        boolean enabled = p.getBoolean("enabled", false);
-        String status = p.getString("status", enabled ? "starting" : "not joined");
+        SharedPreferences p = prefs(context);
+        boolean enabled = p.getBoolean(K_ENABLED, false);
+        String status = p.getString(K_STATUS, enabled ? STARTING : OFF);
+        if (!isStatus(status)) status = ERROR;
         return "Node: " + nodeName(context) + "  \u2022  " + status;
     }
 
