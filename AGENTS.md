@@ -87,7 +87,9 @@ house tailnet is controlled here, not by the Tailscale app.
   credential-encrypted storage. Making it earlier would need a
   `LOCKED_BOOT_COMPLETED` receiver plus device-protected prefs and state - a
   security downgrade for a device that has nothing to serve before unlock, so it
-  is deliberately not done. `JawnTailnetService` retries on its own (5s/15s/60s/5m,
+  is deliberately not done. A device that lost its state registers as a NEW node
+  (`tablet` becomes `tablet-1`): delete the stale node and rename the new one
+  (`headscale nodes delete -i <old>`, `headscale nodes rename -i <new> <name>`). `JawnTailnetService` retries on its own (5s/15s/60s/5m,
   then 15m, via an allow-while-idle alarm), and `files/tailnet/status.json` is
   what the house manager reads to show the real state.
 - **Its own client**: do not route this through the Tailscale app or a CLI; the
