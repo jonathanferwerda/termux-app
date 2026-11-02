@@ -137,6 +137,9 @@ public class JawnAppActivity extends Activity {
     private JawnSpeech speech;
     private boolean pendingLocationStart;
     private volatile boolean mediaPlaying;
+    /** True between onResume() and onPause(); JawnMedia uses it to decide
+     *  whether stopping a track also has to stop the page's timers. */
+    private volatile boolean isResumed;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -214,8 +217,18 @@ public class JawnAppActivity extends Activity {
         root.addView(bar, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        WebView.setWebContentsDebuggingEnabled(true);
+        if (com.jawnos.BuildConfig.DEBUG) {
+            // The inspector sockets are a performance and attack-surface cost in
+            // a shipped build; the release variant is debuggable for run-as, so
+            // BuildConfig.DEBUG is the flag that actually means "not shipped".
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         web = new WebView(this);
+        // Keep this view's renderer at the bound priority. `false` means the
+        // renderer is not waived when the view is invisible, so audio/video
+        // that is meant to continue in the background keeps its process. It is
+        // the default policy, but stating it here makes the intent explicit.
+        web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, false);
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onConsoleMessage(android.webkit.ConsoleMessage m) {
@@ -543,6 +556,7 @@ public class JawnAppActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        isResumed = true;
         if (web != null) {
             web.resumeTimers();
             web.onResume();
@@ -554,7 +568,16 @@ public class JawnAppActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (web != null) web.onPause();
+        isResumed = false;
+        if (web != null) {
+            web.onPause();
+            // pauseTimers() is process-wide, so this also stops the manager
+            // view's timers. That is intended: onCreate()/onResume() call
+            // resumeTimers() again, which is what lets a page parse after a
+            // pause. Never pause while audio/video is playing - the track would
+            // stop; JawnMedia.playing(false) does it when the media ends.
+            if (!mediaPlaying) web.pauseTimers();
+        }
         if (nfc != null) nfc.onPause();
         if (contacts != null) contacts.onPause();
         try {
@@ -666,11 +689,27 @@ public class JawnAppActivity extends Activity {
     }
 
     /** window.JawnMedia - the page tells the app when audio/video is playing.
-     *  This view never pauses its WebView, so playback simply continues. */
+     *  While it is true this view keeps its WebView running in the background
+     *  so playback continues; when the last track ends off-screen the timers
+     *  stop too, exactly as they would have in onPause(). */
     public class JawnMedia {
         @android.webkit.JavascriptInterface
         public void playing(final boolean playing) {
             mediaPlaying = playing;
+            if (!playing && !isResumed) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isResumed && web != null) {
+                            web.onPause();
+                            // Media was the only reason the timers were left
+                            // running; stop them now, process-wide, the same
+                            // way onPause() would have.
+                            web.pauseTimers();
+                        }
+                    }
+                });
+            }
         }
     }
 

@@ -19,6 +19,13 @@ if (keystoreFile.exists()) {
 
 android {
     namespace 'com.jawnos'
+    // BuildConfig.DEBUG is the only reliable "this is a release build" flag:
+    // the release variant is debuggable on purpose (run-as), so the manifest
+    // flag cannot distinguish it. Enabling the class lets the app keep the
+    // WebView inspector off in a shipped build.
+    buildFeatures {
+        buildConfig true
+    }
     compileSdk project.properties.compileSdkVersion.toInteger()
     ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
     def appVersionName = System.getenv("TERMUX_APP_VERSION_NAME") ?: ""
@@ -48,8 +55,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1254
-        versionName "0.118.255"
+        versionCode 1255
+        versionName "0.118.256"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
