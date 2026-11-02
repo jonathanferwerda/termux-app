@@ -60,3 +60,30 @@ If you build with gradlew directly, **bump `versionCode`/`versionName` in
   `JAWNOS.md`.
 - `scripts/app_build.pl` auto-detects the SDK (`~/android-sdk`) and a JDK
   (`~/jdk/jdk-*`); `scripts/app_publish.pl` needs an authenticated `gh`.
+
+## The tailnet: the key is the gate
+
+The app embeds libtailscale (there is no `tailscale` CLI on Android), so the
+house tailnet is controlled here, not by the Tailscale app.
+
+- **Never ship a key.** No preauth key belongs in the APK, in `res/`, or in a
+  tracked file. A key is provisioned per device, once.
+- **Mint a key on the cloud** (Headscale lives there): `sudo headscale
+  preauthkeys create -u 1 --expiration 1h -o json`. Keep it **single-use** (no
+  `--reusable`) and short-lived. `headscale preauthkeys list` shows the unused
+  ones; `headscale preauthkeys expire -i <id>` kills one.
+  Three long-lived reusable keys (2026-10-20) sat unused until 2026-11-02; they
+  were expired because anyone holding one could join the tailnet.
+- **Provision a device over adb** (the receiver accepts only the shell UID):
+  `adb shell am broadcast -a com.jawnos.app.JAWN_TAILNET -n
+  com.jawnos/com.jawnos.app.JawnWakeReceiver --es auth_key <key>`.
+  Without adb, tap *Join / connect* in the dashboard and paste it (blank means
+  browser approval).
+- **Revoke**: `headscale nodes delete -i <id>` (or `headscale nodes expire`).
+- **Self-healing**: the node state lives in `files/tailnet/`, so a joined device
+  reconnects with no key; only a lost state needs a new one, and the dashboard
+  then says `needs_key`. `JawnTailnetService` retries on its own (5s/15s/60s/5m,
+  then 15m, via an allow-while-idle alarm), and `files/tailnet/status.json` is
+  what the house manager reads to show the real state.
+- **Its own client**: do not route this through the Tailscale app or a CLI; the
+  `vpn()`/`tailnetStatus` bridge is the only source of truth on Android.
