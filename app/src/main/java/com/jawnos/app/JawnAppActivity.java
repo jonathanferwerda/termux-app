@@ -217,12 +217,11 @@ public class JawnAppActivity extends Activity {
         root.addView(bar, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        if (com.jawnos.BuildConfig.DEBUG) {
-            // The inspector sockets are a performance and attack-surface cost in
-            // a shipped build; the release variant is debuggable for run-as, so
-            // BuildConfig.DEBUG is the flag that actually means "not shipped".
-            WebView.setWebContentsDebuggingEnabled(true);
-        }
+        // The inspector sockets are a performance and attack-surface cost in a
+        // shipped build. The release variant is debuggable for `run-as`, and a
+        // debuggable app gets remote debugging by default, so say false
+        // explicitly rather than only skipping the true call.
+        WebView.setWebContentsDebuggingEnabled(!com.jawnos.BuildConfig.SHIPPED);
         web = new WebView(this);
         // Keep this view's renderer at the bound priority. `false` means the
         // renderer is not waived when the view is invisible, so audio/video

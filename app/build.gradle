@@ -55,8 +55,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1255
-        versionName "0.118.256"
+        versionCode 1258
+        versionName "0.118.259"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -126,6 +126,10 @@ android {
             // the flag. This is also why the Play channel (which forbids it) is
             // not the distribution route; see docs/leaving-termux.md M5.
             debuggable true
+            // debuggable is kept for `adb run-as`, so BuildConfig.DEBUG is true
+            // in this variant too. SHIPPED is the release-only flag the app
+            // uses for anything that must be off in a build people install.
+            buildConfigField "boolean", "SHIPPED", "true"
             minifyEnabled true
             shrinkResources false // Reproducible builds
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -133,6 +137,7 @@ android {
 
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "boolean", "SHIPPED", "false"
         }
     }
 

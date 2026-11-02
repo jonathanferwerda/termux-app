@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Application;
+import android.webkit.WebView;
 
 import com.jawnos.shared.crash.JawnCrashUtils;
 import com.jawnos.shared.settings.preferences.JawnSharedPreferences;
@@ -10,6 +11,11 @@ import com.jawnos.shared.logger.Logger;
 public class JawnApplication extends Application {
     public void onCreate() {
         super.onCreate();
+
+        // A debuggable app (the release variant keeps it for `run-as`) gets
+        // WebView remote debugging unless it is told otherwise. Set it once for
+        // every process here; a shipped build must not expose the inspector.
+        WebView.setWebContentsDebuggingEnabled(!com.jawnos.BuildConfig.SHIPPED);
 
         // Set crash handler for the app
         JawnCrashUtils.setCrashHandler(this);
