@@ -82,7 +82,12 @@ house tailnet is controlled here, not by the Tailscale app.
 - **Revoke**: `headscale nodes delete -i <id>` (or `headscale nodes expire`).
 - **Self-healing**: the node state lives in `files/tailnet/`, so a joined device
   reconnects with no key; only a lost state needs a new one, and the dashboard
-  then says `needs_key`. `JawnTailnetService` retries on its own (5s/15s/60s/5m,
+  then says `needs_key`. After a reboot the tunnel returns on the **first
+  unlock**, not before: `BOOT_COMPLETED` is delivered then, and jawn itself is in
+  credential-encrypted storage. Making it earlier would need a
+  `LOCKED_BOOT_COMPLETED` receiver plus device-protected prefs and state - a
+  security downgrade for a device that has nothing to serve before unlock, so it
+  is deliberately not done. `JawnTailnetService` retries on its own (5s/15s/60s/5m,
   then 15m, via an allow-while-idle alarm), and `files/tailnet/status.json` is
   what the house manager reads to show the real state.
 - **Its own client**: do not route this through the Tailscale app or a CLI; the
