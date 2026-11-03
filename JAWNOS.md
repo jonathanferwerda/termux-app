@@ -1399,3 +1399,18 @@ work and a full-width build has crashed it (2026-10-10).
      bridge and the tailnet service now declare `specialUse` (with the subtype
      property and the `FOREGROUND_SERVICE_SPECIAL_USE` grant) while the device
      bridge still widens to microphone/camera for a capture. Build 1249.
+
+130. **The alarm keeps the phone's volume, and can be answered from anywhere.**
+     targetSdk 36 made alarm apps pay for two old assumptions. `JawnClockSound`
+     still uses `USAGE_ALARM`, and now moves `STREAM_ALARM` to the Clock's own
+     Volume for the ring, then restores the previous step when the ring ends
+     (Dismiss, Snooze, a timer finishing, or the guard). The player gain ramps
+     into that level, and is the fallback if the stream cannot move. It no
+     longer forces the stream to maximum. `JawnClockNotifier` now checks
+     `canUseFullScreenIntent()` (API 34+), offers **Allow over lock screen** in
+     the ring notification when it is denied, and asks a locked phone directly
+     for the alarm face as a fallback; `JawnPermissionsActivity` gained the
+     same special-access page and a status line. jawn's side shows the ring
+     card in every open Manager window (the old localStorage claim was shared
+     by all windows) and relays `ring_notice` to the other machines, so Dismiss
+     and Snooze can be pressed anywhere and still end the sound everywhere.

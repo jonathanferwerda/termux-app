@@ -20,9 +20,14 @@ import java.io.File;
  * not reach it. This player asks for {@link AudioAttributes#USAGE_ALARM}, so an
  * alarm rings through the alarm channel even when the media volume is down.
  *
- * A short chime loops until Dismiss; a long recording plays once. The volume
- * ramp moves from a quiet start to the alarm's chosen level, and a guard stops
- * a ring that nobody answered.
+ * The alarm sets the phone's alarm stream to the Clock's own Volume for the
+ * ring, and puts the previous alarm-stream step back when the ring ends -
+ * Dismiss, Snooze, a timer finishing, or the five-minute guard. The player's
+ * gain then ramps from a quiet start to that level. The phone is left where
+ * the person left it instead of being forced to maximum.
+ *
+ * An alarm's chime or long recording loops until Dismiss; a timer's chime plays
+ * once. A guard stops a ring that nobody answered.
  */
 public final class JawnClockSound {
     private static final String LOG_TAG = "JawnClockSound";
@@ -59,10 +64,9 @@ public final class JawnClockSound {
             Log.w(LOG_TAG, "sound missing: " + file.getAbsolutePath());
             return;
         }
-        // A phone's volume keys turn down the alarm stream, and a ring nobody
-        // hears is a missed alarm. Raise it for the ring; the player's own
-        // volume (the alarm's percentage, and the ramp) scales on top.
-        raiseAlarmVolume(context);
+        // Put the phone's alarm stream where the Clock says, and remember the
+        // step it was on. A failure leaves the player gain doing the work.
+        boolean streamSet = setAlarmVolume(context, volumePercent);
         try {
             MediaPlayer mp = new MediaPlayer();
             mp.setAudioAttributes(new AudioAttributes.Builder()
@@ -74,7 +78,10 @@ public final class JawnClockSound {
             mp.setOnCompletionListener(done -> restoreAlarmVolume());
             mp.setDataSource(file.getAbsolutePath());
 
-            float target = Math.max(0.02f, Math.min(1f, volumePercent / 100f));
+            // The stream carries the chosen level when it moved; the player
+            // gain is then full, and the ramp fades into it. If the stream
+            // could not move, the gain carries the percentage instead.
+            float target = streamSet ? 1f : Math.max(0.02f, Math.min(1f, volumePercent / 100f));
             final float start = rampSeconds > 0 ? target * 0.15f : target;
             mp.setVolume(start, start);
             mp.prepare();
@@ -150,21 +157,37 @@ public final class JawnClockSound {
         restoreAlarmVolume();
     }
 
-    private static void raiseAlarmVolume(Context context) {
+    /**
+     * Move the alarm stream to the Clock's percentage of its steps. The phone's
+     * own alarm volume is the scale, so 50% means half of this phone's alarm
+     * stream, not half of an arbitrary maximum. The previous step is restored
+     * when the sound ends.
+     *
+     * @return true when the ring can rely on the stream (including when it was
+     *         already at that step), false when the caller should scale the
+     *         player gain instead.
+     */
+    private static boolean setAlarmVolume(Context context, int volumePercent) {
         try {
             AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-            if (am == null) return;
-            int current = am.getStreamVolume(AudioManager.STREAM_ALARM);
+            if (am == null) return false;
             int max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM);
-            if (max <= 0 || current >= max) return;
+            if (max <= 0) return false;
+            int wanted = Math.round(max * Math.max(0, Math.min(100, volumePercent)) / 100f);
+            if (wanted < 1) wanted = 1;
+            if (wanted > max) wanted = max;
+            int current = am.getStreamVolume(AudioManager.STREAM_ALARM);
+            if (current == wanted) return true;
             alarmAudio = am;
             savedAlarmVolume = current;
-            am.setStreamVolume(AudioManager.STREAM_ALARM, max, 0);
-            Log.i(LOG_TAG, "alarm stream " + current + " -> " + max);
+            am.setStreamVolume(AudioManager.STREAM_ALARM, wanted, 0);
+            Log.i(LOG_TAG, "alarm stream " + current + " -> " + wanted + " (" + volumePercent + "%)");
+            return true;
         } catch (Exception e) {
-            Log.w(LOG_TAG, "could not raise the alarm stream", e);
+            Log.w(LOG_TAG, "could not set the alarm stream", e);
             alarmAudio = null;
             savedAlarmVolume = -1;
+            return false;
         }
     }
 
@@ -172,6 +195,7 @@ public final class JawnClockSound {
         if (alarmAudio != null && savedAlarmVolume >= 0) {
             try {
                 alarmAudio.setStreamVolume(AudioManager.STREAM_ALARM, savedAlarmVolume, 0);
+                Log.i(LOG_TAG, "alarm stream restored to " + savedAlarmVolume);
             } catch (Exception ignored) {}
         }
         alarmAudio = null;

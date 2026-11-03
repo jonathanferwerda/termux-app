@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
@@ -61,6 +62,16 @@ public class JawnPermissionsActivity extends Activity {
                 open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             }
         });
+        if (Build.VERSION.SDK_INT >= 34) {
+            // Android 14 made USE_FULL_SCREEN_INTENT a special access; without
+            // it a Clock alarm is only a heads-up notice, not the face over
+            // the lock screen.
+            add(ll, "Alarms: show over the lock screen", new Runnable() {
+                public void run() {
+                    open(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()));
+                }
+            });
+        }
         add(ll, "Notification access (the notification list)", new Runnable() {
             public void run() {
                 open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS, null);
@@ -202,6 +213,11 @@ public class JawnPermissionsActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 29) {
             boolean bg = checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
             sb.append("background location: ").append(bg ? "granted" : "missing").append('\n');
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            boolean fsi = nm != null && nm.canUseFullScreenIntent();
+            sb.append("alarms over the lock screen: ").append(fsi ? "granted" : "missing").append('\n');
         }
         String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
         sb.append("notification access: ").append(flat != null && flat.contains(getPackageName()) ? "granted" : "missing");

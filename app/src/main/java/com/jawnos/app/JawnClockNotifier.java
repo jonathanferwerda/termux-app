@@ -1,5 +1,6 @@
 package com.jawnos.app;
 
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -8,8 +9,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.drawable.Icon;
+import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 
 import com.jawnos.R;
@@ -53,6 +56,7 @@ public final class JawnClockNotifier {
     private static final int CONTENT_REQUEST = 7302;
     private static final int DISMISS_REQUEST = 7307;
     private static final int SNOOZE_REQUEST = 7308;
+    private static final int FULLSCREEN_REQUEST = 7309;
     private static final int DEFAULT_SNOOZE_MINUTES = 5;
     private static final int UPCOMING_ID = 7304;
     private static final int UPCOMING_CONTENT_REQUEST = 7305;
@@ -170,16 +174,25 @@ public final class JawnClockNotifier {
                             context.getString(R.string.clock_alarm_snooze, snoozeMinutes),
                             snoozePending).build());
         }
-        // canUseFullScreenIntent() is API 34 and the app compiles against SDK 30;
-        // ask for it reflectively so the same APK still builds and older phones
-        // simply skip the check.
-        if (Build.VERSION.SDK_INT >= 34) {
-            try {
-                Object allowed = nm.getClass().getMethod("canUseFullScreenIntent").invoke(nm);
-                if (allowed instanceof Boolean && !((Boolean) allowed)) {
-                    Log.w(LOG_TAG, "full-screen intent not allowed; the alarm remains a heads-up notification");
-                }
-            } catch (Exception ignored) {}
+        boolean fullScreen = fullScreenAllowed(context);
+        // A phone with notifications turned off still needs a way to answer.
+        // The alarm face is asked for directly below in that case, just as it
+        // is when the full-screen permission is missing.
+        boolean canNotify = nm.areNotificationsEnabled();
+        if (!canNotify) {
+            Log.w(LOG_TAG, "notifications are disabled; the alarm face is the fallback");
+        }
+        if (!fullScreen) {
+            // Android 14 made USE_FULL_SCREEN_INTENT a special access. The app
+            // is an alarm app, but a sideloaded build is not classified by a
+            // store, so the system can leave it denied and turn the alarm into
+            // a heads-up notice. Offer the switch that grants it; the alarm
+            // still opens the face directly below where Android permits it.
+            Log.w(LOG_TAG, "full-screen intent not allowed; offering the lock-screen permission");
+            builder.addAction(new Notification.Action.Builder(
+                    Icon.createWithResource(context, R.drawable.ic_new_session),
+                    context.getString(R.string.clock_alarm_fullscreen_permission),
+                    fullScreenSettings(context)).build());
         }
         try {
             // A new id each time, so the full-screen intent fires again on a
@@ -194,6 +207,57 @@ public final class JawnClockNotifier {
             nm.notify(ringId, builder.build());
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not post alarm notification", e);
+        }
+        // Ask for the face directly as well as posting the full-screen intent.
+        // The intent is the sanctioned road, but a restricted or OEM build can
+        // ignore it; the activity is singleTask, so when both arrive the second
+        // one just brings the same face forward.
+        startOverLockScreen(context, open);
+    }
+
+    /**
+     * Android 14+ gates USE_FULL_SCREEN_INTENT behind a special access that is
+     * granted by default only to apps a store classifies as alarm or calling
+     * apps. A sideloaded build can be left denied, which is why an alarm that
+     * used to open over the keyguard became a heads-up notice. Ask the system.
+     */
+    public static boolean fullScreenAllowed(Context context) {
+        if (Build.VERSION.SDK_INT < 34) return true;
+        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return false;
+        try {
+            Object allowed = nm.getClass().getMethod("canUseFullScreenIntent").invoke(nm);
+            return allowed instanceof Boolean && ((Boolean) allowed);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static PendingIntent fullScreenSettings(Context context) {
+        Intent allow = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                Uri.parse("package:" + context.getPackageName()));
+        allow.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(context, FULLSCREEN_REQUEST, allow, flags());
+    }
+
+    /**
+     * The permission-free road: with the phone locked or asleep, ask for the
+     * alarm face directly, whether or not the full-screen intent was accepted.
+     * Android may refuse a background activity start, in which case the
+     * notification above (or the intent) is still the way in once unlocked.
+     */
+    private static void startOverLockScreen(Context context, Intent open) {
+        try {
+            KeyguardManager km = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            boolean locked = km != null && km.isKeyguardLocked();
+            boolean awake = pm != null && pm.isInteractive();
+            if (locked || !awake) {
+                context.startActivity(open);
+                Log.i(LOG_TAG, "asked for the alarm face directly");
+            }
+        } catch (Exception e) {
+            Log.w(LOG_TAG, "could not show the alarm face directly", e);
         }
     }
 

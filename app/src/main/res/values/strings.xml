@@ -41,6 +41,7 @@
     <string name="clock_alarm_nfc_first">Solve the problem first</string>
     <string name="clock_alarm_nfc_unavailable">NFC is off - turn it on to snooze or dismiss</string>
     <string name="clock_alarm_nfc_unreadable">Could not read that tag - try again</string>
+    <string name="clock_alarm_fullscreen_permission">Allow over lock screen</string>
 
     <!-- Termux RUN_COMMAND permission -->
     <string name="permission_run_command_label">Run commands in &TERMUX_APP_NAME; environment</string>
