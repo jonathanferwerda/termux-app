@@ -223,9 +223,9 @@ public class JawnBleService extends Service {
         thread.start();
         handler = new Handler(thread.getLooper());
 
-        // While the screen is off the watch decides when it is reachable (a
-        // wrist tilt wakes it), so the link waits in the background instead of
-        // waking the radio on every retry. Screen-on promotes it at once.
+        // A retry waits in the background for the watch to advertise (a wrist
+        // tilt), whatever the screen is doing; screen-on still promotes a
+        // pending wait to a direct attempt once.
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             screenOn = pm == null || pm.isInteractive();
@@ -673,11 +673,18 @@ public class JawnBleService extends Service {
             };
         }
 
-        boolean matches(UUID service, UUID rx, UUID tx, int targetMtu, boolean compress) {
+        /** The radio this link names. Compress is an encoding preference for
+         *  writes, not part of the identity: a connect that only disagrees
+         *  about it must not release a connected watch. */
+        boolean matchesRadio(UUID service, UUID rx, UUID tx, int targetMtu) {
             return this.service.equals(service)
                     && this.rx.equals(rx)
                     && this.tx.equals(tx)
-                    && this.targetMtu == targetMtu
+                    && this.targetMtu == targetMtu;
+        }
+
+        boolean matches(UUID service, UUID rx, UUID tx, int targetMtu, boolean compress) {
+            return matchesRadio(service, rx, tx, targetMtu)
                     && this.compress == compress;
         }
     }
@@ -771,16 +778,21 @@ public class JawnBleService extends Service {
         if (existing != null && existing.matches(service, rx, tx, targetMtu, compress)) {
             // Idempotent: a second connect for a target already linked (or
             // mid-connect) must not tear the first attempt down.
-            if (isConnected(existing) || existing.connecting || existing.gatt != null) {
-                emitStatus();
-                return;
+            connectExisting(existing, true);
+            return;
+        }
+        if (existing != null && existing.matchesRadio(service, rx, tx, targetMtu)) {
+            // Same radio, different encoding preference. Compress decides how a
+            // payload is written, not which link it is, so adopt it in place:
+            // releasing the GATT client here used to drop a connected watch and
+            // start the reconnect hunt again, and every attempt then failed
+            // while the watch slept.
+            if (existing.compress != compress) {
+                existing.compress = compress;
+                targets.put(mac, new Target(mac, service.toString(), rx.toString(), tx.toString(), targetMtu, compress));
+                persistTargets();
             }
-            targets.put(mac, new Target(mac, service.toString(), rx.toString(), tx.toString(), targetMtu, compress));
-            existing.autoReconnect = true;
-            existing.reconnectDelay = RECONNECT_START_MS;
-            existing.attempt = 0;
-            persistTargets();
-            doConnect(existing, false);
+            connectExisting(existing, true);
             return;
         }
         if (existing != null) {
@@ -849,6 +861,25 @@ public class JawnBleService extends Service {
         emitDisconnected(link, 0, "requested", 0);
     }
 
+    /** Ask a link whose target already matches to connect now. An explicit
+     *  connect promotes a pending background wait, so a send is not stuck
+     *  behind the passive retry that waits for the watch to advertise. */
+    private void connectExisting(Link existing, boolean explicit) {
+        if (isConnected(existing) || existing.gatt != null) { emitStatus(); return; }
+        if (existing.connecting) {
+            if (explicit && existing.background) {
+                releaseGatt(existing);
+                doConnect(existing, false);
+            }
+            else { emitStatus(); }
+            return;
+        }
+        existing.autoReconnect = true;
+        existing.reconnectDelay = RECONNECT_START_MS;
+        existing.attempt = 0;
+        doConnect(existing, false);
+    }
+
     private void doConnect(Link link, boolean background) {
         if (link.gatt != null || link.connecting) return;
         handler.removeCallbacks(link.reconnectRunner);
@@ -861,11 +892,13 @@ public class JawnBleService extends Service {
             link.connectStartedAt = System.currentTimeMillis();
             link.since = link.connectStartedAt;
             link.attempt++;
-            // With the screen off, an active attempt wakes the radio just to fail
-            // while the watch sleeps. A background request waits for the
-            // peripheral to advertise - a wrist tilt - and costs nothing until
-            // then, so "hey jawn" is still met the moment the watch wakes.
-            boolean bg = background && !screenOn;
+            // A retry is a background (autoConnect) request even with the screen
+            // on: it waits for the peripheral to advertise - a wrist tilt - and
+            // costs nothing until then, so "hey jawn" is met the moment the watch
+            // wakes. An active attempt to a sleeping watch just fails every
+            // timeout. An explicit connect and the screen-on promotion still ask
+            // directly, so a send does not wait for a tilt.
+            boolean bg = background;
             link.background = bg;
             BluetoothGatt g = dev.connectGatt(this, bg, gattCallback, BluetoothDevice.TRANSPORT_LE);
             if (g == null) {

@@ -1418,3 +1418,15 @@ work and a full-width build has crashed it (2026-10-10).
      `JAWN_CLOCK_TIMER` carries it), and a desktop alarm sets the machine's own
      output volume with pactl, wpctl or amixer for the ring, restoring the
      previous level with the sound.
+
+131. **The watch is not dropped for an encoding preference, and a retry waits
+     for it.** `JawnBleService` treated a connect whose `compress` differed as a
+     different target, so a host connect asking for compression released a
+     connected T-Watch and started the reconnect hunt again; every active
+     attempt then failed while the watch slept (`gatt status 147`, one cycle
+     every 40 s with the screen on). Compress is now adopted in place - it
+     decides how a payload is written, not which radio this is - and reconnects
+     use a background (`autoConnect`) request whatever the screen is doing, so
+     a wrist tilt connects at once and a sleeping watch is not woken for a
+     direct attempt. An explicit connect, and the screen-on promotion, still
+     ask directly, so a send does not wait for a tilt. Build 1269.
