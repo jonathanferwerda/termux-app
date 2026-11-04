@@ -1353,8 +1353,12 @@ public class DeviceService extends Service {
         JSONObject out = new JSONObject();
         out.put("state", JawnInCallService.state);
         out.put("number", JawnPhoneState.freshNumber(120_000));
+        String number = JawnPhoneState.freshNumber(120_000);
         out.put("sco", JawnIvrAudio.scoAvailable(this));
-        out.put("screen", JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)));
+        out.put("enabled", JawnPhoneBridge.ivrEnabled(this));
+        out.put("gateway", JawnPhoneBridge.ivrMachineAvailable(this));
+        out.put("screen", JawnPhoneBridge.ivrFlowFor(this, number));
+        out.put("answer", JawnPhoneBridge.ivrShouldScreen(this, number));
         return out;
     }
 

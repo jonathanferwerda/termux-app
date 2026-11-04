@@ -175,9 +175,17 @@ public class JawnPhoneBridge {
         return flow.isEmpty() ? "ring" : flow;
     }
 
-    /** Should this call be answered and handed to the Bluetooth gateway? */
+    /**
+     * Should this call be answered and handed to the Bluetooth gateway?
+     *
+     * The gateway is reachable when one is named and online, or - the fact that
+     * matters most, because it is what carries the audio - when a Bluetooth
+     * Hands-Free device is connected right now. The settings key is a hint that
+     * can be stale in the page-written facts; the connected headset is not.
+     */
     public static boolean ivrShouldScreen(Context context, String number) {
-        if (!ivrEnabled(context) || !ivrMachineAvailable(context)) return false;
+        if (!ivrEnabled(context)) return false;
+        if (!ivrMachineAvailable(context) && !JawnIvrAudio.scoAvailable(context)) return false;
         String flow = ivrFlowFor(context, number);
         return "ivr".equals(flow) || "voicemail".equals(flow);
     }
