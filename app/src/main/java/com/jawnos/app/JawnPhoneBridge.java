@@ -68,6 +68,34 @@ public class JawnPhoneBridge {
         } catch (Throwable ignored) { }
     }
 
+    /**
+     * Is this app the phone app? Without the dialer role Android hands incoming
+     * calls to another dialer, and the in-call service (which answers for the
+     * reception) never runs at all.
+     */
+    @JavascriptInterface
+    public String dialerRole() {
+        try {
+            android.app.role.RoleManager rm =
+                (android.app.role.RoleManager) context.getSystemService(Context.ROLE_SERVICE);
+            if (rm == null || !rm.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)) return "no";
+            return rm.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER) ? "yes" : "no";
+        } catch (Throwable t) { return "no"; }
+    }
+
+    /** Ask to become the phone app. The system shows its own confirmation. */
+    @JavascriptInterface
+    public void requestDialer() {
+        try {
+            android.app.role.RoleManager rm =
+                (android.app.role.RoleManager) context.getSystemService(Context.ROLE_SERVICE);
+            if (rm == null) return;
+            Intent intent = rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Throwable ignored) { }
+    }
+
     /** The calls this phone refused, handed over and cleared in one step. */
     @JavascriptInterface
     public String takeBlockedCalls() {
