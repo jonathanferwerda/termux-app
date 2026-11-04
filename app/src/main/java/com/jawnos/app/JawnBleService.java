@@ -80,6 +80,10 @@ public class JawnBleService extends Service {
 
     /** Loopback TCP port; the client (tools/jawn-bt) connects to 127.0.0.1:PORT. */
     private static final int PORT = 45999;
+    // A command is one line of JSON from a bridge client. Anything this
+    // large is a broken client, not a plausible message: refuse it without
+    // echoing it back (the old path built a 4 MB error event).
+    private static final int MAX_COMMAND_CHARS = 8 * 1024 * 1024;
 
     /** The Nordic UART service. connect may omit the UUIDs; these are the defaults. */
     private static final UUID NUS_SERVICE = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
@@ -346,13 +350,22 @@ public class JawnBleService extends Service {
                 BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
                 String line;
                 while ((line = r.readLine()) != null) {
+                    if (line.length() > MAX_COMMAND_CHARS) {
+                        emitError("bad command: line too long (" + line.length() + " chars)");
+                        continue;
+                    }
                     try {
                         final JSONObject o = new JSONObject(line);
                         handler.post(new Runnable() {
                             public void run() { handleCommand(o); }
                         });
                     } catch (Throwable t) {
-                        emitError("bad command: " + t);
+                        // JSONTokener's message includes the whole input; a
+                        // truncated large command made this a multi-megabyte error
+                        // event. Name the reason, never the payload.
+                        String why = String.valueOf(t);
+                        if (why.length() > 300) why = why.substring(0, 300) + "...";
+                        emitError("bad command: " + why);
                     }
                 }
             } catch (Throwable t) {
