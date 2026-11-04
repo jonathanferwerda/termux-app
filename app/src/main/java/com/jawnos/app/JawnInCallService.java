@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.Call;
+import android.telecom.CallAudioState;
 import android.telecom.InCallService;
 import android.telecom.VideoProfile;
 
@@ -91,7 +92,7 @@ public class JawnInCallService extends InCallService {
                 }
                 if (isScreened(flow)) {
                     trip.ivr = true;
-                    JawnIvrAudio.routeToSco(JawnInCallService.this, JawnPhoneBridge.ivrBluetoothName(JawnInCallService.this));
+                    routeCallToGateway();
                     try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                     handler.removeCallbacks(watchdog);
                     handler.postDelayed(watchdog,
@@ -115,7 +116,7 @@ public class JawnInCallService extends InCallService {
                     trip.answered = true;
                     // Android may reset the communication device as the call
                     // settles, so the route is set again here
-                    if (trip.ivr) JawnIvrAudio.routeToSco(JawnInCallService.this, JawnPhoneBridge.ivrBluetoothName(JawnInCallService.this));
+                    if (trip.ivr) routeCallToGateway();
                 }
             }
             else if (newState == Call.STATE_DISCONNECTED) {
@@ -128,6 +129,19 @@ public class JawnInCallService extends InCallService {
             }
         }
     };
+
+    /**
+     * Put the call itself on the gateway. As the dialer this app owns the call's
+     * audio route through Telecom: setting only the AudioManager's communication
+     * device is enough for the prompts to leave the phone, but the caller's
+     * voice stays on the handset and never reaches the Hands-Free side. The
+     * Telecom route is the one that moves both directions.
+     */
+    private void routeCallToGateway() {
+        try { setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
+        JawnIvrAudio.routeToSco(this, JawnPhoneBridge.ivrBluetoothName(this));
+        JawnLog.append("ivr audio: telecom route " + getCallAudioState());
+    }
 
     private static boolean isScreened(String flow) {
         return "ivr".equals(flow) || "voicemail".equals(flow);
