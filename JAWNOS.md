@@ -1431,6 +1431,13 @@ work and a full-width build has crashed it (2026-10-10).
      direct attempt. An explicit connect, and the screen-on promotion, still
      ask directly, so a send does not wait for a tilt. Build 1269.
 
+132. **Back hides the page's keyboard first.** The manager page's keyboard is a
+     DOM dock, not a platform input method, so the WebView activity treated Back
+     as history and left the screen. `JawnWebViewActivity` and
+     `JawnAppActivity` now ask the page (`softKbVisible()`) and hide the dock
+     (`softKbHide()`) when it is up, consuming that Back press; history, the
+     app's own back handler and leaving the screen wait for the next press.
+
 ## Deltas round U (the recent-call dialer and the IVR facts)
 - JawnPhoneBridge.dial: window.JawnPhone.dial(number) opens the default dialer
   (ACTION_DIAL, tel:) with the number typed in; the Phone app recent-call phone

@@ -552,8 +552,21 @@ public class JawnWebViewActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack()) web.goBack();
-        else super.onBackPressed();
+        final WebView page = web;
+        if (page == null) {
+            super.onBackPressed();
+            return;
+        }
+        // The page's own keyboard is up: Back hides it, the way it does on a
+        // phone, instead of walking the WebView's history out of the screen.
+        JawnSoftKeyboard.hideIfOpen(page, () -> {
+            if (page.canGoBack()) page.goBack();
+            else backOut();
+        });
+    }
+
+    private void backOut() {
+        super.onBackPressed();
     }
 
     /** The house, on any of its names, keeps navigation in the app. */

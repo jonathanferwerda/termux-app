@@ -607,28 +607,31 @@ public class JawnAppActivity extends Activity {
             super.onBackPressed();
             return;
         }
-        // Let the app walk its own history first (a Gallery photo, then its
-        // album, then the albums page), then the WebView's history, and only
-        // then leave the app.
-        final String quotedApp = JSONObject.quote(appName);
-        try {
-            web.evaluateJavascript(
-                "(function(){try{return typeof jawnosAppBack==='function'"
-                    + "?!!jawnosAppBack(" + quotedApp + "):false;}catch(e){return false;}})()",
-                new ValueCallback<String>() {
-                    @Override
-                    public void onReceiveValue(String value) {
-                        if ("true".equals(value)) return;
-                        if (web != null && web.canGoBack()) {
-                            web.goBack();
-                            return;
+        final WebView page = web;
+        // The page's own keyboard is up: Back hides it first. Only when it is
+        // not does the app walk its own history (a Gallery photo, then its
+        // album, then the albums page), then the WebView's, then leave.
+        JawnSoftKeyboard.hideIfOpen(page, () -> {
+            final String quotedApp = JSONObject.quote(appName);
+            try {
+                page.evaluateJavascript(
+                    "(function(){try{return typeof jawnosAppBack==='function'"
+                        + "?!!jawnosAppBack(" + quotedApp + "):false;}catch(e){return false;}})()",
+                    new ValueCallback<String>() {
+                        @Override
+                        public void onReceiveValue(String value) {
+                            if ("true".equals(value)) return;
+                            if (page.canGoBack()) {
+                                page.goBack();
+                                return;
+                            }
+                            finish();
                         }
-                        finish();
-                    }
-                });
-        } catch (Throwable t) {
-            finish();
-        }
+                    });
+            } catch (Throwable t) {
+                finish();
+            }
+        });
     }
 
     @Override
