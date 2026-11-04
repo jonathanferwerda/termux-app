@@ -91,7 +91,7 @@ public class JawnInCallService extends InCallService {
                 }
                 if (isScreened(flow)) {
                     trip.ivr = true;
-                    JawnIvrAudio.routeToSco(JawnInCallService.this);
+                    JawnIvrAudio.routeToSco(JawnInCallService.this, JawnPhoneBridge.ivrBluetoothName(JawnInCallService.this));
                     try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                     handler.removeCallbacks(watchdog);
                     handler.postDelayed(watchdog,
@@ -115,7 +115,7 @@ public class JawnInCallService extends InCallService {
                     trip.answered = true;
                     // Android may reset the communication device as the call
                     // settles, so the route is set again here
-                    if (trip.ivr) JawnIvrAudio.routeToSco(JawnInCallService.this);
+                    if (trip.ivr) JawnIvrAudio.routeToSco(JawnInCallService.this, JawnPhoneBridge.ivrBluetoothName(JawnInCallService.this));
                 }
             }
             else if (newState == Call.STATE_DISCONNECTED) {

@@ -28,6 +28,33 @@ final class JawnIvrAudio {
         } catch (Throwable t) { return null; }
     }
 
+    /**
+     * The Hands-Free device to use: the one whose Bluetooth name matches the
+     * gateway's, falling back to the only one there is.
+     */
+    static AudioDeviceInfo scoDevice(Context context, String preferName) {
+        AudioManager am = manager(context);
+        if (am == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null;
+        AudioDeviceInfo first = null;
+        String want = preferName == null ? "" : preferName.trim().toLowerCase();
+        try {
+            for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
+                if (device.getType() != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) continue;
+                if (first == null) first = device;
+                String name = device.getProductName() == null ? "" : device.getProductName().toString().toLowerCase();
+                if (!want.isEmpty() && name.equals(want)) return device;
+            }
+            if (!want.isEmpty() && first != null) {
+                for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
+                    if (device.getType() != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) continue;
+                    String name = device.getProductName() == null ? "" : device.getProductName().toString().toLowerCase();
+                    if (name.contains(want)) return device;
+                }
+            }
+        } catch (Throwable t) { }
+        return first;
+    }
+
     /** Is a Bluetooth Hands-Free device (the gateway) connected right now? */
     static boolean scoAvailable(Context context) {
         AudioManager am = manager(context);
@@ -49,17 +76,30 @@ final class JawnIvrAudio {
      * are out of the path while this is on.
      */
     static boolean routeToSco(Context context) {
+        return routeToSco(context, "");
+    }
+
+    /**
+     * Send the call to the named gateway adapter. A phone can have a headset of
+     * its own connected at the same time - and Android prefers whichever it made
+     * active last - so "the first SCO device" is not good enough: the audio has
+     * to go to the adapter the house gateway is listening on.
+     */
+    static boolean routeToSco(Context context, String preferName) {
         AudioManager am = manager(context);
         if (am == null) return false;
         try {
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
-                    if (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
-                        return am.setCommunicationDevice(device);
-                    }
+                AudioDeviceInfo pick = scoDevice(context, preferName);
+                if (pick == null) {
+                    JawnLog.append("ivr audio: no SCO device (wanted " + preferName + ")");
+                    return false;
                 }
-                return false;
+                boolean ok = am.setCommunicationDevice(pick);
+                JawnLog.append("ivr audio: " + (ok ? "routed to " : "could not route to ")
+                        + pick.getProductName() + " [" + pick.getAddress() + "] wanted " + preferName);
+                return ok;
             }
             am.startBluetoothSco();
             am.setBluetoothScoOn(true);

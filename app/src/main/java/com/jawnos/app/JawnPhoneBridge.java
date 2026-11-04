@@ -152,6 +152,11 @@ public class JawnPhoneBridge {
         return ivrFacts(context).optString("machine", "");
     }
 
+    /** The Bluetooth name of the gateway adapter (e.g. jawn-gateway). */
+    public static String ivrBluetoothName(Context context) {
+        return ivrFacts(context).optString("bluetooth", "");
+    }
+
     /** Is the selected gateway's remote_machines row connected right now? */
     public static boolean ivrMachineAvailable(Context context) {
         return ivrFacts(context).optBoolean("machine_available", false);
