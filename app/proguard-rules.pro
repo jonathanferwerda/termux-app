@@ -15,3 +15,10 @@
 # https://issuetracker.google.com/issues/189001730
 # https://android-review.googlesource.com/c/platform/frameworks/support/+/1757630
 -keep class androidx.window.** { *; }
+
+-keepclassmembers class com.jawnos.app.JawnPhoneBridge {
+    public static boolean ivrEnabled(android.content.Context);
+    public static java.lang.String ivrRoute(android.content.Context);
+    public static java.lang.String ivrMachine(android.content.Context);
+    public static boolean ivrMachineAvailable(android.content.Context);
+}

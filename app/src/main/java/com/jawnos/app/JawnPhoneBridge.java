@@ -1,7 +1,9 @@
 package com.jawnos.app;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONArray;
@@ -53,6 +55,19 @@ public class JawnPhoneBridge {
         try { return prefs().getString(FACTS, ""); } catch (Throwable t) { return ""; }
     }
 
+    /** Open the default dialer with the number typed in; this places no call. */
+    @JavascriptInterface
+    public void dial(String number) {
+        try {
+            if (number == null) return;
+            String clean = number.replaceAll("[^0-9+*#]", "");
+            if (clean.isEmpty()) return;
+            Intent intent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + clean));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Throwable ignored) { }
+    }
+
     /** The calls this phone refused, handed over and cleared in one step. */
     @JavascriptInterface
     public String takeBlockedCalls() {
@@ -90,6 +105,35 @@ public class JawnPhoneBridge {
     /** The house's name for this number, or "" when it does not know it. */
     public static String nameFor(Context context, String number) {
         return valueFor(context, "names", number);
+    }
+
+    // ---- the IVR policy (fed by GET /manager/phone/sync) ----
+
+    /** Is the reception flow enabled for this phone? */
+    public static boolean ivrEnabled(Context context) {
+        return "yes".equals(ivrFacts(context).optString("enabled", "no"));
+    }
+
+    /** unknown, all or off: which callers the reception flow should take. */
+    public static String ivrRoute(Context context) {
+        return ivrFacts(context).optString("route", "unknown");
+    }
+
+    /** The selected gateway's signatorial (or IP), or "" when none is set. */
+    public static String ivrMachine(Context context) {
+        return ivrFacts(context).optString("machine", "");
+    }
+
+    /** Is the selected gateway's remote_machines row connected right now? */
+    public static boolean ivrMachineAvailable(Context context) {
+        return ivrFacts(context).optBoolean("machine_available", false);
+    }
+
+    private static JSONObject ivrFacts(Context context) {
+        try {
+            JSONObject ivr = factsOf(context).optJSONObject("ivr");
+            return ivr == null ? new JSONObject() : ivr;
+        } catch (Throwable t) { return new JSONObject(); }
     }
 
     /** The caller's picture as a data URI, or "" when the house has none. */

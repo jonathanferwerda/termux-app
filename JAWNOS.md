@@ -1430,3 +1430,11 @@ work and a full-width build has crashed it (2026-10-10).
      a wrist tilt connects at once and a sleeping watch is not woken for a
      direct attempt. An explicit connect, and the screen-on promotion, still
      ask directly, so a send does not wait for a tilt. Build 1269.
+
+## Deltas round U (the recent-call dialer and the IVR facts)
+- JawnPhoneBridge.dial: window.JawnPhone.dial(number) opens the default dialer
+  (ACTION_DIAL, tel:) with the number typed in; the Phone app recent-call phone
+  icon uses it. No call is placed by the bridge.
+- JawnPhoneBridge: ivrEnabled/ivrRoute/ivrMachine/ivrMachineAvailable read the
+  ivr object that GET /manager/phone/sync now carries, so the native side can
+  see the IVR policy and whether the selected gateway is online.
