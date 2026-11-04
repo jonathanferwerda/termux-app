@@ -486,6 +486,21 @@ public class DeviceService extends Service {
                 reply.put("ok", true);
                 reply.put("result", telephonyInfo());
             }
+            else if ("telephony.ivr_state".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", ivrState());
+            }
+            else if ("telephony.ivr_answer".equals(method)) {
+                JawnIvrAudio.routeToSco(this);
+                JawnInCallService.answer();
+                reply.put("ok", true);
+                reply.put("result", ivrState());
+            }
+            else if ("telephony.hangup".equals(method)) {
+                JawnInCallService.hangup();
+                reply.put("ok", true);
+                reply.put("result", ivrState());
+            }
             else if ("media.player".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", media(request.optJSONObject("args")));
@@ -1327,6 +1342,20 @@ public class DeviceService extends Service {
         startActivity(call);
         result.put("dialed", true);
         return result;
+    }
+
+    /**
+     * What the reception flow needs to know while a call is up: the telecom
+     * state, the number ringing or talking, and whether a Bluetooth Hands-Free
+     * device is there to hand the audio to.
+     */
+    private JSONObject ivrState() throws Exception {
+        JSONObject out = new JSONObject();
+        out.put("state", JawnInCallService.state);
+        out.put("number", JawnPhoneState.freshNumber(120_000));
+        out.put("sco", JawnIvrAudio.scoAvailable(this));
+        out.put("screen", JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)));
+        return out;
     }
 
     /** TelephonyManager in termux-telephony-deviceinfo's shape. */

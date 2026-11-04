@@ -2,6 +2,8 @@ package com.jawnos.app;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.telecom.Call;
 import android.telecom.InCallService;
 import android.telecom.VideoProfile;
@@ -20,6 +22,13 @@ import java.util.Map;
  * else is running, so it keeps one record per call and leaves it in the app's own
  * store when the call ends (JawnPhoneBridge.recordCall): the page files it when
  * it is next there, and is nudged at once when it is up.
+ *
+ * The reception flow lives here too. When the house's IVR is enabled, a gateway
+ * machine is connected, and the caller's flow is "ivr" or "voicemail", the call
+ * is answered without the in-call screen and its audio is handed to the
+ * Bluetooth gateway (JawnIvrAudio), which plays the house's prompts and records
+ * the caller's name. A watchdog hangs up if the gateway never does, so a broken
+ * link cannot leave the line open.
  */
 public class JawnInCallService extends InCallService {
 
@@ -27,12 +36,31 @@ public class JawnInCallService extends InCallService {
     public static volatile int state = Call.STATE_DISCONNECTED;
     public static volatile Call current;
 
+    /**
+     * How long a screened call may stay up with nobody ending it. The caller
+     * says a name in a few seconds and a message takes longer, so the two flows
+     * get different ceilings; either way the line never stays open on its own.
+     */
+    private static final long IVR_LIMIT_MS = 40_000;
+    private static final long VOICEMAIL_LIMIT_MS = 120_000;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            Call call = current;
+            if (call == null) return;
+            try { call.disconnect(); } catch (Throwable ignored) { }
+        }
+    };
+
     /** One call's own record, kept across its state changes. */
     private static final class Trip {
         final String number;
         final String direction;
         final long started;
         boolean answered;
+        boolean ivr;
+        String flow = "";
 
         Trip(String number, String direction, long started) {
             this.number = number == null ? "" : number;
@@ -49,8 +77,27 @@ public class JawnInCallService extends InCallService {
             current = call;
             state = newState;
             if (newState == Call.STATE_RINGING) {
-                JawnPhoneState.incoming(numberOf(call));
-                trips.put(call, new Trip(numberOf(call), "incoming", System.currentTimeMillis()));
+                String number = numberOf(call);
+                JawnPhoneState.incoming(number);
+                Trip trip = new Trip(number, "incoming", System.currentTimeMillis());
+                trips.put(call, trip);
+                // the house decides before the phone does: refuse, answer for the
+                // receptionist, or ring through with the screen
+                String flow = JawnPhoneBridge.ivrFlowFor(JawnInCallService.this, number);
+                trip.flow = flow;
+                if ("reject".equals(flow)) {
+                    try { call.reject(false, null); } catch (Throwable ignored) { }
+                    return;
+                }
+                if (isScreened(flow)) {
+                    trip.ivr = true;
+                    JawnIvrAudio.routeToSco(JawnInCallService.this);
+                    try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
+                    handler.removeCallbacks(watchdog);
+                    handler.postDelayed(watchdog,
+                            "voicemail".equals(flow) ? VOICEMAIL_LIMIT_MS : IVR_LIMIT_MS);
+                    return;
+                }
                 showScreen();
             }
             else if (newState == Call.STATE_DIALING) {
@@ -64,16 +111,27 @@ public class JawnInCallService extends InCallService {
                 // reached ACTIVE: this is the state that means somebody answered,
                 // whether the call came in or went out
                 Trip trip = trips.get(call);
-                if (trip != null) trip.answered = true;
+                if (trip != null) {
+                    trip.answered = true;
+                    // Android may reset the communication device as the call
+                    // settles, so the route is set again here
+                    if (trip.ivr) JawnIvrAudio.routeToSco(JawnInCallService.this);
+                }
             }
             else if (newState == Call.STATE_DISCONNECTED) {
                 Trip trip = trips.remove(call);
+                handler.removeCallbacks(watchdog);
+                if (trip != null && trip.ivr) JawnIvrAudio.restore(JawnInCallService.this);
                 if (trip != null) writeTrip(trip);
                 JawnPhoneState.incoming("");
                 showScreen(); // the screen closes itself once no call is up
             }
         }
     };
+
+    private static boolean isScreened(String flow) {
+        return "ivr".equals(flow) || "voicemail".equals(flow);
+    }
 
     @Override
     public void onCreate() {
@@ -83,6 +141,7 @@ public class JawnInCallService extends InCallService {
 
     @Override
     public void onDestroy() {
+        handler.removeCallbacks(watchdog);
         instance = null;
         current = null;
         state = Call.STATE_DISCONNECTED;
@@ -100,6 +159,8 @@ public class JawnInCallService extends InCallService {
     public void onCallRemoved(Call call) {
         // a call that goes away without ever saying DISCONNECTED still happened
         Trip trip = trips.remove(call);
+        handler.removeCallbacks(watchdog);
+        if (trip != null && trip.ivr) JawnIvrAudio.restore(this);
         if (trip != null) writeTrip(trip);
         call.unregisterCallback(callback);
         super.onCallRemoved(call);
@@ -114,9 +175,12 @@ public class JawnInCallService extends InCallService {
     private void writeTrip(Trip trip) {
         try {
             long ended = System.currentTimeMillis();
-            JawnPhoneBridge.recordCall(this, trip.number, trip.direction, trip.started, ended, trip.answered);
+            JawnPhoneBridge.recordCall(this, trip.number, trip.direction, trip.started, ended,
+                    trip.answered, trip.ivr);
             JawnLog.append("call " + trip.direction + " " + trip.number + " "
-                    + (trip.answered ? "answered" : "unanswered") + " " + ((ended - trip.started) / 1000) + "s");
+                    + (trip.answered ? "answered" : "unanswered")
+                    + (trip.ivr ? " (reception " + trip.flow + ")" : "")
+                    + " " + ((ended - trip.started) / 1000) + "s");
             if (JawnPhoneState.poster != null) {
                 JawnPhoneState.poster.post("window.__jawnPhoneCalls && window.__jawnPhoneCalls();");
             }

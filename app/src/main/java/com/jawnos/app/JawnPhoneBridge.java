@@ -129,6 +129,68 @@ public class JawnPhoneBridge {
         return ivrFacts(context).optBoolean("machine_available", false);
     }
 
+    /**
+     * The house's relationship for this number: self, friend, stranger, enemy,
+     * or "" when the house has no person for it. Fed by GET /manager/phone/sync.
+     */
+    public static String relationshipFor(Context context, String number) {
+        String want = lastTen(number);
+        if (want.isEmpty()) return "";
+        try {
+            JSONObject map = factsOf(context).optJSONObject("relationships");
+            if (map == null) return "";
+            Iterator<String> keys = map.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                if (!lastTen(k).equals(want)) continue;
+                JSONObject row = map.optJSONObject(k);
+                String value = row == null ? "" : row.optString("value", "");
+                return value == null ? "" : value;
+            }
+        } catch (Throwable ignored) { }
+        return "";
+    }
+
+    /** The per-number route set from the Phone app, or "" when the person decides. */
+    public static String routeFor(Context context, String number) {
+        return valueFor(context, "routes", number);
+    }
+
+    /**
+     * Which flow an incoming number gets: ring, ivr, voicemail or reject.
+     * The order is the house's: an explicit route for the number wins, then the
+     * caller's relationship, then - for a number the house cannot name -
+     * "unknown". With the reception flow off, everything rings.
+     */
+    public static String ivrFlowFor(Context context, String number) {
+        if (!ivrEnabled(context)) return "ring";
+        if (isBlocked(context, number)) return flowNamed(context, "blacklisted");
+        String route = routeFor(context, number);
+        if (!route.isEmpty()) return route;
+        String bucket = relationshipFor(context, number);
+        if (bucket.isEmpty()) {
+            bucket = nameFor(context, number).isEmpty() ? "unknown" : "stranger";
+        }
+        String flow = flowNamed(context, bucket);
+        return flow.isEmpty() ? "ring" : flow;
+    }
+
+    /** Should this call be answered and handed to the Bluetooth gateway? */
+    public static boolean ivrShouldScreen(Context context, String number) {
+        if (!ivrEnabled(context) || !ivrMachineAvailable(context)) return false;
+        String flow = ivrFlowFor(context, number);
+        return "ivr".equals(flow) || "voicemail".equals(flow);
+    }
+
+    private static String flowNamed(Context context, String bucket) {
+        try {
+            JSONObject flows = ivrFacts(context).optJSONObject("flows");
+            if (flows == null || bucket == null || bucket.isEmpty()) return "";
+            String flow = flows.optString(bucket, "");
+            return flow == null ? "" : flow;
+        } catch (Throwable t) { return ""; }
+    }
+
     private static JSONObject ivrFacts(Context context) {
         try {
             JSONObject ivr = factsOf(context).optJSONObject("ivr");
@@ -176,6 +238,12 @@ public class JawnPhoneBridge {
     /** Remember a finished call, for the page to file when it is next up. */
     public static void recordCall(Context context, String number, String direction,
                                   long started, long ended, boolean answered) {
+        recordCall(context, number, direction, started, ended, answered, false);
+    }
+
+    /** The same record, saying whether the reception flow answered it. */
+    public static void recordCall(Context context, String number, String direction,
+                                  long started, long ended, boolean answered, boolean screened) {
         String want = lastTen(number);
         if (want.isEmpty()) return;
         try {
@@ -188,6 +256,7 @@ public class JawnPhoneBridge {
             call.put("started", started);
             call.put("ended", ended);
             call.put("answered", answered);
+            if (screened) call.put("screened", true);
             list.put(call);
             p.edit().putString(CALLS_LOG, list.toString()).apply();
         } catch (Throwable ignored) { }
