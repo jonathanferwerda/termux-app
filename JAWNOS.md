@@ -1414,3 +1414,7 @@ work and a full-width build has crashed it (2026-10-10).
      card in every open Manager window (the old localStorage claim was shared
      by all windows) and relays `ring_notice` to the other machines, so Dismiss
      and Snooze can be pressed anywhere and still end the sound everywhere.
+     Timers gained the same Volume control (the timer creator has a slider, and
+     `JAWN_CLOCK_TIMER` carries it), and a desktop alarm sets the machine's own
+     output volume with pactl, wpctl or amixer for the ring, restoring the
+     previous level with the sound.
