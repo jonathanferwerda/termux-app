@@ -138,6 +138,18 @@ public class JawnInCallService extends InCallService {
      * Telecom route is the one that moves both directions.
      */
     private void routeCallToGateway() {
+        routeOnce();
+        // Telecom accepts the route once the call is really up, and the radio
+        // needs a moment after that: one attempt at the ring and one at ACTIVE
+        // was not always enough for the caller's voice to come back
+        handler.postDelayed(this::routeOnce, 800);
+        handler.postDelayed(this::routeOnce, 2200);
+    }
+
+    private void routeOnce() {
+        if (!isScreened(JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)))) {
+            return;
+        }
         try { setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
         JawnIvrAudio.routeToSco(this, JawnPhoneBridge.ivrBluetoothName(this));
         JawnLog.append("ivr audio: telecom route " + getCallAudioState());
