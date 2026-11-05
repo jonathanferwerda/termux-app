@@ -48,6 +48,10 @@ public class JawnInCallService extends InCallService {
     private static final long VOICEMAIL_LIMIT_MS = 120_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    /** The retries that re-apply the gateway route, so a call that ends can cancel them. */
+    private final Runnable routeLater = new Runnable() {
+        @Override public void run() { routeOnce(); }
+    };
     private final Runnable watchdog = new Runnable() {
         @Override public void run() {
             Call call = current;
@@ -124,6 +128,7 @@ public class JawnInCallService extends InCallService {
             else if (newState == Call.STATE_DISCONNECTED) {
                 Trip trip = trips.remove(call);
                 handler.removeCallbacks(watchdog);
+                handler.removeCallbacks(routeLater);
                 if (trip != null && trip.ivr) {
                     JawnIvrAudio.restore(JawnInCallService.this);
                     JawnPhoneBridge.cancelGateway(JawnInCallService.this);
@@ -178,15 +183,25 @@ public class JawnInCallService extends InCallService {
      * Telecom route is the one that moves both directions.
      */
     private void routeCallToGateway() {
+        handler.removeCallbacks(routeLater);
         routeOnce();
         // Telecom accepts the route once the call is really up, and the radio
         // needs a moment after that: one attempt at the ring and one at ACTIVE
         // was not always enough for the caller's voice to come back
-        handler.postDelayed(this::routeOnce, 800);
-        handler.postDelayed(this::routeOnce, 2200);
+        handler.postDelayed(routeLater, 800);
+        handler.postDelayed(routeLater, 2200);
     }
 
     private void routeOnce() {
+        // A retry left over from a call that has ended must not touch the
+        // phone's audio: the number is still "fresh", so the flow would still
+        // read as screened and the next call would be pinned to a gateway that
+        // hung up. Only a call that is really up may move the route.
+        int now = state;
+        if (current == null || (now != Call.STATE_RINGING && now != Call.STATE_DIALING
+                && now != Call.STATE_ACTIVE && now != Call.STATE_HOLDING)) {
+            return;
+        }
         if (!isScreened(JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)))) {
             return;
         }
@@ -236,6 +251,7 @@ public class JawnInCallService extends InCallService {
         // a call that goes away without ever saying DISCONNECTED still happened
         Trip trip = trips.remove(call);
         handler.removeCallbacks(watchdog);
+        handler.removeCallbacks(routeLater);
         if (trip != null && trip.ivr) {
             JawnIvrAudio.restore(this);
             JawnPhoneBridge.cancelGateway(this);
