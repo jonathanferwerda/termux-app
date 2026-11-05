@@ -1,7 +1,9 @@
 package com.jawnos.app;
 
 import android.bluetooth.BluetoothDevice;
+import android.content.Context;
 import android.content.Intent;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -66,7 +68,11 @@ public class JawnInCallService extends InCallService {
         final String direction;
         final long started;
         boolean answered;
+        /** The reception flow answered this call: it is recorded as screened. */
         boolean ivr;
+        /** The gateway is carrying the audio right now; false once the person
+         *  takes the call back on the phone. */
+        boolean gateway;
         String flow = "";
 
         Trip(String number, String direction, long started) {
@@ -122,7 +128,12 @@ public class JawnInCallService extends InCallService {
                     trip.answered = true;
                     // Android may reset the communication device as the call
                     // settles, so the route is set again here
-                    if (trip.ivr) routeCallToGateway();
+                    if (trip.gateway) {
+                        routeCallToGateway();
+                        // the house is screening this call: show the person who
+                        // it is, what is being heard, and the two ways out
+                        JawnScreenFace.show(JawnInCallService.this, trip.number);
+                    }
                 }
             }
             else if (newState == Call.STATE_DISCONNECTED) {
@@ -132,6 +143,7 @@ public class JawnInCallService extends InCallService {
                 if (trip != null && trip.ivr) {
                     JawnIvrAudio.restore(JawnInCallService.this);
                     JawnPhoneBridge.cancelGateway(JawnInCallService.this);
+                    JawnScreenFace.hide(JawnInCallService.this);
                 }
                 if (trip != null) writeTrip(trip);
                 JawnPhoneState.incoming("");
@@ -164,6 +176,7 @@ public class JawnInCallService extends InCallService {
                         try { now = call.getState(); } catch (Throwable ignored) { }
                         if (now != Call.STATE_RINGING) return;
                         trip.ivr = true;
+                        trip.gateway = true;
                         routeCallToGateway();
                         try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                         handler.removeCallbacks(watchdog);
@@ -240,6 +253,8 @@ public class JawnInCallService extends InCallService {
         if (current != null && state != Call.STATE_DISCONNECTED) {
             JawnLog.append("ivr audio: restoring the route because the call service went away");
             JawnIvrAudio.restore(this);
+            // the face has no call to follow once the service is gone
+            JawnScreenFace.hide(this);
         }
         instance = null;
         current = null;
@@ -263,6 +278,7 @@ public class JawnInCallService extends InCallService {
         if (trip != null && trip.ivr) {
             JawnIvrAudio.restore(this);
             JawnPhoneBridge.cancelGateway(this);
+            JawnScreenFace.hide(this);
         }
         if (trip != null) writeTrip(trip);
         call.unregisterCallback(callback);
@@ -305,6 +321,47 @@ public class JawnInCallService extends InCallService {
     public static void hangup() {
         if (instance == null || current == null) return;
         try { current.disconnect(); } catch (Throwable t) {}
+    }
+
+    /**
+     * Take a screened call back on this phone.
+     *
+     * Two halves have to come back: AudioManager's communication device (the
+     * gateway's SCO link) and Telecom's route, which routeCallToGateway pointed
+     * at the same Hands-Free device - clearing only the first leaves the call
+     * silent even though the gateway is gone. The watchdog is cancelled too: a
+     * call the person has taken over must not be hung up because the reception
+     * flow's own limit expired.
+     */
+    public static void restoreAudio() {
+        JawnInCallService svc = instance;
+        if (svc == null) return;
+        Trip trip = svc.trips.get(current);
+        if (trip != null) trip.gateway = false;
+        svc.handler.removeCallbacks(svc.routeLater);
+        svc.handler.removeCallbacks(svc.watchdog);
+        try {
+            AudioManager am = (AudioManager) svc.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    am.clearCommunicationDevice();
+                }
+                else {
+                    am.setBluetoothScoOn(false);
+                    am.stopBluetoothSco();
+                }
+                am.setMode(AudioManager.MODE_NORMAL);
+            }
+        } catch (Throwable ignored) { }
+        try {
+            // a wired headset is the phone's own audio too; the earpiece is the
+            // fallback when there is none
+            CallAudioState cas = svc.getCallAudioState();
+            int mask = cas == null ? 0 : cas.getSupportedRouteMask();
+            svc.setAudioRoute((mask & CallAudioState.ROUTE_WIRED_HEADSET) != 0
+                    ? CallAudioState.ROUTE_WIRED_HEADSET : CallAudioState.ROUTE_EARPIECE);
+        } catch (Throwable ignored) { }
+        JawnLog.append("ivr audio: the call is back on the phone");
     }
 
     private void showScreen() {

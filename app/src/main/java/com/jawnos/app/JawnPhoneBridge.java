@@ -10,6 +10,8 @@ import android.webkit.JavascriptInterface;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -384,6 +386,49 @@ public class JawnPhoneBridge {
                 }
             }
         }, "jawn-ivr-cancel").start();
+    }
+
+    /**
+     * GET /manager/sco/status: what the gateway is doing and the caller's live
+     * transcript. The body is handed back as text for the screening face to
+     * parse, because the gateway's shape grows (transcript engines, notes) and
+     * a new key there should not need a new APK here.
+     *
+     * Blocks for up to the read timeout, so it belongs on a worker thread.
+     * null means the house did not answer - an ordinary state: the face still
+     * shows the caller and its two buttons, and the call service is untouched.
+     */
+    public static String scoStatus(Context context) {
+        Context app = context.getApplicationContext();
+        int port = JawnLauncher.getJawnPort(app);
+        String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/status").openConnection();
+            trustHouse(conn);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(4000);
+            conn.setRequestMethod("GET");
+            String cookie = presidentCookie(app, origin, port);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            if (conn.getResponseCode() != 200) return null;
+            InputStream in = conn.getInputStream();
+            try {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                return out.toString("UTF-8");
+            } finally {
+                in.close();
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
     }
 
     /**

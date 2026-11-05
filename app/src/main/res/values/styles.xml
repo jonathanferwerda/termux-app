@@ -50,6 +50,19 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
+    <!-- The screening face: the in-call screen's own colours, full screen,
+         so a call the house is answering looks like a call and not a notice. -->
+    <style name="Theme.Termux.JawnScreening" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0D1117</item>
+        <item name="android:colorBackground">#FF0D1117</item>
+        <item name="android:statusBarColor">#FF0D1117</item>
+        <item name="android:navigationBarColor">#FF0D1117</item>
+        <item name="android:colorAccent">#FF4A90D9</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
     <style name="Theme.Termux.JawnAlarm" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@drawable/clock_alarm_background</item>
         <item name="android:colorBackground">@color/clock_alarm_bg_bottom</item>

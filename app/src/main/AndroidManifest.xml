@@ -352,6 +352,21 @@
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:excludeFromRecents="true" />
 
+        <!-- The face of a call the house is screening when the screen is off
+             or the phone is locked: full screen, over the keyguard, woken and
+             kept lit, the same shape as the ringing alarm. Reached only from
+             the app's own notification and its in-call service. -->
+        <activity
+            android:name=".app.JawnScreeningActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|density|screenLayout|uiMode|keyboard|keyboardHidden|navigation"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.Termux.JawnScreening"
+            android:turnScreenOn="true"
+            tools:targetApi="27" />
+
         <service
             android:name=".app.JawnInCallService"
             android:exported="true"

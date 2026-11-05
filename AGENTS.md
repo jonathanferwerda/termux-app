@@ -19,7 +19,7 @@ one — the in-app updater (the dashboard's "Update app"), the peer/GitHub sync
 A rebuild that reuses a `versionCode` reads as **"up to date"** and **no device
 will take it** (this is exactly why a build once sat uninstalled while the app
 kept saying it was current). Never reuse or re-ship a number; always step above
-the last release (1280 / 0.118.281).
+the last release (1292 / 0.118.294).
 
 A change that never enters the APK — this file, `JAWNOS.md`, `README.md` — is not
 a version change.
