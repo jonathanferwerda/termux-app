@@ -1,10 +1,10 @@
 {
  "abi": {
   "aarch64": {
-   "file": "jawnrt-aarch64-0.1.1750.zip",
-   "sha256": "fb2ee91ae1ebc880dd3163d8368eab4e3dd0c8247faa337e53b271acb302a273",
-   "size": 31311461,
-   "version": "0.1.1750"
+   "file": "jawnrt-aarch64-0.1.1751.zip",
+   "sha256": "0454d7d45090803df7dca238b963cbd6dab673ba08f628e12ec3e1932edd492f",
+   "size": 31357295,
+   "version": "0.1.1751"
   },
   "x86_64": {
    "file": "jawnrt-x86_64-0.1.1702.zip",
