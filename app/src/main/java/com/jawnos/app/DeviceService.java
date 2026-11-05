@@ -1,12 +1,16 @@
 package com.jawnos.app;
 
 import android.Manifest;
+import android.bluetooth.BluetoothA2dp;
+import android.bluetooth.BluetoothDevice;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.ContentResolver;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -129,6 +133,21 @@ public class DeviceService extends Service {
     private ServerSocket serverSocket;
     private Thread acceptor;
     private ExecutorService clients;
+    /**
+     * Calls are the gateway's business; media is not. Pairing brings A2DP up as
+     * well, and then every sound the phone makes is sent to the laptop. The
+     * profile is put down whenever it appears for the gateway device, so media
+     * stays on the phone and only calls use the link.
+     */
+    private final BroadcastReceiver mediaOff = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            final Context app = getApplicationContext();
+            new Thread(new Runnable() {
+                @Override public void run() { JawnIvrAudio.keepMediaLocal(app); }
+            }, "jawn-media-off").start();
+        }
+    };
+
     private String token = "";
 
     @Override
@@ -142,6 +161,23 @@ public class DeviceService extends Service {
         acceptor = new Thread(this::acceptLoop, "jawn-device-accept");
         acceptor.start();
         Log.i(LOG_TAG, "device bridge listening on 127.0.0.1:" + PORT);
+        // A service that died mid-call can leave the route on the gateway; clear
+        // it, and keep the phone's media off the gateway from now on.
+        final Context app = getApplicationContext();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                JawnIvrAudio.recoverIfStuck(app);
+                JawnIvrAudio.keepMediaLocal(app);
+            }
+        }, "jawn-audio-recover").start();
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+            filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+            registerReceiver(mediaOff, filter);
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "media-off receiver could not start", t);
+        }
     }
 
     /** Start the bridge notification with one explicit foreground type.
@@ -198,6 +234,7 @@ public class DeviceService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        try { unregisterReceiver(mediaOff); } catch (Throwable ignored) { }
         try { if (serverSocket != null) serverSocket.close(); } catch (Throwable ignored) {}
         if (clients != null) clients.shutdownNow();
         try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}

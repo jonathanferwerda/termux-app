@@ -233,6 +233,14 @@ public class JawnInCallService extends InCallService {
     @Override
     public void onDestroy() {
         handler.removeCallbacks(watchdog);
+        handler.removeCallbacks(routeLater);
+        // The service can go away mid-call (a crash or a system kill). Nothing
+        // else then puts the phone's audio back, so it is done here and said out
+        // loud; recoverIfStuck() covers the case where even this never ran.
+        if (current != null && state != Call.STATE_DISCONNECTED) {
+            JawnLog.append("ivr audio: restoring the route because the call service went away");
+            JawnIvrAudio.restore(this);
+        }
         instance = null;
         current = null;
         state = Call.STATE_DISCONNECTED;

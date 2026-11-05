@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.Manifest;
+import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHeadset;
@@ -274,6 +275,100 @@ final class JawnIvrAudio {
         };
         try {
             if (!adapter.getProfileProxy(context, listener, BluetoothProfile.HEADSET)) return null;
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0 || !ready.await(left, TimeUnit.MILLISECONDS)) return null;
+            return box[0];
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Keep the phone's own media off the gateway.
+     *
+     * Pairing with the gateway brings up A2DP as well as Hands-Free, so every
+     * sound the phone makes is sent to the laptop. The house only needs the
+     * call, so the media profile is put down for that one device and the sound
+     * stays on the phone. Called when the app starts and whenever a device
+     * connects.
+     */
+    static void keepMediaLocal(Context context) {
+        String want = JawnPhoneBridge.ivrBluetoothName(context);
+        BluetoothDevice gateway = gateway(context, want);
+        if (gateway == null) return;
+        BluetoothAdapter adapter = null;
+        try {
+            BluetoothManager bm = (BluetoothManager) context.getApplicationContext()
+                    .getSystemService(Context.BLUETOOTH_SERVICE);
+            adapter = bm == null ? null : bm.getAdapter();
+        } catch (Throwable t) { }
+        if (adapter == null) return;
+        BluetoothA2dp a2dp = a2dpProxy(context, adapter,
+                System.currentTimeMillis() + GATEWAY_CONNECT_MS);
+        if (a2dp == null) return;
+        try {
+            if (a2dp.getConnectionState(gateway) == BluetoothProfile.STATE_CONNECTED) {
+                boolean ok = disconnectA2dp(a2dp, gateway);
+                JawnLog.append("ivr audio: media profile " + (ok ? "put down" : "would not go down")
+                        + " for " + want + " - calls only");
+            }
+        } catch (Throwable t) {
+            JawnLog.append("ivr audio: could not keep media off the gateway: " + t);
+        } finally {
+            try { adapter.closeProfileProxy(BluetoothProfile.A2DP, a2dp); } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * A service that died mid-call can leave the phone's audio mode or
+     * communication device on the gateway. There is no in-call service left to
+     * finish the job then, so the next start clears it and says so.
+     */
+    static void recoverIfStuck(Context context) {
+        if (JawnInCallService.instance != null) return;
+        AudioManager am = manager(context);
+        if (am == null) return;
+        try {
+            boolean mode = am.getMode() == AudioManager.MODE_IN_COMMUNICATION;
+            boolean device = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && am.getCommunicationDevice() != null;
+            if (mode || device) {
+                JawnLog.append("ivr audio: a left-over call route was cleared after a restart");
+                restore(context);
+            }
+        } catch (Throwable t) { }
+    }
+
+    /**
+     * Ask the media profile to let go of the device. There is no public method
+     * for this (BluetoothA2dp.disconnect is hidden), so it is called
+     * reflectively and a build that refuses it is reported, not fatal.
+     */
+    private static boolean disconnectA2dp(BluetoothA2dp a2dp, BluetoothDevice device) {
+        try {
+            Method disconnect = BluetoothA2dp.class.getMethod("disconnect", BluetoothDevice.class);
+            Object accepted = disconnect.invoke(a2dp, device);
+            return accepted instanceof Boolean && (Boolean) accepted;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Open the media profile proxy, sharing the caller's deadline. */
+    private static BluetoothA2dp a2dpProxy(Context context, BluetoothAdapter adapter, long deadline) {
+        final CountDownLatch ready = new CountDownLatch(1);
+        final BluetoothA2dp[] box = new BluetoothA2dp[1];
+        BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+            @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                if (profile == BluetoothProfile.A2DP && proxy instanceof BluetoothA2dp) {
+                    box[0] = (BluetoothA2dp) proxy;
+                }
+                ready.countDown();
+            }
+            @Override public void onServiceDisconnected(int profile) { }
+        };
+        try {
+            if (!adapter.getProfileProxy(context, listener, BluetoothProfile.A2DP)) return null;
             long left = deadline - System.currentTimeMillis();
             if (left <= 0 || !ready.await(left, TimeUnit.MILLISECONDS)) return null;
             return box[0];
