@@ -91,12 +91,12 @@ public class JawnInCallService extends InCallService {
                     return;
                 }
                 if (isScreened(flow)) {
-                    trip.ivr = true;
-                    routeCallToGateway();
-                    try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
-                    handler.removeCallbacks(watchdog);
-                    handler.postDelayed(watchdog,
-                            "voicemail".equals(flow) ? VOICEMAIL_LIMIT_MS : IVR_LIMIT_MS);
+                    // Answer only once the gateway can actually carry the call:
+                    // answering first and routing after leaves the caller in
+                    // silence whenever the phone is out of the adapter's range.
+                    // The check may bring a bonded link up, so it runs off the
+                    // main thread; a call no longer ringing is left alone.
+                    screenWhenGatewayReady(call, trip, flow);
                     return;
                 }
                 showScreen();
@@ -122,13 +122,51 @@ public class JawnInCallService extends InCallService {
             else if (newState == Call.STATE_DISCONNECTED) {
                 Trip trip = trips.remove(call);
                 handler.removeCallbacks(watchdog);
-                if (trip != null && trip.ivr) JawnIvrAudio.restore(JawnInCallService.this);
+                if (trip != null && trip.ivr) {
+                    JawnIvrAudio.restore(JawnInCallService.this);
+                    JawnPhoneBridge.cancelGateway(JawnInCallService.this);
+                }
                 if (trip != null) writeTrip(trip);
                 JawnPhoneState.incoming("");
                 showScreen(); // the screen closes itself once no call is up
             }
         }
     };
+
+    /**
+     * Answer an IVR/voicemail call once the gateway adapter is bonded,
+     * connected and carrying Hands-Free audio. If it is not, the call is left
+     * to ring and the normal screen is shown, exactly as the "ring" flow does:
+     * a screened call must never be answered into silence.
+     */
+    private void screenWhenGatewayReady(final Call call, final Trip trip, final String flow) {
+        final String gateway = JawnPhoneBridge.ivrBluetoothName(this);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final String problem = JawnIvrAudio.gatewayProblem(
+                        JawnInCallService.this, gateway);
+                handler.post(new Runnable() {
+                    @Override public void run() {
+                        if (trips.get(call) != trip) return;
+                        if (!problem.isEmpty()) {
+                            JawnLog.append("ivr: not screening " + trip.number + ": " + problem);
+                            showScreen();
+                            return;
+                        }
+                        int now = Call.STATE_DISCONNECTED;
+                        try { now = call.getState(); } catch (Throwable ignored) { }
+                        if (now != Call.STATE_RINGING) return;
+                        trip.ivr = true;
+                        routeCallToGateway();
+                        try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
+                        handler.removeCallbacks(watchdog);
+                        handler.postDelayed(watchdog,
+                                "voicemail".equals(flow) ? VOICEMAIL_LIMIT_MS : IVR_LIMIT_MS);
+                    }
+                });
+            }
+        }, "jawn-ivr-gateway").start();
+    }
 
     /**
      * Put the call itself on the gateway. As the dialer this app owns the call's
@@ -186,7 +224,10 @@ public class JawnInCallService extends InCallService {
         // a call that goes away without ever saying DISCONNECTED still happened
         Trip trip = trips.remove(call);
         handler.removeCallbacks(watchdog);
-        if (trip != null && trip.ivr) JawnIvrAudio.restore(this);
+        if (trip != null && trip.ivr) {
+            JawnIvrAudio.restore(this);
+            JawnPhoneBridge.cancelGateway(this);
+        }
         if (trip != null) writeTrip(trip);
         call.unregisterCallback(callback);
         super.onCallRemoved(call);

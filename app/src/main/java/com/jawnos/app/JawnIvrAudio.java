@@ -1,9 +1,21 @@
 package com.jawnos.app;
 
+import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothHeadset;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
+
+import java.lang.reflect.Method;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Put a call's audio on the Bluetooth link the gateway is listening on.
@@ -18,6 +30,9 @@ import android.os.Build;
  * restore() is what stops the call being stuck on a dead headset afterwards.
  */
 final class JawnIvrAudio {
+
+    /** How long a bonded-but-idle gateway gets to come up at ring time. */
+    private static final long GATEWAY_CONNECT_MS = 1500;
 
     private JawnIvrAudio() {}
 
@@ -105,6 +120,135 @@ final class JawnIvrAudio {
             am.setBluetoothScoOn(true);
             return true;
         } catch (Throwable t) { return false; }
+    }
+
+    /**
+     * Can the named gateway actually carry a call right now?
+     *
+     * "" means yes. Anything else is the line to log when the call is NOT
+     * screened: it names the adapter, or the piece that is missing, so a call
+     * left to ring says why. This asks the phone to bring a bonded-but-idle
+     * Hands-Free link up, so it blocks for at most GATEWAY_CONNECT_MS and
+     * belongs on a worker thread, never the main one.
+     */
+    static String gatewayProblem(Context context, String preferName) {
+        String want = preferName == null ? "" : preferName.trim();
+        if (want.isEmpty()) want = "jawn-gateway";
+        if (Build.VERSION.SDK_INT >= 31
+                && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
+            return want + " cannot be checked: Bluetooth connect permission is not granted";
+        }
+        BluetoothManager bm;
+        BluetoothAdapter adapter;
+        try {
+            bm = (BluetoothManager) context.getApplicationContext()
+                    .getSystemService(Context.BLUETOOTH_SERVICE);
+            adapter = bm == null ? null : bm.getAdapter();
+        } catch (Throwable t) {
+            return want + " cannot be checked: " + t;
+        }
+        if (adapter == null) return want + " cannot be checked: this phone has no Bluetooth adapter";
+        try {
+            if (!adapter.isEnabled()) return want + " is unreachable: Bluetooth is turned off";
+        } catch (Throwable t) {
+            return want + " cannot be checked: " + t;
+        }
+        BluetoothDevice gateway = null;
+        try {
+            for (BluetoothDevice device : adapter.getBondedDevices()) {
+                String name = device.getName();
+                if (name != null && name.trim().equalsIgnoreCase(want)) { gateway = device; break; }
+            }
+        } catch (Throwable t) {
+            return want + " cannot be checked: " + t;
+        }
+        if (gateway == null) return want + " is not paired with this phone";
+        if (headsetConnected(bm, adapter, gateway)) return "";
+        long deadline = System.currentTimeMillis() + GATEWAY_CONNECT_MS;
+        BluetoothHeadset headset = headsetProxy(context, adapter, deadline);
+        if (headset == null) return want + " is paired but its Hands-Free profile did not open";
+        try {
+            String connect = connectHeadset(headset, gateway);
+            if (!connect.isEmpty()) return want + " is paired but " + connect;
+            while (System.currentTimeMillis() < deadline) {
+                if (headsetConnected(bm, adapter, gateway)) return "";
+                try { Thread.sleep(150); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        } catch (Throwable t) {
+            return want + " is paired but could not be connected: " + t;
+        } finally {
+            try { adapter.closeProfileProxy(BluetoothProfile.HEADSET, headset); } catch (Throwable ignored) { }
+        }
+        return want + " is paired but not connected";
+    }
+
+    /**
+     * Is this exact device carrying Hands-Free audio? The per-device state is
+     * the answer; the connected list and the profile state are older, coarser
+     * public calls, used only when the per-device one cannot be read - another
+     * paired headset must not stand in for the gateway.
+     */
+    private static boolean headsetConnected(BluetoothManager bm, BluetoothAdapter adapter,
+                                            BluetoothDevice gateway) {
+        try {
+            return bm.getConnectionState(gateway, BluetoothProfile.HEADSET)
+                    == BluetoothProfile.STATE_CONNECTED;
+        } catch (Throwable ignored) { }
+        try {
+            List<BluetoothDevice> connected = bm.getConnectedDevices(BluetoothProfile.HEADSET);
+            for (BluetoothDevice device : connected) {
+                if (gateway.equals(device)) return true;
+            }
+            return false;
+        } catch (Throwable ignored) { }
+        try {
+            return adapter.getProfileConnectionState(BluetoothProfile.HEADSET)
+                    == BluetoothProfile.STATE_CONNECTED;
+        } catch (Throwable t) { return false; }
+    }
+
+    /**
+     * Ask the profile to bring the Hands-Free link up. There is no public
+     * method for this (BluetoothHeadset.connect is hidden), so it is called
+     * reflectively and a build that refuses it is reported, not fatal: the
+     * caller then waits and gives up, and the call is left to ring.
+     */
+    private static String connectHeadset(BluetoothHeadset headset, BluetoothDevice gateway) {
+        try {
+            Method connect = BluetoothHeadset.class.getMethod("connect", BluetoothDevice.class);
+            Object accepted = connect.invoke(headset, gateway);
+            if (accepted instanceof Boolean && (Boolean) accepted) return "";
+            return "the phone refused a Hands-Free connect";
+        } catch (Throwable t) {
+            return "this Android build does not let an app start a Hands-Free connect";
+        }
+    }
+
+    /** Open the Hands-Free profile proxy, sharing the caller's deadline. */
+    private static BluetoothHeadset headsetProxy(Context context, BluetoothAdapter adapter, long deadline) {
+        final CountDownLatch ready = new CountDownLatch(1);
+        final BluetoothHeadset[] box = new BluetoothHeadset[1];
+        BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+            @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                if (profile == BluetoothProfile.HEADSET && proxy instanceof BluetoothHeadset) {
+                    box[0] = (BluetoothHeadset) proxy;
+                }
+                ready.countDown();
+            }
+            @Override public void onServiceDisconnected(int profile) { }
+        };
+        try {
+            if (!adapter.getProfileProxy(context, listener, BluetoothProfile.HEADSET)) return null;
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0 || !ready.await(left, TimeUnit.MILLISECONDS)) return null;
+            return box[0];
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /** Hand the audio back to the phone once the call is over. */

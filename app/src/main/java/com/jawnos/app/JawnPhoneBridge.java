@@ -4,12 +4,24 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.Iterator;
+import java.util.List;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * window.JawnPhone: the house's phone facts, handed to the native side because a
@@ -34,6 +46,9 @@ public class JawnPhoneBridge {
     private static final String FACTS = "facts";
     private static final String CALLS = "blocked_calls";
     private static final String CALLS_LOG = "calls";
+
+    /** The gateway adapter's name when the house did not name one. */
+    private static final String DEFAULT_GATEWAY_BLUETOOTH = "jawn-gateway";
 
     private final Context context;
 
@@ -154,7 +169,8 @@ public class JawnPhoneBridge {
 
     /** The Bluetooth name of the gateway adapter (e.g. jawn-gateway). */
     public static String ivrBluetoothName(Context context) {
-        return ivrFacts(context).optString("bluetooth", "");
+        String name = ivrFacts(context).optString("bluetooth", "");
+        return name == null || name.trim().isEmpty() ? DEFAULT_GATEWAY_BLUETOOTH : name.trim();
     }
 
     /** Is the selected gateway's remote_machines row connected right now? */
@@ -329,6 +345,97 @@ public class JawnPhoneBridge {
         }
         String d = digits.toString();
         return d.length() > 10 ? d.substring(d.length() - 10) : d;
+    }
+
+    // ---- telling the gateway a screened call is over ----
+
+    /**
+     * Tell the house's gateway the call it was carrying has ended. The
+     * gateway hangs up on its own timeout too, so this is a courtesy: it frees
+     * the handed-over link and keeps a late prompt out of the next call. It
+     * runs off the main thread - the call has already gone by the time it
+     * starts - and a failure changes nothing.
+     */
+    public static void cancelGateway(final Context context) {
+        final Context app = context.getApplicationContext();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int port = JawnLauncher.getJawnPort(app);
+                String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+                HttpURLConnection conn = null;
+                try {
+                    conn = (HttpURLConnection) new URL(origin + "/manager/sco/cancel").openConnection();
+                    trustHouse(conn);
+                    conn.setConnectTimeout(2000);
+                    conn.setReadTimeout(4000);
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    String cookie = presidentCookie(app, origin, port);
+                    if (cookie != null && !cookie.isEmpty()) {
+                        conn.setRequestProperty("Cookie", cookie);
+                    }
+                    OutputStream out = conn.getOutputStream();
+                    try { out.write(new byte[0]); } finally { out.close(); }
+                    JawnLog.append("ivr: gateway cancel " + conn.getResponseCode());
+                } catch (Throwable t) {
+                    JawnLog.append("ivr: gateway cancel failed: " + t);
+                } finally {
+                    if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+                }
+            }
+        }, "jawn-ivr-cancel").start();
+    }
+
+    /**
+     * The app's session cookie, or a fresh one minted from the saved ticket.
+     * The ticket page sets the cookie on its response before its own redirect,
+     * so a plain request is enough (the same way JawnAutofillService does it).
+     */
+    private static String presidentCookie(Context app, String origin, int port) {
+        try {
+            String cookie = CookieManager.getInstance().getCookie(origin + "/");
+            if (cookie != null && cookie.contains("president=")) return cookie;
+        } catch (Throwable ignored) { }
+        HttpURLConnection conn = null;
+        try {
+            String ticket = JawnLauncher.getUiUrl(app, port);
+            if (ticket == null || !ticket.contains("/box_office/")) return null;
+            conn = (HttpURLConnection) new URL(ticket).openConnection();
+            trustHouse(conn);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(4000);
+            conn.getResponseCode();
+            List<String> cookies = conn.getHeaderFields().get("Set-Cookie");
+            if (cookies == null) return null;
+            for (String raw : cookies) {
+                int at = raw.indexOf("president=");
+                if (at < 0) continue;
+                int end = raw.indexOf(';', at);
+                String value = end > 0 ? raw.substring(at, end) : raw.substring(at);
+                try { CookieManager.getInstance().setCookie(origin + "/", value); } catch (Throwable ignored) { }
+                return value;
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+        return null;
+    }
+
+    /** The house serves its own certificate; trust it for this loopback call. */
+    private static void trustHouse(HttpURLConnection conn) {
+        if (!(conn instanceof HttpsURLConnection)) return;
+        try {
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, new TrustManager[] { new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] chain, String auth) { }
+                public void checkServerTrusted(X509Certificate[] chain, String auth) { }
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            } }, new SecureRandom());
+            HttpsURLConnection https = (HttpsURLConnection) conn;
+            https.setSSLSocketFactory(sc.getSocketFactory());
+            https.setHostnameVerifier((h, session) -> true);
+        } catch (Throwable ignored) { }
     }
 
     private static JSONObject factsOf(Context context) {

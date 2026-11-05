@@ -55,8 +55,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1281
-        versionName "0.118.282"
+        versionCode 1283
+        versionName "0.118.285"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
