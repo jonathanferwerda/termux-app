@@ -539,7 +539,16 @@ public class JawnWebViewActivity extends Activity {
         // forward without recreating it, so reload - a fresh ticket, or a jawn
         // that has since restarted, is picked up instead of the stale page.
         if (web != null) {
-            if (web == null) return;
+            // An explicit destination from the app itself - the screening
+            // face's Connect me asks for /phone?connect=me - wins over "you are
+            // already on the manager": the whole point is to go somewhere else.
+            String asked = intent.getStringExtra(EXTRA_URL);
+            if (asked != null && !asked.isEmpty()) {
+                try { houseHost = new URI(asked).getHost(); } catch (Exception e) { houseHost = ""; }
+                if (houseHost == null) houseHost = "";
+                web.loadUrl(asked);
+                return;
+            }
             // Already on the destination: keep the view rather than reloading it.
             String current = web.getUrl();
             if (current != null && current.startsWith(JawnLauncher.getManagerUrl(this, JawnLauncher.getJawnPort(this)))) return;

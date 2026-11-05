@@ -317,6 +317,28 @@ public final class JawnScreenFace {
 
     // ---- taking the call back ----
 
+    /**
+     * Carry the call to this device over WebRTC, in the house's own Phone app.
+     *
+     * The page does the media: the WebView grants it the microphone, the
+     * browser cancels the echo, and /manager/sco/rtc carries the offer to the
+     * gateway. Opening it here is what "the device that clicked" means - the
+     * same button on a tablet would open the same page on the tablet.
+     */
+    private static void connectMe(Context context) {
+        try {
+            int port = JawnLauncher.getJawnPort(context);
+            String url = JawnLauncher.getManagerUrl(context, port) + "/phone?connect=me";
+            Intent i = new Intent(context, JawnWebViewActivity.class);
+            i.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            context.startActivity(i);
+        } catch (Throwable t) {
+            JawnLog.append("screening: could not open the phone page: " + t);
+        }
+        hide(context);
+    }
+
     private static void connectPhone(Context context) {
         // The phone's own audio first, so the person hears the caller at once;
         // the gateway is then told to stop playing. The call itself never moves.
@@ -396,18 +418,27 @@ public final class JawnScreenFace {
             noteView.setVisibility(View.GONE);
             root.addView(noteView);
 
+            // "Connect me" opens the house's Phone app on this device. The page
+            // is the WebRTC peer - it already has the microphone through
+            // HouseChrome.onPermissionRequest and it owns the signalling - so
+            // the face carries a button rather than a second copy of that stack.
+            // The gateway's half is docs/reception.md, "Connect me".
+            Button bridge = pill("Connect me", "#2f6db0");
+            LinearLayout.LayoutParams bridgeLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            bridgeLp.topMargin = dp(12);
+            bridge.setLayoutParams(bridgeLp);
+            bridge.setOnClickListener(v -> connectMe(context));
+            root.addView(bridge);
+
             LinearLayout buttons = new LinearLayout(context);
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            blp.topMargin = dp(12);
+            blp.topMargin = dp(6);
             buttons.setLayoutParams(blp);
-
-            // TODO: "Connect me" - bridging this call into the house over
-            // WebRTC so the person can hear and speak to the caller from
-            // anywhere - is deliberately not part of this face yet. The
-            // gateway setup it would sit next to is docs/reception.md.
 
             Button connect = pill("Connect phone", "#1d7a3e");
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
