@@ -44,30 +44,61 @@ final class JawnIvrAudio {
     }
 
     /**
-     * The Hands-Free device to use: the one whose Bluetooth name matches the
-     * gateway's, falling back to the only one there is.
+     * The phone's own record of the gateway: the bonded device whose name is the
+     * one the house gave it. Its address is what a selection has to compare, so
+     * an AudioDeviceInfo can be proven to be the gateway and not just a headset
+     * that happens to be connected.
+     */
+    static BluetoothDevice gateway(Context context, String preferName) {
+        String want = preferName == null ? "" : preferName.trim();
+        if (want.isEmpty()) return null;
+        try {
+            BluetoothManager bm = (BluetoothManager) context.getApplicationContext()
+                    .getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter adapter = bm == null ? null : bm.getAdapter();
+            if (adapter == null) return null;
+            for (BluetoothDevice device : adapter.getBondedDevices()) {
+                String name = device.getName();
+                if (name != null && name.trim().equalsIgnoreCase(want)) return device;
+            }
+        } catch (Throwable t) { }
+        return null;
+    }
+
+    /**
+     * The Hands-Free device to use: the one whose address is the gateway's.
+     *
+     * A named gateway is the only device a screened call may use, so when it is
+     * not on offer this returns null instead of "the first SCO device". That
+     * fallback cost a real call: with a JBL Tune 520BT connected as well, the
+     * framework offered only the JBL, the call was routed to it, and the caller
+     * heard silence while the gateway played a plan into a link carrying
+     * nothing. An empty name (no gateway asked for) keeps the old behaviour.
      */
     static AudioDeviceInfo scoDevice(Context context, String preferName) {
         AudioManager am = manager(context);
         if (am == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null;
         AudioDeviceInfo first = null;
-        String want = preferName == null ? "" : preferName.trim().toLowerCase();
+        String want = preferName == null ? "" : preferName.trim();
+        String address = "";
+        if (!want.isEmpty()) {
+            BluetoothDevice named = gateway(context, want);
+            try {
+                address = named == null || named.getAddress() == null ? "" : named.getAddress();
+            } catch (Throwable t) { address = ""; }
+        }
         try {
             for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
                 if (device.getType() != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) continue;
-                if (first == null) first = device;
-                String name = device.getProductName() == null ? "" : device.getProductName().toString().toLowerCase();
-                if (!want.isEmpty() && name.equals(want)) return device;
-            }
-            if (!want.isEmpty() && first != null) {
-                for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
-                    if (device.getType() != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) continue;
-                    String name = device.getProductName() == null ? "" : device.getProductName().toString().toLowerCase();
-                    if (name.contains(want)) return device;
+                if (want.isEmpty()) {
+                    if (first == null) first = device;
+                    continue;
                 }
+                String addr = device.getAddress() == null ? "" : device.getAddress();
+                if (!address.isEmpty() && addr.equalsIgnoreCase(address)) return device;
             }
         } catch (Throwable t) { }
-        return first;
+        return want.isEmpty() ? first : null;
     }
 
     /** Is a Bluetooth Hands-Free device (the gateway) connected right now? */
