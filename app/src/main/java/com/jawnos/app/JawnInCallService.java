@@ -1,7 +1,9 @@
 package com.jawnos.app;
 
+import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.telecom.Call;
@@ -188,8 +190,18 @@ public class JawnInCallService extends InCallService {
         if (!isScreened(JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)))) {
             return;
         }
+        String gatewayName = JawnPhoneBridge.ivrBluetoothName(this);
         try { setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
-        JawnIvrAudio.routeToSco(this, JawnPhoneBridge.ivrBluetoothName(this));
+        // Telecom carries the call on one of the Bluetooth devices it knows, and
+        // with a second headset connected it picks the one it made active last.
+        // Naming the gateway here is what keeps that choice ours.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            BluetoothDevice gateway = JawnIvrAudio.gateway(this, gatewayName);
+            if (gateway != null) {
+                try { requestBluetoothAudio(gateway); } catch (Throwable ignored) { }
+            }
+        }
+        JawnIvrAudio.routeToSco(this, gatewayName);
         JawnLog.append("ivr audio: telecom route " + getCallAudioState());
     }
 
