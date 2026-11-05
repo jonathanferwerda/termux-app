@@ -7,10 +7,10 @@
    "version": "0.1.1751"
   },
   "x86_64": {
-   "file": "jawnrt-x86_64-0.1.1702.zip",
-   "sha256": "58170096f463512b5b02eedc88d83faa957809b35287c12160a2265f8b39eeae",
-   "size": 90070656,
-   "version": "0.1.1702"
+   "file": "jawnrt-x86_64-0.1.1751.zip",
+   "sha256": "cde9a57cb5d3fbcd60cd64f9b821d766c1fc3f9d3b7584273113d619cc589b53",
+   "size": 87798483,
+   "version": "0.1.1751"
   }
  },
  "parts": {
