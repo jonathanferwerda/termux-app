@@ -209,7 +209,7 @@ public final class JawnScreenFace {
             PendingIntent content = PendingIntent.getActivity(
                     app, CONTENT_REQUEST, open, flags());
 
-            String who = caller == null || caller.isEmpty() ? "A screened call" : caller;
+            String who = caller == null || caller.isEmpty() ? "A screened call" : "Call from: " + caller;
             Notification.Builder builder = new Notification.Builder(app, CHANNEL);
             builder.setSmallIcon(R.drawable.ic_new_session)
                     .setContentTitle(who)
@@ -472,9 +472,13 @@ public final class JawnScreenFace {
         void repaint() {
             String who = caller == null ? "" : caller;
             if (who.isEmpty()) who = JawnPhoneState.freshNumber(120_000);
-            callerView.setText(who.isEmpty() ? "A screened call" : who);
 
             JSONObject st = status;
+            JSONObject sc = st == null ? null : st.optJSONObject("caller");
+            String scName = sc == null ? "" : sc.optString("name", "");
+            String scNum = sc == null ? "" : sc.optString("number", "");
+            String label = !scName.isEmpty() ? scName : (!scNum.isEmpty() ? scNum : who);
+            callerView.setText(label.isEmpty() ? "A screened call" : "Call from: " + label);
             JSONArray list = st == null ? null : st.optJSONArray("transcript");
             String partial = st == null ? "" : st.optString("partial", "");
             String engine = st == null ? "" : st.optString("transcript_engine", "");

@@ -404,7 +404,9 @@ public class JawnPhoneBridge {
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(origin + "/manager/sco/status").openConnection();
+            String number = JawnPhoneState.freshNumber(120_000);
+            String query = (number == null || number.isEmpty()) ? "" : "?number=" + Uri.encode(number);
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/status" + query).openConnection();
             trustHouse(conn);
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(4000);
