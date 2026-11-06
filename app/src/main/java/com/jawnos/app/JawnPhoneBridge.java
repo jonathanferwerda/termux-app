@@ -237,8 +237,17 @@ public class JawnPhoneBridge {
     public static boolean ivrShouldScreen(Context context, String number) {
         if (!ivrEnabled(context)) return false;
         if (!ivrMachineAvailable(context) && !JawnIvrAudio.scoAvailable(context)) return false;
-        String flow = ivrFlowFor(context, number);
-        return "ivr".equals(flow) || "voicemail".equals(flow);
+        return ivrScreened(ivrFlowFor(context, number));
+    }
+
+    /**
+     * Is this flow one the phone answers for the gateway? Anything the house
+     * named is: the older "ivr" and "voicemail" words, and a flow of its own.
+     * "ring" and "reject" are decisions the phone keeps to itself.
+     */
+    public static boolean ivrScreened(String flow) {
+        return flow != null && !flow.isEmpty()
+                && !"ring".equals(flow) && !"reject".equals(flow);
     }
 
     private static String flowNamed(Context context, String bucket) {
@@ -509,6 +518,63 @@ public class JawnPhoneBridge {
             }
         } catch (Throwable t) {
             JawnLog.append("hold: request failed: " + t);
+            return null;
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    /**
+     * POST /manager/sco/flow: name the caller's flow before the link is
+     * answered. The gateway holds the key until it accepts the call and then
+     * runs that flow's plan; with nothing posted it keeps the flow its unknown
+     * bucket names, so a missed post still leaves a working call.
+     *
+     * The one field is `flow`. "ivr" is the phone's older word for the built-in
+     * receptionist and the caller maps it; every other key is the house's own.
+     * Returns the reply as text ({"ok":1,"flow":"...","state":"..."} or
+     * {"ok":0,"error":"..."}), or null when the house did not answer. Blocks
+     * for up to the read timeout - kept short, because the caller is waiting on
+     * the answer - so it belongs on a worker thread.
+     */
+    public static String scoFlow(Context context, String flow) {
+        Context app = context.getApplicationContext();
+        int port = JawnLauncher.getJawnPort(app);
+        String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+        HttpURLConnection conn = null;
+        try {
+            String body = "flow=" + Uri.encode(flow == null ? "" : flow);
+            byte[] bytes = body.getBytes("UTF-8");
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/flow").openConnection();
+            trustHouse(conn);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(3000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setFixedLengthStreamingMode(bytes.length);
+            String cookie = presidentCookie(app, origin, port);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            OutputStream out = conn.getOutputStream();
+            try { out.write(bytes); } finally { out.close(); }
+            if (conn.getResponseCode() != 200) {
+                JawnLog.append("flow: name answered " + conn.getResponseCode());
+                return null;
+            }
+            InputStream in = conn.getInputStream();
+            try {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0) buffer.write(buf, 0, n);
+                return buffer.toString("UTF-8");
+            } finally {
+                in.close();
+            }
+        } catch (Throwable t) {
+            JawnLog.append("flow: request failed: " + t);
             return null;
         } finally {
             if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }

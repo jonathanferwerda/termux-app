@@ -1511,3 +1511,22 @@ work and a full-width build has crashed it (2026-10-10).
   never end a call somebody is talking on. `Trip.refused` keeps the call out of
   the answered count and files it through `recordBlockedCall` (an ignored,
   cancelled appointment). The `voicemail` flow is untouched. Build 1300.
+
+## Deltas round X (the caller's flow, named before the answer)
+
+- **The phone names the caller's flow to the gateway before it answers.**
+  `JawnInCallService.screenWhenGatewayReady` now calls `postFlowToGateway(flow)`
+  just before `routeCallToGateway()` / `call.answer`, using the new
+  `JawnPhoneBridge.scoFlow` - the shape of `scoRtc`: a form-urlencoded
+  `POST /manager/sco/flow` with one field, `flow`, the president cookie, and a
+  short read timeout (3s). The request rides its own worker thread, so a slow or
+  missing gateway neither delays nor breaks the answer; a failed post is logged
+  (`flow: request failed`, `flow: name answered <code>`, `ivr: flow <key>
+  refused: <error>`) and the gateway keeps its unknown bucket's flow. "ivr" is
+  the phone's older word for the built-in receptionist, so it is posted as
+  `receptionist`; every other key goes through unchanged.
+- **A named flow is screened like `ivr`/`voicemail`.** `isScreened` (and
+  `JawnPhoneBridge.ivrScreened`, which `ivrShouldScreen` now uses) means
+  anything but `ring` and `reject`, so a bucket the house mapped to its own flow
+  is answered and carried by the gateway instead of ringing through. The
+  `reject` and manual-decline paths never post. Build 1301.

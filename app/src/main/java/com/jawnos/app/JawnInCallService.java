@@ -32,8 +32,9 @@ import java.util.Map;
  * it is next there, and is nudged at once when it is up.
  *
  * The reception flow lives here too. When the house's IVR is enabled, a gateway
- * machine is connected, and the caller's flow is "ivr" or "voicemail", the call
- * is answered without the in-call screen and its audio is handed to the
+ * machine is connected, and the caller's flow is one the house screens (the
+ * built-in "ivr" or "voicemail", or a flow of its own), the call is answered
+ * without the in-call screen and its audio is handed to the
  * Bluetooth gateway (JawnIvrAudio), which plays the house's prompts and records
  * the caller's name. A watchdog hangs up if the gateway never does, so a broken
  * link cannot leave the line open.
@@ -309,6 +310,10 @@ public class JawnInCallService extends InCallService {
                         if (now != Call.STATE_RINGING) return;
                         trip.ivr = true;
                         trip.gateway = true;
+                        // the house may run a different plan per caller: name
+                        // this one before the link is answered, so it is the
+                        // flow the gateway starts with
+                        postFlowToGateway(flow);
                         routeCallToGateway();
                         try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                         handler.removeCallbacks(watchdog);
@@ -319,6 +324,37 @@ public class JawnInCallService extends InCallService {
                 });
             }
         }, "jawn-ivr-gateway").start();
+    }
+
+    /**
+     * Name the caller's flow to the gateway before the call is answered.
+     *
+     * The gateway runs one step-plan per flow and holds the name until it
+     * accepts the link, so the post has to leave before the answer - but it
+     * must never hold the answer up. It is one fire-and-forget request on a
+     * worker thread with a short timeout: the call is answered and routed
+     * whatever the house says, and a gateway that heard nothing keeps its
+     * unknown bucket's flow. "ivr" is the phone's older word for the built-in
+     * receptionist; every other key is passed through as the house named it.
+     */
+    private void postFlowToGateway(final String flow) {
+        if (flow == null || flow.isEmpty()) return;
+        final String key = "ivr".equals(flow) ? "receptionist" : flow;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String reply = JawnPhoneBridge.scoFlow(JawnInCallService.this, key);
+                if (reply == null) return;
+                try {
+                    JSONObject answer = new JSONObject(reply);
+                    if (answer.optInt("ok", 0) != 1) {
+                        JawnLog.append("ivr: flow " + key + " refused: "
+                                + answer.optString("error", "the gateway said no"));
+                    }
+                } catch (Throwable t) {
+                    JawnLog.append("ivr: flow " + key + " reply could not be read");
+                }
+            }
+        }, "jawn-ivr-flow").start();
     }
 
     /**
@@ -367,7 +403,7 @@ public class JawnInCallService extends InCallService {
     }
 
     private static boolean isScreened(String flow) {
-        return "ivr".equals(flow) || "voicemail".equals(flow);
+        return JawnPhoneBridge.ivrScreened(flow);
     }
 
     @Override
