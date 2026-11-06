@@ -348,9 +348,10 @@
 
         <activity
             android:name=".app.JawnInCallActivity"
+            android:excludeFromRecents="true"
             android:exported="false"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-            android:excludeFromRecents="true" />
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
 
         <!-- The face of a call the house is screening when the screen is off
              or the phone is locked: full screen, over the keyguard, woken and

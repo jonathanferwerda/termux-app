@@ -399,6 +399,64 @@ public class JawnPhoneBridge {
     }
 
     /**
+     * POST /manager/sco/rtc: start or stop the WebRTC bridge on the machine that
+     * is carrying the call. This is the same hop the Manager's screening panel
+     * makes (public/js/manager/screening.js, jawnScreenRtcSignal), reused so the
+     * in-call screen can offer the bridge without a page.
+     *
+     * The gateway spawns its bridge on "start" and closes it on "stop"; the media
+     * itself is carried by whichever window can hold a microphone, because this
+     * app has no WebRTC peer of its own.
+     *
+     * Returns the gateway's reply as text ({"ok":1,"state":"starting"} or
+     * {"ok":0,"error":"..."}), or null when the house did not answer. Blocks for
+     * up to the read timeout, so it belongs on a worker thread.
+     */
+    public static String scoRtc(Context context, String action) {
+        Context app = context.getApplicationContext();
+        int port = JawnLauncher.getJawnPort(app);
+        String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+        HttpURLConnection conn = null;
+        try {
+            String body = "action=" + Uri.encode(action == null ? "" : action);
+            byte[] bytes = body.getBytes("UTF-8");
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/rtc").openConnection();
+            trustHouse(conn);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(6000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setFixedLengthStreamingMode(bytes.length);
+            String cookie = presidentCookie(app, origin, port);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            OutputStream out = conn.getOutputStream();
+            try { out.write(bytes); } finally { out.close(); }
+            if (conn.getResponseCode() != 200) {
+                JawnLog.append("rtc: start/stop answered " + conn.getResponseCode());
+                return null;
+            }
+            InputStream in = conn.getInputStream();
+            try {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0) buffer.write(buf, 0, n);
+                return buffer.toString("UTF-8");
+            } finally {
+                in.close();
+            }
+        } catch (Throwable t) {
+            JawnLog.append("rtc: bridge request failed: " + t);
+            return null;
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    /**
      * GET /manager/sco/status: what the gateway is doing and the caller's live
      * transcript. The body is handed back as text for the screening face to
      * parse, because the gateway's shape grows (transcript engines, notes) and

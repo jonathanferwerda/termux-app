@@ -1445,3 +1445,43 @@ work and a full-width build has crashed it (2026-10-10).
 - JawnPhoneBridge: ivrEnabled/ivrRoute/ivrMachine/ivrMachineAvailable read the
   ivr object that GET /manager/phone/sync now carries, so the native side can
   see the IVR policy and whether the selected gateway is online.
+
+## Deltas round V (the in-call screen grows controls)
+
+- JawnInCallActivity is the real in-call screen now. A ringing call keeps the two
+  big Answer / Decline buttons; a call that is up gets a grid of controls under
+  the caller's face, with one note line saying what the last press did:
+  - **Speaker** - Telecom's route (ROUTE_SPEAKER), back to a wired headset or
+    the earpiece when it is on; AudioManager.setSpeakerphoneOn when there is no
+    Telecom service to ask.
+  - **Mute** - InCallService.setMuted (the call's own uplink, which is what the
+    caller must not hear), AudioManager.setMicrophoneMute as the fallback.
+  - **Bluetooth** - shows whether the call's audio is on a Bluetooth device (the
+    name is the gateway's when it is) and moves it there or back. The gateway
+    named by the house's IVR setting is the device requested, so a second
+    headset cannot steal the route.
+  - **Conference** - only where Telecom reports
+    CAPABILITY_MERGE_CONFERENCE / CAPABILITY_SWAP_CONFERENCE, and it says why
+    when it does not. Merge joins a conferenceable call
+    (Call.getConferenceableCalls -> Call.conference); a swap needs a conference
+    that is already up. Nothing is faked.
+  - **WebRTC** - POST /manager/sco/rtc with action=start, and action=stop on a
+    second press (JawnPhoneBridge.scoRtc, the same hop the Manager's screening
+    panel makes with the app's ticket cookie). The gateway spawns/closes its
+    bridge; the media still rides on a window that can hold a microphone (the
+    Manager's screening panel), because this app has no WebRTC peer.
+  - **Connect phone** - the screening face's action: both audio halves come home
+    (IvrAudio.restore + restoreAudio), the gateway is told the call is over, and
+    the screen stays up with the controls.
+  - **Hang up** - JawnInCallService.hangup, so a screened call no longer waits
+    for the caller to end it.
+  The screen says which route the audio is on ("Audio: this phone" / a device
+  name / "(the house gateway)"), and is scrollable so a short screen still
+  reaches the last control. launchMode singleTop keeps a second openScreen from
+  stacking instances.
+- JawnInCallService: audioState() (route, mute, Bluetooth name, conference
+  capabilities), toggleSpeaker, toggleMute, toggleBluetooth, joinConference,
+  connectPhone, toggleRtc and openScreen; every one reports through
+  controlNote/controlNoteAt so the screen has one line to paint.
+- JawnScreenFace "Connect phone" now lands on that screen instead of only
+  swapping the audio and hiding. Build 1298.

@@ -13,7 +13,10 @@ import android.telecom.CallAudioState;
 import android.telecom.InCallService;
 import android.telecom.VideoProfile;
 
+import org.json.JSONObject;
+
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -372,12 +375,335 @@ public class JawnInCallService extends InCallService {
         JawnLog.append("ivr audio: the call is back on the phone");
     }
 
-    private void showScreen() {
+    // ---- the in-call screen's controls ----
+
+    /** The last thing a control said, for the screen's one note line. */
+    public static volatile String controlNote = "";
+    public static volatile long controlNoteAt = 0;
+    /** The gateway's WebRTC bridge was asked for and has not been stopped. */
+    public static volatile boolean rtcOn;
+
+    private static void say(String text) {
+        controlNote = text;
+        controlNoteAt = System.currentTimeMillis();
+        JawnLog.append("call: " + text);
+    }
+
+    /** What the in-call screen needs to know about this call's audio, in one look. */
+    public static final class Audio {
+        public int route = CallAudioState.ROUTE_EARPIECE;
+        public int mask;
+        public boolean speaker;
+        public boolean muted;
+        public boolean bluetooth;
+        public boolean bluetoothOffered;
+        public String bluetoothName = "";
+        /** Telecom says this call may join (or swap with) a conference. */
+        public boolean conference;
+        /** ... and merge is the capability that is actually on offer. */
+        public boolean merge;
+        public String conferenceWhy = "";
+    }
+
+    /**
+     * Read the call's audio state from Telecom, which is the authority while this
+     * service holds the call, and from AudioManager only when there is no service
+     * to ask. Both halves are needed: Telecom owns the route, AudioManager owns
+     * the mute flag a plain phone call would use.
+     */
+    public static Audio audioState(Context context) {
+        Audio out = new Audio();
+        JawnInCallService svc = instance;
+        CallAudioState cas = null;
+        if (svc != null) {
+            try { cas = svc.getCallAudioState(); } catch (Throwable ignored) { }
+        }
+        if (cas != null) {
+            out.route = cas.getRoute();
+            out.mask = cas.getSupportedRouteMask();
+            out.muted = cas.isMuted();
+            out.speaker = out.route == CallAudioState.ROUTE_SPEAKER;
+            out.bluetooth = out.route == CallAudioState.ROUTE_BLUETOOTH;
+            if (out.bluetooth) out.bluetoothName = deviceName(cas.getActiveBluetoothDevice());
+        }
+        else {
+            AudioManager am = JawnIvrAudio.manager(context);
+            if (am != null) {
+                out.mask = CallAudioState.ROUTE_EARPIECE | CallAudioState.ROUTE_SPEAKER;
+                try {
+                    out.muted = am.isMicrophoneMute();
+                    out.speaker = am.isSpeakerphoneOn();
+                    out.bluetooth = am.isBluetoothScoOn();
+                    if (out.speaker) out.route = CallAudioState.ROUTE_SPEAKER;
+                    if (out.bluetooth) out.route = CallAudioState.ROUTE_BLUETOOTH;
+                    if (am.isBluetoothScoAvailableOffCall()) {
+                        out.mask |= CallAudioState.ROUTE_BLUETOOTH;
+                    }
+                    if (am.isWiredHeadsetOn()) out.mask |= CallAudioState.ROUTE_WIRED_HEADSET;
+                } catch (Throwable ignored) { }
+            }
+        }
+        if (out.bluetoothName.isEmpty()) {
+            out.bluetoothName = JawnPhoneBridge.ivrBluetoothName(context);
+        }
+        out.bluetoothOffered = (out.mask & CallAudioState.ROUTE_BLUETOOTH) != 0
+                && JawnIvrAudio.scoAvailable(context);
+
+        // Conference is only offered when Telecom says it is possible. A merge
+        // needs a second call, which the press says out loud; a capability the
+        // platform does not grant is named instead of faked.
+        Call.Details details = null;
+        try { details = current == null ? null : current.getDetails(); } catch (Throwable ignored) { }
+        if (details == null) {
+            out.conferenceWhy = "Conference is unavailable: Telecom has not described this call yet.";
+        }
+        else {
+            out.merge = details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE);
+            boolean swap = details.can(Call.Details.CAPABILITY_SWAP_CONFERENCE);
+            out.conference = out.merge || swap;
+            if (!out.conference) {
+                out.conferenceWhy = "Conference is unavailable: Telecom says this call cannot be joined.";
+            }
+        }
+        return out;
+    }
+
+    /** Is the call being carried by the Bluetooth gateway the house screened it on? */
+    public static boolean onGateway() {
+        JawnInCallService svc = instance;
+        if (svc == null) return false;
+        Trip trip = svc.trips.get(current);
+        return trip != null && trip.gateway;
+    }
+
+    private static String deviceName(BluetoothDevice device) {
+        if (device == null) return "";
         try {
-            Intent i = new Intent(this, JawnInCallActivity.class);
+            String name = device.getName();
+            return name == null ? "" : name.trim();
+        } catch (Throwable t) { return ""; }
+    }
+
+    /** Speakerphone on or off. Telecom's route is the switch; the handset is the way back. */
+    public static void toggleSpeaker(Context context) {
+        JawnInCallService svc = instance;
+        Audio now = audioState(context);
+        boolean on = now.speaker;
+        if (svc == null) {
+            AudioManager am = JawnIvrAudio.manager(context);
+            if (am == null) { say("the speaker could not be switched: no audio service"); return; }
+            try { am.setSpeakerphoneOn(!on); } catch (Throwable t) {
+                say("the speaker could not be switched: " + t);
+                return;
+            }
+            say(on ? "speakerphone off" : "speakerphone on");
+            return;
+        }
+        int target;
+        if (on) {
+            target = (now.mask & CallAudioState.ROUTE_WIRED_HEADSET) != 0
+                    ? CallAudioState.ROUTE_WIRED_HEADSET : CallAudioState.ROUTE_EARPIECE;
+        }
+        else {
+            target = CallAudioState.ROUTE_SPEAKER;
+        }
+        try {
+            svc.setAudioRoute(target);
+            say(on ? "speakerphone off" : "speakerphone on");
+        } catch (Throwable t) {
+            say("Telecom would not move the audio: " + t);
+        }
+    }
+
+    /**
+     * The microphone. Telecom's mute is used when it is offered - it mutes the
+     * call's own uplink, which is what the caller must not hear - and
+     * AudioManager's microphone mute is the fallback.
+     */
+    public static void toggleMute(Context context) {
+        boolean next = !audioState(context).muted;
+        JawnInCallService svc = instance;
+        if (svc != null) {
+            try {
+                svc.setMuted(next);
+                say(next ? "microphone muted" : "microphone live");
+                return;
+            } catch (Throwable ignored) { }
+        }
+        AudioManager am = JawnIvrAudio.manager(context);
+        if (am == null) { say("the microphone could not be muted: no audio service"); return; }
+        try {
+            am.setMicrophoneMute(next);
+            say(next ? "microphone muted" : "microphone live");
+        } catch (Throwable t) {
+            say("the microphone could not be muted: " + t);
+        }
+    }
+
+    /**
+     * Move the call on to Bluetooth, or back to the phone when it is already
+     * there. The gateway is the device named by the house's own setting, so a
+     * second headset connected to the phone does not steal the route.
+     */
+    public static void toggleBluetooth(Context context) {
+        Context app = context.getApplicationContext();
+        JawnInCallService svc = instance;
+        Audio now = audioState(app);
+        if (now.bluetooth) {
+            // the SCO link first, then Telecom's route: clearing only one leaves
+            // the call silent, the same pair restoreAudio() has to undo
+            try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
+            int target = (now.mask & CallAudioState.ROUTE_WIRED_HEADSET) != 0
+                    ? CallAudioState.ROUTE_WIRED_HEADSET : CallAudioState.ROUTE_EARPIECE;
+            try {
+                if (svc != null) svc.setAudioRoute(target);
+                say("audio back on this phone");
+            } catch (Throwable t) {
+                say("audio could not leave Bluetooth: " + t);
+            }
+            return;
+        }
+        if (!now.bluetoothOffered) {
+            say("no Bluetooth device is connected to carry the call");
+            return;
+        }
+        String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        if (svc == null) {
+            say(JawnIvrAudio.routeToSco(app, gateway)
+                    ? "audio on " + now.bluetoothName
+                    : "the Bluetooth link would not come up");
+            return;
+        }
+        try { svc.setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            BluetoothDevice device = JawnIvrAudio.gateway(app, gateway);
+            if (device != null) {
+                try { svc.requestBluetoothAudio(device); } catch (Throwable ignored) { }
+            }
+        }
+        JawnIvrAudio.routeToSco(app, gateway);
+        say("audio on " + (now.bluetoothName.isEmpty() ? "Bluetooth" : now.bluetoothName));
+    }
+
+    /**
+     * Conference, only where Telecom allows it. A merge joins the call that is
+     * waiting (Telecom names the candidates); a swap moves the call into a
+     * conference that is already up. Neither is invented: where the platform
+     * withholds the capability the press only says so.
+     */
+    public static void joinConference(Context context) {
+        JawnInCallService svc = instance;
+        if (svc == null || current == null) { say("no call is up"); return; }
+        Audio now = audioState(context);
+        if (!now.conference) { say(now.conferenceWhy); return; }
+        if (!now.merge) {
+            try {
+                current.swapConference();
+                say("swapping into the conference");
+            } catch (Throwable t) {
+                say("Telecom would not swap the calls: " + t);
+            }
+            return;
+        }
+        Call other = null;
+        try {
+            List<Call> waiting = current.getConferenceableCalls();
+            if (waiting != null) {
+                for (Call candidate : waiting) {
+                    if (candidate != current) { other = candidate; break; }
+                }
+            }
+        } catch (Throwable ignored) { }
+        if (other == null) {
+            say("no second call to merge yet - answer or place one first");
+            return;
+        }
+        try {
+            current.conference(other);
+            say("merging the calls");
+        } catch (Throwable t) {
+            say("Telecom would not merge the calls: " + t);
+        }
+    }
+
+    /**
+     * Take the call back on this phone and stay on the in-call screen, which is
+     * where every control now lives. The gateway is told the call is no longer
+     * its own so it stops playing into a link that is no longer carrying audio.
+     */
+    public static void connectPhone(Context context) {
+        Context app = context.getApplicationContext();
+        try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
+        restoreAudio();
+        JawnPhoneBridge.cancelGateway(app);
+        say("the call is on this phone");
+    }
+
+    /**
+     * Start or stop the WebRTC bridge on the machine that is carrying the call.
+     * The POST is the hand-over; the media rides on a window that can hold a
+     * microphone (the Manager's screening panel), and the reply is what the
+     * screen shows. A second press stops the bridge.
+     */
+    public static void toggleRtc(Context context) {
+        final Context app = context.getApplicationContext();
+        final boolean stop = rtcOn;
+        rtcOn = !stop;
+        say(stop ? "stopping the WebRTC bridge..." : "asking the gateway for the WebRTC bridge...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String reply = JawnPhoneBridge.scoRtc(app, stop ? "stop" : "start");
+                if (reply == null) {
+                    rtcOn = false;
+                    say("the house did not answer the WebRTC request");
+                    return;
+                }
+                try {
+                    JSONObject answer = new JSONObject(reply);
+                    if (answer.optInt("ok", 0) == 1) {
+                        String state = answer.optString("state", "");
+                        rtcOn = !stop;
+                        if (stop) {
+                            say("WebRTC bridge stopped");
+                        }
+                        else {
+                            say("WebRTC bridge " + (state.isEmpty() ? "starting" : state)
+                                    + " - carry the media from a Manager window");
+                        }
+                    }
+                    else {
+                        rtcOn = false;
+                        say("WebRTC: " + answer.optString("error", "the gateway refused the bridge"));
+                    }
+                } catch (Throwable t) {
+                    rtcOn = false;
+                    say("WebRTC: the gateway's reply could not be read");
+                }
+            }
+        }, "jawn-rtc").start();
+    }
+
+    private void showScreen() {
+        openScreen(this);
+    }
+
+    /** Put the in-call screen up; safe to call without a live service. */
+    public static void openScreen(Context context) {
+        JawnInCallService svc = instance;
+        if (svc != null) {
+            try {
+                Intent i = new Intent(svc, JawnInCallActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                svc.startActivity(i);
+                return;
+            } catch (Throwable ignored) { }
+        }
+        if (context == null) return;
+        try {
+            Intent i = new Intent(context.getApplicationContext(), JawnInCallActivity.class);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-        } catch (Throwable t) {}
+            context.getApplicationContext().startActivity(i);
+        } catch (Throwable ignored) { }
     }
 
     private String numberOf(Call call) {

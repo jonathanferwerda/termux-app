@@ -342,9 +342,10 @@ public final class JawnScreenFace {
     private static void connectPhone(Context context) {
         // The phone's own audio first, so the person hears the caller at once;
         // the gateway is then told to stop playing. The call itself never moves.
-        try { JawnIvrAudio.restore(context); } catch (Throwable ignored) { }
-        JawnInCallService.restoreAudio();
-        JawnPhoneBridge.cancelGateway(context);
+        // The person then lands on the in-call screen: that is where the rest of
+        // the controls (speaker, mute, Bluetooth, hang up) now live.
+        JawnInCallService.connectPhone(context);
+        JawnInCallService.openScreen(context);
         hide(context);
     }
 
