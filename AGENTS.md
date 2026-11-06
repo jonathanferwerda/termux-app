@@ -19,7 +19,7 @@ one — the in-app updater (the dashboard's "Update app"), the peer/GitHub sync
 A rebuild that reuses a `versionCode` reads as **"up to date"** and **no device
 will take it** (this is exactly why a build once sat uninstalled while the app
 kept saying it was current). Never reuse or re-ship a number; always step above
-the last release (1293 / 0.118.295).
+the last release (1295 / 0.118.297).
 
 A change that never enters the APK — this file, `JAWNOS.md`, `README.md` — is not
 a version change.
@@ -28,8 +28,13 @@ a version change.
 
 From the jawnos repo (`~/jawnos`):
 
-    perl scripts/app_build.pl      # bumps versionCode + versionName, builds, stages into releases/
+    perl scripts/app_build.pl      # bumps versionCode + versionName, builds the RELEASE-signed APK, stages it
     perl scripts/app_publish.pl    # publishes the newest staged APK + manifest to GitHub
+
+`app_build.pl` builds the **release** variant whenever `keystore.properties` is
+present, and refuses to stage an APK whose certificate is not that keystore's.
+`--debug` builds the dev variant, which no phone running a release build will
+install over - use it only to develop against the app.
 
 Then commit and push this repo (app_build.pl leaves it dirty on purpose — it only
 builds and stages, so the bump is yours to commit):
