@@ -48,6 +48,13 @@ public class JawnInCallService extends InCallService {
      */
     private static final long IVR_LIMIT_MS = 40_000;
     private static final long VOICEMAIL_LIMIT_MS = 120_000;
+    /**
+     * A screened call the house is holding music on. The caller has heard the
+     * thanks and is waiting for somebody to pick up, so the plan's own ceiling
+     * would hang up mid-song. The gateway stops the music when it is told to;
+     * this is the backstop for a hold nobody ever answers.
+     */
+    private static final long HOLD_LIMIT_MS = 10 * 60_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     /** The retries that re-apply the gateway route, so a call that ends can cancel them. */
@@ -180,8 +187,9 @@ public class JawnInCallService extends InCallService {
                         routeCallToGateway();
                         try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                         handler.removeCallbacks(watchdog);
-                        handler.postDelayed(watchdog,
-                                "voicemail".equals(flow) ? VOICEMAIL_LIMIT_MS : IVR_LIMIT_MS);
+                        long limit = "voicemail".equals(flow) ? VOICEMAIL_LIMIT_MS
+                                : (JawnPhoneBridge.ivrHoldOn(JawnInCallService.this) ? HOLD_LIMIT_MS : IVR_LIMIT_MS);
+                        handler.postDelayed(watchdog, limit);
                     }
                 });
             }

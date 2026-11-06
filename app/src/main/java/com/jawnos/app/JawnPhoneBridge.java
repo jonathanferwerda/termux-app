@@ -250,6 +250,16 @@ public class JawnPhoneBridge {
         } catch (Throwable t) { return ""; }
     }
 
+    /**
+     * Is the house holding the caller on music after the thanks? The gateway
+     * plays it and keeps the line up, so the in-call watchdog must not hang up
+     * at the end of the prompts. The choice is the IVR pane's Hold music.
+     */
+    public static boolean ivrHoldOn(Context context) {
+        String hold = ivrFacts(context).optString("hold", "");
+        return hold != null && !hold.isEmpty() && !"none".equalsIgnoreCase(hold);
+    }
+
     private static JSONObject ivrFacts(Context context) {
         try {
             JSONObject ivr = factsOf(context).optJSONObject("ivr");
