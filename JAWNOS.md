@@ -1485,3 +1485,24 @@ work and a full-width build has crashed it (2026-10-10).
   controlNote/controlNoteAt so the screen has one line to paint.
 - JawnScreenFace "Connect phone" now lands on that screen instead of only
   swapping the audio and hiding. Build 1298.
+
+## Deltas round W (hold music, the bottom bar, and a refused call)
+
+- **Hold** joins the in-call grid, beside WebRTC (both are the gateway's): it
+  posts `action=start` / `action=stop` to the new `POST /manager/sco/hold`
+  (`JawnPhoneBridge.scoHold`, the shape of `scoRtc`) and paints "Hold: on" only
+  when the house answers `{"ok":1}`; `{"ok":0,"error":...}` becomes the note
+  line and the state stays where it was. The button is disabled with a reason
+  when the gateway is not carrying the call, because the music is played by the
+  gateway into the line it carries. "Connect phone" now takes a full row of its
+  own. The state is cleared when the call ends or comes back to the phone.
+- **The in-call screen is edge-to-edge-aware.** `JawnInCallActivity` opts into
+  `WindowCompat.setDecorFitsSystemWindows(false)` and pads its root by
+  systemBars|displayCutout (the dashboard's convention), so Hang up sits above
+  a gesture bar and above 3-button navigation instead of under them.
+- **The `reject` flow answers and hangs up at once**, instead of `Call.reject`,
+  so the carrier never forwards the caller to its voicemail.
+  `JawnInCallService.refuseAtNetwork` answers, disconnects a millisecond later,
+  and `Trip.refused` keeps the call out of the answered count and files it
+  through `recordBlockedCall` (an ignored, cancelled appointment). The
+  `voicemail` flow is untouched. Build 1299.

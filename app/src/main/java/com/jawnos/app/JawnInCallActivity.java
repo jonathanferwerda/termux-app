@@ -25,6 +25,12 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+
 import com.jawnos.R;
 
 /**
@@ -37,9 +43,10 @@ import com.jawnos.R;
  *
  * A ringing call gets the two big buttons. A call that is up gets the controls:
  * speaker, mute, Bluetooth, conference (only where Telecom allows it), the
- * gateway's WebRTC bridge, "Connect phone" for taking a screened call back on
- * this phone, and hang up. Every control reports what it did in one note line,
- * so a refusal from Telecom is visible instead of a button that quietly fails.
+ * gateway's WebRTC bridge, its hold music, "Connect phone" for taking a screened
+ * call back on this phone, and hang up. Every control reports what it did in one
+ * note line, so a refusal from Telecom is visible instead of a button that
+ * quietly fails.
  */
 public class JawnInCallActivity extends Activity {
 
@@ -58,6 +65,7 @@ public class JawnInCallActivity extends Activity {
     private Button bluetooth;
     private Button conference;
     private Button rtc;
+    private Button hold;
     private Button connect;
     private LinearLayout controls;
     private String paintedFor = null;
@@ -70,6 +78,14 @@ public class JawnInCallActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Android 15+ draws edge-to-edge whatever the app asks for, and the
+        // control people reach for last is Hang up. Opt in everywhere and pad
+        // the column by the bars and the cutout, so that button sits above a
+        // gesture bar and above 3-button navigation instead of under them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        getWindow().setStatusBarColor(Color.parseColor("#0d1117"));
+        getWindow().setNavigationBarColor(Color.parseColor("#0d1117"));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -146,12 +162,21 @@ public class JawnInCallActivity extends Activity {
         rtc = cell("WebRTC: off", "#2f6db0");
         rtc.setOnClickListener(v -> JawnInCallService.toggleRtc(this));
 
+        hold = cell("Hold", "#243b5e");
+        hold.setOnClickListener(v -> JawnInCallService.toggleHold(this));
+
         connect = cell("Connect phone", "#1d7a3e");
         connect.setOnClickListener(v -> JawnInCallService.connectPhone(this));
+        // the way off the gateway gets a row of its own, full width
+        LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        wide.setMargins(dp(4), dp(4), dp(4), dp(4));
+        connect.setLayoutParams(wide);
 
         controls.addView(row(speaker, mute));
         controls.addView(row(bluetooth, conference));
-        controls.addView(row(rtc, connect));
+        controls.addView(row(rtc, hold));
+        controls.addView(connect);
 
         note = new TextView(this);
         note.setTextColor(Color.parseColor("#8fa3b8"));
@@ -196,6 +221,15 @@ public class JawnInCallActivity extends Activity {
         root.addView(scroll);
         root.addView(bottom);
         setContentView(root);
+        // the bars and the cutout live outside the content on every current
+        // Android; the padding keeps the house's mark and Hang up inside them
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(dp(24) + bars.left, dp(32) + bars.top,
+                    dp(24) + bars.right, dp(20) + bars.bottom);
+            return insets;
+        });
         handler.post(tick);
     }
 
@@ -328,6 +362,7 @@ public class JawnInCallActivity extends Activity {
         }
         if (!a.conference) return a.conferenceWhy;
         if (!a.bluetoothOffered) return "Bluetooth is unavailable: no Bluetooth device is connected.";
+        if (!a.holdOffered) return a.holdWhy;
         return "";
     }
 
@@ -393,6 +428,9 @@ public class JawnInCallActivity extends Activity {
 
             rtc.setText(JawnInCallService.rtcOn ? "WebRTC: on" : "WebRTC: off");
             tint(rtc, JawnInCallService.rtcOn ? "#1d7a3e" : "#2f6db0", true);
+
+            hold.setText(a.hold ? "Hold: on" : "Hold");
+            tint(hold, a.hold ? "#1d7a3e" : "#243b5e", a.holdOffered || a.hold);
 
             note.setText(noteFor(a));
             handler.postDelayed(this, 400);

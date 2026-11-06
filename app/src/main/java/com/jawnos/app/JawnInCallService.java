@@ -80,6 +80,8 @@ public class JawnInCallService extends InCallService {
         boolean answered;
         /** The reception flow answered this call: it is recorded as screened. */
         boolean ivr;
+        /** A "reject" flow: answered only to deny the carrier's voicemail, then ended. */
+        boolean refused;
         /** The gateway is carrying the audio right now; false once the person
          *  takes the call back on the phone. */
         boolean gateway;
@@ -109,7 +111,13 @@ public class JawnInCallService extends InCallService {
                 String flow = JawnPhoneBridge.ivrFlowFor(JawnInCallService.this, number);
                 trip.flow = flow;
                 if ("reject".equals(flow)) {
-                    try { call.reject(false, null); } catch (Throwable ignored) { }
+                    // Declining hands the call back to the carrier, and the
+                    // carrier's voicemail takes the message - which is how the
+                    // owner's box filled up. Answer and end instead: the
+                    // network sees an answered-then-ended call and records
+                    // nothing. trip.refused keeps the log honest about it.
+                    trip.refused = true;
+                    refuseAtNetwork(call, trip);
                     return;
                 }
                 if (isScreened(flow)) {
@@ -135,7 +143,9 @@ public class JawnInCallService extends InCallService {
                 // whether the call came in or went out
                 Trip trip = trips.get(call);
                 if (trip != null) {
-                    trip.answered = true;
+                    // a refused call is answered for a millisecond only, but
+                    // that answer must not read as a call that was taken
+                    if (!trip.refused) trip.answered = true;
                     // Android may reset the communication device as the call
                     // settles, so the route is set again here
                     if (trip.gateway) {
@@ -150,6 +160,7 @@ public class JawnInCallService extends InCallService {
                 Trip trip = trips.remove(call);
                 handler.removeCallbacks(watchdog);
                 handler.removeCallbacks(routeLater);
+                holdOn = false;
                 if (trip != null && trip.ivr) {
                     JawnIvrAudio.restore(JawnInCallService.this);
                     JawnPhoneBridge.cancelGateway(JawnInCallService.this);
@@ -161,6 +172,34 @@ public class JawnInCallService extends InCallService {
             }
         }
     };
+
+    /**
+     * Refuse a call at the network instead of declining it.
+     *
+     * Call.reject() leaves the decision to the carrier, and the carrier's
+     * decision is its voicemail, which then takes a message the owner never
+     * wanted. Answering and disconnecting in the same pass makes the network
+     * see an answered call that ended immediately, so no message is taken. The
+     * trip stays marked refused, so it is still filed as an ignored call and
+     * never counted as answered.
+     */
+    private void refuseAtNetwork(final Call call, final Trip trip) {
+        try {
+            call.answer(VideoProfile.STATE_AUDIO_ONLY);
+        } catch (Throwable t) {
+            // the answer was refused: declining is the only route left, and the
+            // carrier behaves exactly as it did before
+            try { call.reject(false, null); } catch (Throwable ignored) { }
+            return;
+        }
+        handler.postDelayed(new Runnable() {
+            @Override public void run() {
+                // the call may already be gone by the next millisecond
+                if (trip != null && trips.get(call) != trip) return;
+                try { call.disconnect(); } catch (Throwable ignored) { }
+            }
+        }, 1);
+    }
 
     /**
      * Answer an IVR/voicemail call once the gateway adapter is bonded,
@@ -270,6 +309,7 @@ public class JawnInCallService extends InCallService {
         instance = null;
         current = null;
         state = Call.STATE_DISCONNECTED;
+        holdOn = false;
         super.onDestroy();
     }
 
@@ -286,6 +326,7 @@ public class JawnInCallService extends InCallService {
         Trip trip = trips.remove(call);
         handler.removeCallbacks(watchdog);
         handler.removeCallbacks(routeLater);
+        holdOn = false;
         if (trip != null && trip.ivr) {
             JawnIvrAudio.restore(this);
             JawnPhoneBridge.cancelGateway(this);
@@ -305,6 +346,15 @@ public class JawnInCallService extends InCallService {
     private void writeTrip(Trip trip) {
         try {
             long ended = System.currentTimeMillis();
+            if (trip.refused) {
+                // the door a blacklisted call uses: an ignored appointment,
+                // cancelled at once. It was answered only to keep the carrier
+                // from taking a message, so it is not filed as a call taken.
+                JawnPhoneBridge.recordBlockedCall(this, trip.number);
+                JawnLog.append("call " + trip.direction + " " + trip.number
+                        + " refused (reject flow)");
+                return;
+            }
             JawnPhoneBridge.recordCall(this, trip.number, trip.direction, trip.started, ended,
                     trip.answered, trip.ivr);
             JawnLog.append("call " + trip.direction + " " + trip.number + " "
@@ -382,6 +432,8 @@ public class JawnInCallService extends InCallService {
     public static volatile long controlNoteAt = 0;
     /** The gateway's WebRTC bridge was asked for and has not been stopped. */
     public static volatile boolean rtcOn;
+    /** The gateway is playing hold music to the caller (as far as the house said). */
+    public static volatile boolean holdOn;
 
     private static void say(String text) {
         controlNote = text;
@@ -403,6 +455,11 @@ public class JawnInCallService extends InCallService {
         /** ... and merge is the capability that is actually on offer. */
         public boolean merge;
         public String conferenceWhy = "";
+        /** The gateway is playing hold music to this caller right now. */
+        public boolean hold;
+        /** Hold can be offered: the gateway is carrying this call. */
+        public boolean holdOffered;
+        public String holdWhy = "";
     }
 
     /**
@@ -448,6 +505,18 @@ public class JawnInCallService extends InCallService {
         }
         out.bluetoothOffered = (out.mask & CallAudioState.ROUTE_BLUETOOTH) != 0
                 && JawnIvrAudio.scoAvailable(context);
+
+        // Hold music is played by the gateway into the line it carries, so the
+        // call has to be on that gateway; anywhere else the button is disabled
+        // and says so. Music that is configured but missing is the house's
+        // answer to report, not the app's to guess.
+        out.hold = holdOn;
+        if (!onGateway()) {
+            out.holdWhy = "Hold is unavailable: the house gateway is not carrying this call.";
+        }
+        else {
+            out.holdOffered = true;
+        }
 
         // Conference is only offered when Telecom says it is possible. A merge
         // needs a second call, which the press says out loud; a capability the
@@ -636,6 +705,8 @@ public class JawnInCallService extends InCallService {
         try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
         restoreAudio();
         JawnPhoneBridge.cancelGateway(app);
+        // the music came through the gateway's link; it is gone with it
+        holdOn = false;
         say("the call is on this phone");
     }
 
@@ -681,6 +752,44 @@ public class JawnInCallService extends InCallService {
                 }
             }
         }, "jawn-rtc").start();
+    }
+
+    /**
+     * Start or stop the gateway's hold music for this call. The POST is the
+     * whole action - the gateway owns the caller's line - and its reply is what
+     * the screen paints: the music is on only when the house said ok.
+     */
+    public static void toggleHold(Context context) {
+        final Context app = context.getApplicationContext();
+        final boolean stop = holdOn;
+        if (!stop) {
+            Audio now = audioState(app);
+            if (!now.holdOffered) { say(now.holdWhy); return; }
+        }
+        say(stop ? "stopping the hold music..." : "putting the caller on hold music...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String reply = JawnPhoneBridge.scoHold(app, stop ? "stop" : "start");
+                if (reply == null) {
+                    say("the house did not answer the hold request");
+                    return;
+                }
+                try {
+                    JSONObject answer = new JSONObject(reply);
+                    if (answer.optInt("ok", 0) == 1) {
+                        // a reply that lands after the call ended must not
+                        // leave the next call painted as on hold
+                        holdOn = current != null && state != Call.STATE_DISCONNECTED && !stop;
+                        say(stop ? "hold music stopped" : "the caller is on hold music");
+                    }
+                    else {
+                        say("Hold: " + answer.optString("error", "the gateway refused the hold"));
+                    }
+                } catch (Throwable t) {
+                    say("Hold: the gateway's reply could not be read");
+                }
+            }
+        }, "jawn-hold").start();
     }
 
     private void showScreen() {
