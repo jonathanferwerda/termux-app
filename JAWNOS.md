@@ -1500,9 +1500,14 @@ work and a full-width build has crashed it (2026-10-10).
   `WindowCompat.setDecorFitsSystemWindows(false)` and pads its root by
   systemBars|displayCutout (the dashboard's convention), so Hang up sits above
   a gesture bar and above 3-button navigation instead of under them.
-- **The `reject` flow answers and hangs up at once**, instead of `Call.reject`,
-  so the carrier never forwards the caller to its voicemail.
-  `JawnInCallService.refuseAtNetwork` answers, disconnects a millisecond later,
-  and `Trip.refused` keeps the call out of the answered count and files it
-  through `recordBlockedCall` (an ignored, cancelled appointment). The
-  `voicemail` flow is untouched. Build 1299.
+- **The `reject` flow answers, holds a silent line for four seconds, then
+  hangs up**, instead of `Call.reject`, so the carrier never forwards the caller
+  to its voicemail. `JawnInCallService.refuseAtNetwork` answers
+  (`STATE_AUDIO_ONLY`), mutes the call's uplink through Telecom
+  (`InCallService.setMuted`) with `AudioManager.setMicrophoneMute` as a second
+  layer, never routes the call to the gateway, and disconnects after
+  `REJECT_HOLD_MS` (4s). A different call reaching ACTIVE cancels that pending
+  disconnect, and `onDestroy`/`onCallRemoved` tear it down, so the timer can
+  never end a call somebody is talking on. `Trip.refused` keeps the call out of
+  the answered count and files it through `recordBlockedCall` (an ignored,
+  cancelled appointment). The `voicemail` flow is untouched. Build 1300.

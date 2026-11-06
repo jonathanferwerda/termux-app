@@ -58,6 +58,13 @@ public class JawnInCallService extends InCallService {
      * this is the backstop for a hold nobody ever answers.
      */
     private static final long HOLD_LIMIT_MS = 10 * 60_000;
+    /**
+     * How long a "reject" flow is held answered before it is disconnected. The
+     * network has to see a real answered call, or its voicemail takes a message
+     * the owner never wanted - but the caller hears nothing the whole time,
+     * because the microphone is muted for the window.
+     */
+    private static final long REJECT_HOLD_MS = 4_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     /** The retries that re-apply the gateway route, so a call that ends can cancel them. */
@@ -95,6 +102,10 @@ public class JawnInCallService extends InCallService {
     }
 
     private final Map<Call, Trip> trips = new HashMap<>();
+    /** The reject flow's delayed disconnect, so a competing call or teardown can cancel it. */
+    private Runnable pendingReject;
+    /** The call pendingReject would disconnect; a different call must never match it. */
+    private Call pendingRejectCall;
 
     private final Call.Callback callback = new Call.Callback() {
         @Override
@@ -139,13 +150,27 @@ public class JawnInCallService extends InCallService {
                 showScreen();
             }
             else if (newState == Call.STATE_ACTIVE) {
+                // A second call reaching ACTIVE means the person is talking on it:
+                // the pending reject belongs to the old, refused call and must not
+                // disconnect this one (or keep its microphone muted).
+                if (pendingReject != null && pendingRejectCall != call) {
+                    cancelPendingReject();
+                }
                 // reached ACTIVE: this is the state that means somebody answered,
                 // whether the call came in or went out
                 Trip trip = trips.get(call);
                 if (trip != null) {
-                    // a refused call is answered for a millisecond only, but
+                    // a refused call is answered without anybody taking it, but
                     // that answer must not read as a call that was taken
                     if (!trip.refused) trip.answered = true;
+                    else if (pendingReject == null) {
+                        // the window was cancelled when another call was
+                        // answered, and the network has now resumed this
+                        // refused one: end it rather than let it reconnect a
+                        // caller to a microphone that is live again
+                        try { call.disconnect(); } catch (Throwable ignored) { }
+                        return;
+                    }
                     // Android may reset the communication device as the call
                     // settles, so the route is set again here
                     if (trip.gateway) {
@@ -160,6 +185,14 @@ public class JawnInCallService extends InCallService {
                 Trip trip = trips.remove(call);
                 handler.removeCallbacks(watchdog);
                 handler.removeCallbacks(routeLater);
+                if (pendingReject != null && call == pendingRejectCall) {
+                    // the refused call ended before its window did; the timer
+                    // must not fire into a later call
+                    handler.removeCallbacks(pendingReject);
+                    pendingReject = null;
+                    pendingRejectCall = null;
+                    unmuteAfterReject();
+                }
                 holdOn = false;
                 if (trip != null && trip.ivr) {
                     JawnIvrAudio.restore(JawnInCallService.this);
@@ -178,10 +211,15 @@ public class JawnInCallService extends InCallService {
      *
      * Call.reject() leaves the decision to the carrier, and the carrier's
      * decision is its voicemail, which then takes a message the owner never
-     * wanted. Answering and disconnecting in the same pass makes the network
-     * see an answered call that ended immediately, so no message is taken. The
-     * trip stays marked refused, so it is still filed as an ignored call and
-     * never counted as answered.
+     * wanted. Answering and holding the line makes the network see a call that
+     * was really taken: it is answered, kept for REJECT_HOLD_MS, then ended.
+     *
+     * Nothing of the house reaches the caller in that window: the microphone is
+     * muted the moment the call is answered, the gateway route is never applied
+     * (a rejected call never sets trip.gateway, and a retry left over from an
+     * earlier screened call is cancelled), and no prompt, tone or screen sound
+     * is played. The trip stays marked refused, so it is still filed as an
+     * ignored call and never counted as answered.
      */
     private void refuseAtNetwork(final Call call, final Trip trip) {
         try {
@@ -192,13 +230,58 @@ public class JawnInCallService extends InCallService {
             try { call.reject(false, null); } catch (Throwable ignored) { }
             return;
         }
-        handler.postDelayed(new Runnable() {
+        // mute before anything can leave the phone, not after the hold starts
+        muteForReject();
+        // a route retry from an earlier screened call must not attach this one
+        // to the gateway; nothing else may be routed either
+        handler.removeCallbacks(routeLater);
+        final Runnable end = new Runnable() {
             @Override public void run() {
-                // the call may already be gone by the next millisecond
-                if (trip != null && trips.get(call) != trip) return;
+                if (pendingReject != this) return;
+                pendingReject = null;
+                pendingRejectCall = null;
+                // the call may already be gone, or a competing call may have
+                // taken over the service's microphone: only this trip's call is
+                // ever disconnected
+                if (trips.get(call) != trip) { unmuteAfterReject(); return; }
                 try { call.disconnect(); } catch (Throwable ignored) { }
+                unmuteAfterReject();
             }
-        }, 1);
+        };
+        pendingReject = end;
+        pendingRejectCall = call;
+        handler.postDelayed(end, REJECT_HOLD_MS);
+    }
+
+    /**
+     * Drop a pending reject without disconnecting anything. Used when somebody
+     * answers a different call, and when the service goes away: the microphone
+     * is ours (the reject muted it and no screen offered a mute), so it is put
+     * back the way an ordinary call expects to find it.
+     */
+    private void cancelPendingReject() {
+        if (pendingReject == null) return;
+        handler.removeCallbacks(pendingReject);
+        pendingReject = null;
+        pendingRejectCall = null;
+        unmuteAfterReject();
+    }
+
+    /** Mute the uplink for the reject window: Telecom first, AudioManager as the second layer. */
+    private void muteForReject() {
+        try { setMuted(true); } catch (Throwable ignored) { }
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) am.setMicrophoneMute(true);
+        } catch (Throwable ignored) { }
+    }
+
+    private void unmuteAfterReject() {
+        try { setMuted(false); } catch (Throwable ignored) { }
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) am.setMicrophoneMute(false);
+        } catch (Throwable ignored) { }
     }
 
     /**
@@ -295,6 +378,7 @@ public class JawnInCallService extends InCallService {
 
     @Override
     public void onDestroy() {
+        cancelPendingReject();
         handler.removeCallbacks(watchdog);
         handler.removeCallbacks(routeLater);
         // The service can go away mid-call (a crash or a system kill). Nothing
@@ -323,6 +407,12 @@ public class JawnInCallService extends InCallService {
     @Override
     public void onCallRemoved(Call call) {
         // a call that goes away without ever saying DISCONNECTED still happened
+        if (pendingReject != null && call == pendingRejectCall) {
+            handler.removeCallbacks(pendingReject);
+            pendingReject = null;
+            pendingRejectCall = null;
+            unmuteAfterReject();
+        }
         Trip trip = trips.remove(call);
         handler.removeCallbacks(watchdog);
         handler.removeCallbacks(routeLater);
