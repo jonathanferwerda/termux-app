@@ -688,12 +688,17 @@ public class JawnInCallService extends InCallService {
         // Telecom names merge/swap once it knows of a partner; a call it only
         // says can be held can still start that conference, and the press names
         // the missing second call instead of a dead button.
+        Call callUp = current;
         Call.Details details = null;
-        try { details = current == null ? null : current.getDetails(); } catch (Throwable ignored) { }
+        try { details = callUp == null ? null : callUp.getDetails(); } catch (Throwable ignored) { }
         if (details == null) {
             out.conferenceWhy = "Conference is unavailable: Telecom has not described this call yet.";
         }
         else {
+            // Telecom's capability report for this call - the same test as
+            // Call.can() names, read where this API keeps it. Neither the
+            // audio route nor trip.gateway is consulted, so a call on the
+            // phone offers conference exactly when the platform allows it.
             out.merge = details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE);
             out.swap = details.can(Call.Details.CAPABILITY_SWAP_CONFERENCE);
             boolean partner = false;
@@ -1229,16 +1234,23 @@ public class JawnInCallService extends InCallService {
         }
         String body = reply.body;
         if (body != null && !body.trim().isEmpty()) {
-            try {
-                JSONObject answer = new JSONObject(body);
+            JSONObject answer = null;
+            try { answer = new JSONObject(body); } catch (Throwable ignored) { }
+            if (answer != null) {
                 if (answer.optInt("ok", 0) == 1) {
                     return new VoicemailResult(true,
                             "the caller is on the house voicemail - recording now");
                 }
                 String error = answer.optString("error", "");
                 if (!error.isEmpty()) return new VoicemailResult(false, "Voicemail: " + error);
-            } catch (Throwable ignored) { }
-            return new VoicemailResult(false, "Voicemail: the gateway's reply could not be read"
+                return new VoicemailResult(false,
+                        "Voicemail: the house refused it without saying why"
+                        + (reply.failure == null ? "" : " (" + reply.failure + ")"));
+            }
+            // the body is there but is not JSON: name that, and the status the
+            // request itself got, instead of a generic silence
+            return new VoicemailResult(false,
+                    "Voicemail: the gateway's reply could not be read as JSON"
                     + (reply.failure == null ? "" : " (" + reply.failure + ")"));
         }
         return new VoicemailResult(false,

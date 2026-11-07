@@ -118,9 +118,24 @@
   instead of a bare string: a non-200 body is read too, because the gateway can
   put its refusal there. `JawnInCallService.voicemailResult` paints
   `Voicemail: <the gateway's error>` for `{ok:0,error}`, the success sentence
-  for `{ok:1}`, `the gateway's reply could not be read (<why>)` for a body that
-  is not JSON, and `the house did not answer (timeout)` / `the house answered
-  <code>` when the request itself failed. Both the in-call screen and the
-  screening panel use it. `Audio.voicemailOffered` is exactly
-  `screened && trip.gateway` - the same rule as Hold - and enables the button
-  there and on the panel. Build 1305.
+  for `{ok:1}`, `the gateway's reply could not be read as JSON (<why>)` for a
+  body that is not JSON, `the house refused it without saying why (<status>)`
+  for a JSON answer that names no error, and `the house did not answer
+  (timeout)` / `the house answered <code>` when the request itself failed. Both
+  the in-call screen and the screening panel use it. `Audio.voicemailOffered` is
+  exactly `screened && trip.gateway` - the same rule as Hold - and enables the
+  button there and on the panel. Build 1305.
+
+### Round X+5, second pass (same three rules, two sharpenings)
+
+- **Conference reads Telecom's capability report for the call.** Android keeps
+  it on `Call.Details` (`CAPABILITY_MERGE_CONFERENCE` / `..._SWAP_CONFERENCE`;
+  `Call` has no `can()` on this SDK), so `Audio.merge`/`swap` come from
+  `details.can(...)` - the report `Call.can()` is named for. It is taken from
+  one `current` snapshot and never consults the audio route or `trip.gateway`,
+  so a call on the phone offers conference exactly when the platform allows it.
+- **The voicemail note names the half that failed.** An unreadable body says
+  `could not be read as JSON`, a JSON refusal with no `error` says so, and both
+  carry the request's own status (`the house answered <code>`) when there was
+  one. A `{ok:0,error}` still surfaces the gateway's words unchanged. Nothing
+  is retried. Build 1307.
