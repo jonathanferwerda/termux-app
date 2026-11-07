@@ -37,7 +37,7 @@ import org.json.JSONObject;
  * (JawnInCallService, JawnIvrAudio), so the caller's voice never reaches the
  * phone's speaker. Without something on screen the call is invisible: the phone
  * shows its ordinary in-call screen for a call nobody is holding. That is what
- * this is - the caller, what the gateway hears, and the two things a person can
+ * this is - the caller, what the gateway hears, and the three things a person can
  * do about it.
  *
  * Two hosts, one panel:
@@ -65,6 +65,8 @@ public final class JawnScreenFace {
     private static volatile String caller = "";
     /** The newest status body, parsed, or null before the first answer. */
     private static volatile JSONObject status;
+    /** The answer to "Send to voicemail", shown under the transcript until the face goes. */
+    private static volatile String voicemailNote = "";
 
     private static Thread worker;
     /** Each poller owns its own flag: a request already in flight when the
@@ -97,6 +99,7 @@ public final class JawnScreenFace {
         ui.post(new Runnable() {
             @Override public void run() {
                 caller = who.isEmpty() ? JawnPhoneState.freshNumber(120_000) : who;
+                voicemailNote = "";
                 if (screenHidden(app)) {
                     postNotification(app);
                     // The intent is the sanctioned road, but a restricted or
@@ -122,6 +125,7 @@ public final class JawnScreenFace {
                 removeOverlay();
                 cancelNotification(app);
                 status = null;
+                voicemailNote = "";
                 JawnScreeningActivity.closeIfShowing();
             }
         });
@@ -318,25 +322,56 @@ public final class JawnScreenFace {
     // ---- taking the call back ----
 
     /**
-     * Carry the call to this device over WebRTC, in the house's own Phone app.
+     * Send this caller to the house's voicemail without moving the call.
      *
-     * The page does the media: the WebView grants it the microphone, the
-     * browser cancels the echo, and /manager/sco/rtc carries the offer to the
-     * gateway. Opening it here is what "the device that clicked" means - the
-     * same button on a tablet would open the same page on the tablet.
+     * The phone carrying a screened call must not connect the caller to itself,
+     * so the panel's way out is the house's voicemail: the gateway plays the
+     * greeting and records the message on the line it already owns. This is the
+     * same POST the in-call screen's Voicemail button makes, and the same rule:
+     * only a screened call the gateway is carrying has one. The answer is
+     * painted on the panel; nothing here hangs up.
      */
-    private static void connectMe(Context context) {
-        try {
-            int port = JawnLauncher.getJawnPort(context);
-            String url = JawnLauncher.getManagerUrl(context, port) + "/phone?connect=me";
-            Intent i = new Intent(context, JawnWebViewActivity.class);
-            i.putExtra(JawnWebViewActivity.EXTRA_URL, url);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            context.startActivity(i);
-        } catch (Throwable t) {
-            JawnLog.append("screening: could not open the phone page: " + t);
+    private static void sendToVoicemail(final Context context) {
+        final Context app = context.getApplicationContext();
+        JawnInCallService.Audio now = JawnInCallService.audioState(app);
+        if (!now.gatewayCarried) {
+            voicemailNote = now.screened
+                    ? "Voicemail is unavailable: the call is not on the house gateway."
+                    : "Voicemail is unavailable: this call is not being screened by the house.";
+            ui.post(repaintAll);
+            return;
         }
-        hide(context);
+        voicemailNote = "sending the caller to the house voicemail...";
+        ui.post(repaintAll);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String reply = JawnPhoneBridge.scoVoicemail(app, null);
+                String painted;
+                if (reply == null) {
+                    painted = "the house did not answer the voicemail request";
+                }
+                else {
+                    try {
+                        JSONObject answer = new JSONObject(reply);
+                        if (answer.optInt("ok", 0) == 1) {
+                            // the gateway stops its music before the greeting,
+                            // so the call screen must not keep painting "Hold: on"
+                            JawnInCallService.holdOn = false;
+                            painted = "the caller is on the house voicemail - recording now";
+                        }
+                        else {
+                            painted = "Voicemail: " + answer.optString("error",
+                                    "the gateway refused the voicemail");
+                        }
+                    } catch (Throwable t) {
+                        painted = "Voicemail: the gateway's reply could not be read";
+                    }
+                }
+                voicemailNote = painted;
+                JawnLog.append("screening: " + painted);
+                ui.post(repaintAll);
+            }
+        }, "jawn-screen-voicemail").start();
     }
 
     private static void connectPhone(Context context) {
@@ -376,6 +411,7 @@ public final class JawnScreenFace {
         private final TextView noteView;
         private final LinearLayout bubbles;
         private final ScrollView scroll;
+        private final Button voicemail;
         private String painted = null;
 
         public Panel(Context context) {
@@ -419,19 +455,18 @@ public final class JawnScreenFace {
             noteView.setVisibility(View.GONE);
             root.addView(noteView);
 
-            // "Connect me" opens the house's Phone app on this device. The page
-            // is the WebRTC peer - it already has the microphone through
-            // HouseChrome.onPermissionRequest and it owns the signalling - so
-            // the face carries a button rather than a second copy of that stack.
-            // The gateway's half is docs/reception.md, "Connect me".
-            Button bridge = pill("Connect me", "#2f6db0");
-            LinearLayout.LayoutParams bridgeLp = new LinearLayout.LayoutParams(
+            // The phone carrying a screened call must not connect the caller to
+            // itself: the house's voicemail is the way out that leaves the line
+            // where it is. Same request as the in-call screen's Voicemail
+            // button - the gateway plays the greeting and records the message.
+            voicemail = pill("Send to voicemail", "#8a5b16");
+            LinearLayout.LayoutParams vmlp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            bridgeLp.topMargin = dp(12);
-            bridge.setLayoutParams(bridgeLp);
-            bridge.setOnClickListener(v -> connectMe(context));
-            root.addView(bridge);
+            vmlp.topMargin = dp(12);
+            voicemail.setLayoutParams(vmlp);
+            voicemail.setOnClickListener(v -> sendToVoicemail(context));
+            root.addView(voicemail);
 
             LinearLayout buttons = new LinearLayout(context);
             buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -510,12 +545,22 @@ public final class JawnScreenFace {
                 }
             }
 
+            // The voicemail answer outranks the transcript hint: it is the
+            // reply to something the person just pressed. The button follows
+            // the call: only a screened call the gateway still carries has a
+            // voicemail to send it to.
+            boolean canVoicemail = JawnInCallService.audioState(context).gatewayCarried;
+            voicemail.setEnabled(canVoicemail);
+            voicemail.setAlpha(canVoicemail ? 1f : 0.45f);
+
             // No engine is the one case worth explaining: the note says why
             // there is nothing to read. With an engine and no words yet, the
             // face simply waits.
-            String hint = "";
-            if (engine.isEmpty()) hint = note;
-            else if (count == 0 && partial.isEmpty()) hint = "listening...";
+            String hint = voicemailNote;
+            if (hint.isEmpty()) {
+                if (engine.isEmpty()) hint = note;
+                else if (count == 0 && partial.isEmpty()) hint = "listening...";
+            }
             noteView.setText(hint);
             noteView.setVisibility(hint.isEmpty() ? View.GONE : View.VISIBLE);
         }

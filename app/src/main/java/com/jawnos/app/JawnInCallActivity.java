@@ -49,10 +49,10 @@ import com.jawnos.R;
  *
  * A ringing call gets the two big buttons. A call that is up gets the controls:
  * speaker, mute, Bluetooth, conference (only where Telecom allows it), the
- * gateway's WebRTC bridge, its hold music, its voicemail, "Connect phone" for
- * taking a screened call back on this phone, and hang up. Every control reports
- * what it did in one note line, so a refusal from Telecom is visible instead
- * of a button that quietly fails.
+ * gateway's WebRTC bridge, its hold music, its voicemail, "Connect phone" -
+ * the toggle between this phone and the house gateway for a screened call -
+ * and hang up. Every control reports what it did in one note line, so a
+ * refusal from Telecom is visible instead of a button that quietly fails.
  */
 public class JawnInCallActivity extends Activity {
 
@@ -511,8 +511,10 @@ public class JawnInCallActivity extends Activity {
         if (!JawnInCallService.controlNote.isEmpty() && age < 20_000) {
             return JawnInCallService.controlNote;
         }
+        // which side of the gateway toggle the call is on: the same line is
+        // the reason Hold and Voicemail are off while the call is home
+        if (a.screened) return a.connectWhy;
         if (!a.conference) return a.conferenceWhy;
-        if (!a.connectOffered && a.screened) return a.connectWhy;
         if (!a.bluetoothOffered) return "Bluetooth is unavailable: no Bluetooth device is connected.";
         if (!a.holdOffered) return a.holdWhy;
         return "";
@@ -593,11 +595,12 @@ public class JawnInCallActivity extends Activity {
             // hold: the gateway owns the line and does the recording
             tint(voicemail, "#243b5e", a.gatewayCarried);
 
-            // "Connect phone" is the way back from the gateway, so it is only
-            // on a call the house screened; once the call is home it stays as
-            // the reason line rather than offering the same move again
+            // One control, two directions: on the gateway it brings the call
+            // home, and once home it hands the call back, so it is never a
+            // dead end. Only a call the house screened has a gateway at all.
             connect.setVisibility(a.screened ? View.VISIBLE : View.GONE);
-            tint(connect, "#1d7a3e", a.connectOffered);
+            connect.setText(a.gatewayCarried ? "Connect phone" : "Send to gateway");
+            tint(connect, "#1d7a3e", true);
 
             note.setText(noteFor(a));
             handler.postDelayed(this, 400);

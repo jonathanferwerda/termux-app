@@ -590,7 +590,7 @@ public class JawnInCallService extends InCallService {
         public boolean screened;
         /** That flow gateway is carrying the call right now. */
         public boolean gatewayCarried;
-        /** "Connect phone" still has something to do. */
+        /** "Connect phone" brings the call home; false means the same control hands it back. */
         public boolean connectOffered;
         public String connectWhy = "";
     }
@@ -664,9 +664,13 @@ public class JawnInCallService extends InCallService {
         else {
             out.holdOffered = true;
         }
+        // The control is a toggle: on the gateway it brings the call home, and
+        // once home the same button hands it back. The note line says which.
         out.connectOffered = out.gatewayCarried;
-        if (!out.connectOffered && out.screened) {
-            out.connectWhy = "The call is already on this phone.";
+        if (out.screened) {
+            out.connectWhy = out.gatewayCarried
+                    ? "The house gateway is carrying this call - Connect phone brings it home."
+                    : "The call is on this phone - Send to gateway hands it back to the house.";
         }
 
         // Conference is only offered when Telecom says it is possible. A merge
@@ -886,18 +890,26 @@ public class JawnInCallService extends InCallService {
     }
 
     /**
-     * Take the call back on this phone and stay on the in-call screen, which is
-     * where every control now lives. The gateway is told the call is no longer
-     * its own so it stops playing into a link that is no longer carrying audio.
+     * The one control between the house gateway and this phone, in both
+     * directions.
+     *
+     * While the gateway carries a screened call it takes the call back: the
+     * phone's audio first, then the gateway is told the call is no longer its
+     * own so it stops playing into a link that is no longer carrying audio.
+     * Once the call is home the same control hands it back to the adapter the
+     * house named - the way back that Hold, Voicemail and the screening panel
+     * all depend on.
      */
     public static void connectPhone(Context context) {
         Context app = context.getApplicationContext();
         if (!onGateway()) {
-            // nothing to take back: the call was never screened, or it is
-            // already here. Say which rather than move audio that is home.
             Audio now = audioState(app);
-            say(now.screened ? "the call is already on this phone"
-                    : "this call is not being screened by the house");
+            if (!now.screened) {
+                // nothing to hand over: the house never screened this call
+                say("this call is not being screened by the house");
+                return;
+            }
+            sendToGateway(context);
             return;
         }
         try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
@@ -905,7 +917,43 @@ public class JawnInCallService extends InCallService {
         JawnPhoneBridge.cancelGateway(app);
         // the music came through the gateway's link; it is gone with it
         holdOn = false;
+        // the face belongs to the gateway: once the call is home it has
+        // nothing to show, and the in-call screen is where the controls are
+        JawnScreenFace.hide(app);
         say("the call is on this phone");
+    }
+
+    /**
+     * Hand a screened call that came home back to the gateway the house named.
+     *
+     * routeCallToGateway() is the same route answer time applies - Telecom's
+     * Bluetooth route, the named Hands-Free device, the SCO link, and its
+     * retries for a route Telecom resets as the call settles. The trip's
+     * gateway flag is what Hold, Voicemail and the screening panel read, and
+     * it is set again so all three come back. Nothing is played: hold music
+     * stays off until the person asks for it. A call with no Bluetooth device
+     * is left where it is and says why.
+     */
+    private static void sendToGateway(Context context) {
+        Context app = context.getApplicationContext();
+        JawnInCallService svc = instance;
+        if (svc == null || current == null) { say("no call is up"); return; }
+        Audio now = audioState(app);
+        if (now.gatewayCarried) { say("the call is already on the house gateway"); return; }
+        String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        if (gateway.isEmpty()) { say("the house has not named a gateway for this call"); return; }
+        if (!now.bluetoothOffered) {
+            say("no Bluetooth device is connected to carry the call");
+            return;
+        }
+        // music would play into a link that is not carrying the call
+        holdOn = false;
+        svc.routeCallToGateway();
+        setGatewayCarried(true);
+        Trip trip = svc.trips.get(current);
+        // the face is the gateway's: the call is back on it, so it comes back
+        JawnScreenFace.show(app, trip == null ? "" : trip.number);
+        say("the call is back on " + gateway);
     }
 
     /**

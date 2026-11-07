@@ -48,3 +48,35 @@
   already recording) - shown, not retried. A successful send also clears the
   screen's `holdOn`, because the gateway stops its music before the greeting.
   Build 1303.
+
+## Deltas round X+4 (voicemail from the screening panel, and the toggle back)
+
+- **The screening panel offers "Send to voicemail", not "Connect me".**
+  `JawnScreenFace.Panel` no longer opens `/phone?connect=me`: the phone
+  carrying a screened call must not connect the caller to itself. The
+  full-width button now posts the same `POST /manager/sco/voicemail` the
+  in-call screen's Voicemail control uses (`JawnPhoneBridge.scoVoicemail`,
+  worker thread), and it follows the same rule - only a screened,
+  gateway-carried call has one, computed from `JawnInCallService.audioState`
+  on every repaint. The reply is painted in the panel's own note line
+  (`the caller is on the house voicemail - recording now`, or the gateway's
+  error) and outranks the transcript hint until the face goes; a successful
+  send clears `holdOn` because the greeting replaces the music. The call is
+  never hung up, and **Connect phone** and **Disconnect** are unchanged.
+- **Connect phone is a toggle, so the in-call screen is never a dead end.**
+  `JawnInCallService.connectPhone` still takes a gateway-carried call home
+  (`JawnIvrAudio.restore` + `restoreAudio`, flags cleared, gateway cancelled,
+  hold music off) and now hides the screening face with it. Called on a call
+  that is already home, the same method runs `sendToGateway`: it re-applies
+  the answer-time route (`routeCallToGateway`, so the named Hands-Free
+  adapter, Telecom's Bluetooth route, the SCO link and its retries), sets the
+  trip's `gateway` flag again with `setGatewayCarried(true)`, keeps hold music
+  off, and raises `JawnScreenFace` again - Hold and Voicemail come back with
+  it. With no Bluetooth device the call stays put and the note line says why.
+  `Audio.connectWhy` now carries the state sentence in both directions, so
+  the screen's one note line reads "The house gateway is carrying this call -
+  Connect phone brings it home." or "The call is on this phone - Send to
+  gateway hands it back to the house."; the control reads **Connect phone** on
+  the gateway and **Send to gateway** once home, and it is never dimmed. Hold
+  and Voicemail stay lit while the gateway carries and dim (with that line as
+  the reason) only while the call is home. Build 1304.
