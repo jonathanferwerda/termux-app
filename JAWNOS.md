@@ -30,3 +30,21 @@
   for that window. Away from the face, and on call end or `onDestroy`, both
   locks are released, the sensor is unregistered and the flag comes back.
   `WAKE_LOCK` was already in the manifest; no permission was added. Build 1302.
+
+## Deltas round X+3 (voicemail from the call screen)
+
+- **The in-call screen can send a screened caller to the house's voicemail.**
+  A `Voicemail` cell joins the call-up grid, under WebRTC/Hold, and shares
+  Hold's shape: it posts `POST /manager/sco/voicemail` through
+  `JawnPhoneBridge.scoVoicemail` (form-urlencoded `text`, the president cookie,
+  the same 2 s connect / 6 s read timeouts as `scoHold`) from a worker thread,
+  and it is enabled exactly when `Audio.gatewayCarried` - the same
+  `trip.ivr && trip.gateway` test Hold uses. The gateway plays the greeting and
+  records the message; the app never hangs up, moves no audio and leaves the
+  gateway flag alone, so the call stays up as it was. A press on a call that is
+  not on the gateway says why in the note line instead of posting. The reply
+  paints the note line: `the caller is on the house voicemail - recording now`
+  on `{ok:1}`, and `Voicemail: <the gateway's error>` on `{ok:0}` (no call up,
+  already recording) - shown, not retried. A successful send also clears the
+  screen's `holdOn`, because the gateway stops its music before the greeting.
+  Build 1303.

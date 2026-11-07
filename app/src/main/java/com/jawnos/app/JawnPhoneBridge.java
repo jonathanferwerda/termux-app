@@ -525,6 +525,64 @@ public class JawnPhoneBridge {
     }
 
     /**
+     * POST /manager/sco/voicemail: the house's voicemail, now - the flow's
+     * greeting (or words the person typed) plays and the message is recorded,
+     * instead of after the rest of the flow.
+     *
+     * The one field is `text`, optional words to speak before the recording.
+     * This screen has no typed line, so it posts none and the house's own
+     * greeting plays. The reply is {"ok":1,"flow":"...","step":"voicemail"} or
+     * {"ok":0,"error":"..."} - no call is up, or it is already recording. The
+     * call is deliberately left alone: the gateway ends it when the recording
+     * does, so nothing here hangs up.  A null return means the house did not
+     * answer. Blocks for up to the read timeout, so it belongs on a worker
+     * thread.
+     */
+    public static String scoVoicemail(Context context, String text) {
+        Context app = context.getApplicationContext();
+        int port = JawnLauncher.getJawnPort(app);
+        String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+        HttpURLConnection conn = null;
+        try {
+            String body = "text=" + Uri.encode(text == null ? "" : text);
+            byte[] bytes = body.getBytes("UTF-8");
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/voicemail").openConnection();
+            trustHouse(conn);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(6000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setFixedLengthStreamingMode(bytes.length);
+            String cookie = presidentCookie(app, origin, port);
+            if (cookie != null && !cookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookie);
+            }
+            OutputStream out = conn.getOutputStream();
+            try { out.write(bytes); } finally { out.close(); }
+            if (conn.getResponseCode() != 200) {
+                JawnLog.append("voicemail: request answered " + conn.getResponseCode());
+                return null;
+            }
+            InputStream in = conn.getInputStream();
+            try {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0) buffer.write(buf, 0, n);
+                return buffer.toString("UTF-8");
+            } finally {
+                in.close();
+            }
+        } catch (Throwable t) {
+            JawnLog.append("voicemail: request failed: " + t);
+            return null;
+        } finally {
+            if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    /**
      * POST /manager/sco/flow: name the caller's flow before the link is
      * answered. The gateway holds the key until it accepts the call and then
      * runs that flow's plan; with nothing posted it keeps the flow its unknown

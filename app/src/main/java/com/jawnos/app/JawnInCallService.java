@@ -990,6 +990,52 @@ public class JawnInCallService extends InCallService {
         }, "jawn-hold").start();
     }
 
+    /**
+     * Send this caller to the house's voicemail: the gateway plays its greeting
+     * and records the message now. The call stays up on purpose - the gateway
+     * owns the line and ends it when the recording does, so nothing here hangs
+     * up and "Connect phone" is untouched.
+     *
+     * A second press is harmless: the gateway answers {ok:0} when no call is up
+     * or it is already recording, that reason is painted in the note line, and
+     * the app does not retry.
+     */
+    public static void sendToVoicemail(Context context) {
+        final Context app = context.getApplicationContext();
+        Audio now = audioState(app);
+        if (!now.gatewayCarried) {
+            say(now.screened
+                    ? "Voicemail is unavailable: the call is not on the house gateway."
+                    : "Voicemail is unavailable: this call is not being screened by the house.");
+            return;
+        }
+        say("sending the caller to the house voicemail...");
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String reply = JawnPhoneBridge.scoVoicemail(app, null);
+                if (reply == null) {
+                    say("the house did not answer the voicemail request");
+                    return;
+                }
+                try {
+                    JSONObject answer = new JSONObject(reply);
+                    if (answer.optInt("ok", 0) == 1) {
+                        // sending the caller to voicemail stops the hold music
+                        // before the greeting plays, so the screen must not keep
+                        // painting "Hold: on"
+                        holdOn = false;
+                        say("the caller is on the house voicemail - recording now");
+                    }
+                    else {
+                        say("Voicemail: " + answer.optString("error", "the gateway refused the voicemail"));
+                    }
+                } catch (Throwable t) {
+                    say("Voicemail: the gateway's reply could not be read");
+                }
+            }
+        }, "jawn-voicemail").start();
+    }
+
     private void showScreen() {
         openScreen(this);
     }

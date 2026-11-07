@@ -49,10 +49,10 @@ import com.jawnos.R;
  *
  * A ringing call gets the two big buttons. A call that is up gets the controls:
  * speaker, mute, Bluetooth, conference (only where Telecom allows it), the
- * gateway's WebRTC bridge, its hold music, "Connect phone" for taking a screened
- * call back on this phone, and hang up. Every control reports what it did in one
- * note line, so a refusal from Telecom is visible instead of a button that
- * quietly fails.
+ * gateway's WebRTC bridge, its hold music, its voicemail, "Connect phone" for
+ * taking a screened call back on this phone, and hang up. Every control reports
+ * what it did in one note line, so a refusal from Telecom is visible instead
+ * of a button that quietly fails.
  */
 public class JawnInCallActivity extends Activity {
 
@@ -72,6 +72,7 @@ public class JawnInCallActivity extends Activity {
     private Button conference;
     private Button rtc;
     private Button hold;
+    private Button voicemail;
     private Button connect;
     private LinearLayout controls;
     private String paintedFor = null;
@@ -179,6 +180,9 @@ public class JawnInCallActivity extends Activity {
         hold = cell("Hold", "#243b5e");
         hold.setOnClickListener(v -> JawnInCallService.toggleHold(this));
 
+        voicemail = cell("Voicemail", "#243b5e");
+        voicemail.setOnClickListener(v -> JawnInCallService.sendToVoicemail(this));
+
         connect = cell("Connect phone", "#1d7a3e");
         connect.setOnClickListener(v -> JawnInCallService.connectPhone(this));
         // the way off the gateway gets a row of its own, full width
@@ -190,6 +194,7 @@ public class JawnInCallActivity extends Activity {
         controls.addView(row(speaker, mute));
         controls.addView(row(bluetooth, conference));
         controls.addView(row(rtc, hold));
+        controls.addView(row(voicemail));
         controls.addView(connect);
 
         note = new TextView(this);
@@ -287,8 +292,13 @@ public class JawnInCallActivity extends Activity {
         r.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         r.addView(left);
-        r.addView(right);
+        if (right != null) r.addView(right);
         return r;
+    }
+
+    /** A grid row with one cell: a gateway action the width of the grid. */
+    private LinearLayout row(Button only) {
+        return row(only, null);
     }
 
     /** Paint the button as on or off without changing its shape. */
@@ -578,6 +588,10 @@ public class JawnInCallActivity extends Activity {
 
             hold.setText(a.hold ? "Hold: on" : "Hold");
             tint(hold, a.hold ? "#1d7a3e" : "#243b5e", a.holdOffered || a.hold);
+
+            // voicemail is the same screened, gateway-carried case as
+            // hold: the gateway owns the line and does the recording
+            tint(voicemail, "#243b5e", a.gatewayCarried);
 
             // "Connect phone" is the way back from the gateway, so it is only
             // on a call the house screened; once the call is home it stays as
