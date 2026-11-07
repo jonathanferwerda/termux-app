@@ -586,6 +586,13 @@ public class JawnInCallService extends InCallService {
         /** Hold can be offered: the gateway is carrying this call. */
         public boolean holdOffered;
         public String holdWhy = "";
+        /** The reception flow answered this call: the house screened it. */
+        public boolean screened;
+        /** That flow gateway is carrying the call right now. */
+        public boolean gatewayCarried;
+        /** "Connect phone" still has something to do. */
+        public boolean connectOffered;
+        public String connectWhy = "";
     }
 
     /**
@@ -632,16 +639,34 @@ public class JawnInCallService extends InCallService {
         out.bluetoothOffered = (out.mask & CallAudioState.ROUTE_BLUETOOTH) != 0
                 && JawnIvrAudio.scoAvailable(context);
 
-        // Hold music is played by the gateway into the line it carries, so the
-        // call has to be on that gateway; anywhere else the button is disabled
-        // and says so. Music that is configured but missing is the house's
-        // answer to report, not the app's to guess.
+        // Who is carrying the call is the trip record, not the audio route: a
+        // screened call can read as the phone's own route while the gateway
+        // really holds the line, and an ordinary Bluetooth headset reads
+        // exactly like the gateway. Hold is offered for one case only - the
+        // reception flow answered this call (trip.ivr) and its gateway is still
+        // carrying it (trip.gateway). "Connect phone" is the same test from the
+        // other side: it has nothing to do once the call is home.
+        Trip trip = svc == null ? null : svc.trips.get(current);
+        out.screened = trip != null && trip.ivr;
+        out.gatewayCarried = out.screened && trip.gateway;
         out.hold = holdOn;
-        if (!onGateway()) {
-            out.holdWhy = "Hold is unavailable: the house gateway is not carrying this call.";
+        if (!out.gatewayCarried) {
+            if (trip == null) {
+                out.holdWhy = "Hold is unavailable: this call is not a screened call.";
+            }
+            else if (!out.screened) {
+                out.holdWhy = "Hold is unavailable: this call is not being screened by the house.";
+            }
+            else {
+                out.holdWhy = "Hold is unavailable: the call is not on the house gateway.";
+            }
         }
         else {
             out.holdOffered = true;
+        }
+        out.connectOffered = out.gatewayCarried;
+        if (!out.connectOffered && out.screened) {
+            out.connectWhy = "The call is already on this phone.";
         }
 
         // Conference is only offered when Telecom says it is possible. A merge
@@ -663,12 +688,33 @@ public class JawnInCallService extends InCallService {
         return out;
     }
 
-    /** Is the call being carried by the Bluetooth gateway the house screened it on? */
+    /**
+     * Is a screened call still being carried by the house gateway?
+     *
+     * The trip record answers this, not the audio route: the route cannot tell
+     * the house adapter from an ordinary headset, and a screened call that the
+     * person connected to the phone must read as off the gateway even if
+     * Bluetooth is still on.
+     */
     public static boolean onGateway() {
         JawnInCallService svc = instance;
         if (svc == null) return false;
         Trip trip = svc.trips.get(current);
-        return trip != null && trip.gateway;
+        return trip != null && trip.ivr && trip.gateway;
+    }
+
+    /**
+     * Record who is carrying a screened call after the audio was moved by hand -
+     * the in-call screen's Bluetooth control is the reverse of "Connect phone".
+     * Only a call the reception flow answered has this to record: on an
+     * ordinary call Bluetooth is just a headset, and Hold stays off.
+     */
+    private static void setGatewayCarried(boolean carried) {
+        JawnInCallService svc = instance;
+        if (svc == null) return;
+        Trip trip = svc.trips.get(current);
+        if (trip == null || !trip.ivr) return;
+        trip.gateway = carried;
     }
 
     private static String deviceName(BluetoothDevice device) {
@@ -745,16 +791,28 @@ public class JawnInCallService extends InCallService {
         JawnInCallService svc = instance;
         Audio now = audioState(app);
         if (now.bluetooth) {
+            boolean wasGateway = now.gatewayCarried;
             // the SCO link first, then Telecom's route: clearing only one leaves
             // the call silent, the same pair restoreAudio() has to undo
             try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
             int target = (now.mask & CallAudioState.ROUTE_WIRED_HEADSET) != 0
                     ? CallAudioState.ROUTE_WIRED_HEADSET : CallAudioState.ROUTE_EARPIECE;
+            boolean home = false;
             try {
                 if (svc != null) svc.setAudioRoute(target);
+                home = true;
                 say("audio back on this phone");
             } catch (Throwable t) {
                 say("audio could not leave Bluetooth: " + t);
+            }
+            if (home) {
+                // the call is home: Hold and "Connect phone" follow it, and a
+                // gateway that was playing hold music is told to stop
+                setGatewayCarried(false);
+                if (wasGateway) {
+                    holdOn = false;
+                    JawnPhoneBridge.cancelGateway(app);
+                }
             }
             return;
         }
@@ -764,19 +822,25 @@ public class JawnInCallService extends InCallService {
         }
         String gateway = JawnPhoneBridge.ivrBluetoothName(app);
         if (svc == null) {
-            say(JawnIvrAudio.routeToSco(app, gateway)
+            boolean sco = JawnIvrAudio.routeToSco(app, gateway);
+            setGatewayCarried(sco && !gateway.isEmpty());
+            say(sco
                     ? "audio on " + now.bluetoothName
                     : "the Bluetooth link would not come up");
             return;
         }
         try { svc.setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
+        BluetoothDevice device = null;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            BluetoothDevice device = JawnIvrAudio.gateway(app, gateway);
+            device = JawnIvrAudio.gateway(app, gateway);
             if (device != null) {
                 try { svc.requestBluetoothAudio(device); } catch (Throwable ignored) { }
             }
         }
-        JawnIvrAudio.routeToSco(app, gateway);
+        boolean sco = JawnIvrAudio.routeToSco(app, gateway);
+        // a hand-back only when the route really went to the adapter the house
+        // named; some other headset is not the gateway, and Hold stays off
+        setGatewayCarried(!gateway.isEmpty() && (device != null || sco));
         say("audio on " + (now.bluetoothName.isEmpty() ? "Bluetooth" : now.bluetoothName));
     }
 
@@ -828,6 +892,14 @@ public class JawnInCallService extends InCallService {
      */
     public static void connectPhone(Context context) {
         Context app = context.getApplicationContext();
+        if (!onGateway()) {
+            // nothing to take back: the call was never screened, or it is
+            // already here. Say which rather than move audio that is home.
+            Audio now = audioState(app);
+            say(now.screened ? "the call is already on this phone"
+                    : "this call is not being screened by the house");
+            return;
+        }
         try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
         restoreAudio();
         JawnPhoneBridge.cancelGateway(app);

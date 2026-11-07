@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapShader;
@@ -11,8 +12,13 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.PowerManager;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
 import android.util.Base64;
@@ -71,6 +77,14 @@ public class JawnInCallActivity extends Activity {
     private String paintedFor = null;
     private boolean ringingNow = false;
     private boolean firstPaint = true;
+    /** The screen-at-the-ear half: one sensor, two wake locks at most. */
+    private SensorManager sensors;
+    private Sensor proximity;
+    private PowerManager.WakeLock callLock;
+    private PowerManager.WakeLock earLock;
+    private boolean sensorOn;
+    private boolean near;
+    private boolean callUp;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -230,6 +244,7 @@ public class JawnInCallActivity extends Activity {
                     dp(24) + bars.right, dp(20) + bars.bottom);
             return insets;
         });
+        startProximity();
         handler.post(tick);
     }
 
@@ -291,6 +306,132 @@ public class JawnInCallActivity extends Activity {
 
     private int dp(int value) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics());
+    }
+
+    // ---- the screen at the ear ----
+
+    /**
+     * The screen at the ear, the way the stock dialer does it.
+     *
+     * A proximity sensor drives two wake locks: the call lock (partial) keeps
+     * this process and the call bookkeeping running while the display is dark,
+     * and the ear lock is a PROXIMITY_SCREEN_OFF wake lock - the platform
+     * switch that turns the display off while the sensor reads near and back on
+     * when it reads far. KEEP_SCREEN_ON is dropped for the same window, or it
+     * would hold the display against the ear lock.
+     *
+     * Only a call that is up arms this. A ringing call keeps its screen, and a
+     * screen the person turned off stays theirs.
+     */
+    private void startProximity() {
+        try {
+            sensors = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+            proximity = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                callLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jawnos:call-up");
+                callLock.setReferenceCounted(false);
+                // the same lock AOSP dialer holds; WAKE_LOCK is already in the
+                // manifest, so this asks for no new grant
+                earLock = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                        "jawnos:call-ear");
+                earLock.setReferenceCounted(false);
+            }
+        } catch (Throwable t) {
+            JawnLog.append("call screen: no proximity control: " + t);
+        }
+        if (proximity == null) {
+            JawnLog.append("call screen: no proximity sensor on this phone");
+        }
+    }
+
+    private final SensorEventListener ear = new SensorEventListener() {
+        @Override public void onSensorChanged(SensorEvent event) {
+            float value = event.values == null || event.values.length == 0 ? -1f : event.values[0];
+            boolean now = value >= 0f && proximity != null
+                    && value < proximity.getMaximumRange();
+            if (now == near) return;
+            near = now;
+            applyEar();
+        }
+
+        @Override public void onAccuracyChanged(Sensor sensor, int accuracy) { }
+    };
+
+    /** Arm the ear while a call is up; disarm it the moment the call is not. */
+    private void proximityFor(boolean up) {
+        if (up != callUp) {
+            callUp = up;
+            if (up) openProximity();
+            else closeProximity();
+        }
+        applyEar();
+    }
+
+    private void openProximity() {
+        near = false;
+        if (sensors == null || proximity == null || sensorOn) return;
+        try {
+            sensorOn = sensors.registerListener(ear, proximity, SensorManager.SENSOR_DELAY_UI);
+        } catch (Throwable t) {
+            sensorOn = false;
+            JawnLog.append("call screen: the proximity sensor would not open: " + t);
+        }
+    }
+
+    private void closeProximity() {
+        near = false;
+        if (sensors != null && sensorOn) {
+            try { sensors.unregisterListener(ear); } catch (Throwable ignored) { }
+        }
+        sensorOn = false;
+    }
+
+    /**
+     * Hold the ear lock only while the phone is at the face of an up call, and
+     * let go on the way back. Releasing the lock is what brings the display
+     * back; the partial lock is released with it.
+     */
+    private void applyEar() {
+        if (callUp && near) {
+            if (callLock != null && !callLock.isHeld()) {
+                try { callLock.acquire(); } catch (Throwable ignored) { }
+            }
+            if (earLock != null && !earLock.isHeld()) {
+                try {
+                    // the flag would hold the display on against the lock
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    earLock.acquire();
+                    JawnLog.append("call screen: display off at the ear");
+                } catch (Throwable t) {
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    JawnLog.append("call screen: could not darken the display: " + t);
+                }
+            }
+            return;
+        }
+        // far from the face, or no call: the display is the person again
+        if (earLock != null && earLock.isHeld()) {
+            try { earLock.release(); } catch (Throwable ignored) { }
+            try {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } catch (Throwable ignored) { }
+            JawnLog.append("call screen: display back on");
+        }
+        if (callLock != null && callLock.isHeld()) {
+            try { callLock.release(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** Nothing of this screen outlives it: locks released, sensor closed. */
+    private void stopProximity() {
+        callUp = false;
+        near = false;
+        closeProximity();
+        applyEar();
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } catch (Throwable ignored) { }
     }
 
     /** Repaint the round picture once per caller, not once per tick. */
@@ -361,6 +502,7 @@ public class JawnInCallActivity extends Activity {
             return JawnInCallService.controlNote;
         }
         if (!a.conference) return a.conferenceWhy;
+        if (!a.connectOffered && a.screened) return a.connectWhy;
         if (!a.bluetoothOffered) return "Bluetooth is unavailable: no Bluetooth device is connected.";
         if (!a.holdOffered) return a.holdWhy;
         return "";
@@ -370,6 +512,11 @@ public class JawnInCallActivity extends Activity {
         @Override
         public void run() {
             int s = JawnInCallService.state;
+            // the ear lock is armed only while a call is really up - not while
+            // it rings, not once it has ended - and applyEar releases it the
+            // moment this turns false
+            proximityFor(s == Call.STATE_ACTIVE || s == Call.STATE_DIALING
+                    || s == Call.STATE_CONNECTING);
             if (s == Call.STATE_DISCONNECTED) {
                 // no call: the screen has done its job
                 finish();
@@ -432,6 +579,12 @@ public class JawnInCallActivity extends Activity {
             hold.setText(a.hold ? "Hold: on" : "Hold");
             tint(hold, a.hold ? "#1d7a3e" : "#243b5e", a.holdOffered || a.hold);
 
+            // "Connect phone" is the way back from the gateway, so it is only
+            // on a call the house screened; once the call is home it stays as
+            // the reason line rather than offering the same move again
+            connect.setVisibility(a.screened ? View.VISIBLE : View.GONE);
+            tint(connect, "#1d7a3e", a.connectOffered);
+
             note.setText(noteFor(a));
             handler.postDelayed(this, 400);
         }
@@ -440,6 +593,7 @@ public class JawnInCallActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(tick);
+        stopProximity();
         super.onDestroy();
     }
 }
