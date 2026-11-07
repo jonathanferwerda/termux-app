@@ -80,3 +80,47 @@
   the gateway and **Send to gateway** once home, and it is never dimmed. Hold
   and Voicemail stay lit while the gateway carries and dim (with that line as
   the reason) only while the call is home. Build 1304.
+
+## Deltas round X+5 (the screen tells the truth about who has the call)
+
+- **Conference follows the call, not the route.** `Audio.conference` is read
+  from Telecom's `Call.Details` on every repaint: merge or swap when the
+  platform names the capability, a non-empty `getConferenceableCalls()` when it
+  names a partner, and `CAPABILITY_SUPPORT_HOLD` on a call that is up (active,
+  holding, connecting or dialing). Nothing in it looks at the gateway,
+  `trip.gateway` or the audio route, so a call on the phone - the case where a
+  conference usually starts - offers it. `Audio.swap` is carried alongside
+  `merge`, and `joinConference` swaps only when swap is the capability it has;
+  otherwise a call with no partner says `no second call to merge yet - answer
+  or place one first` instead of a dead or wrongly-dispatched button.
+- **Bluetooth is a route picker and never claims the house.** `toggleBluetooth`
+  no longer calls `setGatewayCarried(true)`; a Bluetooth route is indistinguishable
+  from any other headset, so the control moves the audio, then reads the route
+  back after 600 ms and paints `audio on <name>`, `Bluetooth: Telecom would not
+  move the audio` (or `... (the house gateway is not connected)`). Moving off
+  Bluetooth still brings the call home, clears the trip's gateway flag, stops
+  hold music and cancels the gateway. Only **Send to gateway** establishes
+  carriage.
+- **Send to gateway proves the move before it lights Hold.** `sendToGateway`
+  applies `routeCallToGateway()`, polls `CallAudioState` for up to 4 s until
+  Telecom's route is Bluetooth on the exact adapter the house named (address
+  from `JawnIvrAudio.gateway`, falling back to `AudioManager`'s communication
+  device when Telecom names none), then probes the house with the new
+  `JawnPhoneBridge.scoState` (`GET /manager/sco/status`, reading `state`/`flow`;
+  carrying is `state == in_call`). Only `answered && carrying` sets the trip
+  flag and raises the screening face. A gateway that does not answer, or answers
+  with any other state, leaves the flag false, says
+  `the gateway did not answer - the call stays on this phone` (or the state it
+  did report) and brings the audio home instead of leaving the caller on a
+  silent link.
+- **Voicemail's reply is surfaced verbatim, including how the request failed.**
+  `JawnPhoneBridge.scoVoicemail` returns a typed `ScoReply` (`body` + `failure`)
+  instead of a bare string: a non-200 body is read too, because the gateway can
+  put its refusal there. `JawnInCallService.voicemailResult` paints
+  `Voicemail: <the gateway's error>` for `{ok:0,error}`, the success sentence
+  for `{ok:1}`, `the gateway's reply could not be read (<why>)` for a body that
+  is not JSON, and `the house did not answer (timeout)` / `the house answered
+  <code>` when the request itself failed. Both the in-call screen and the
+  screening panel use it. `Audio.voicemailOffered` is exactly
+  `screened && trip.gateway` - the same rule as Hold - and enables the button
+  there and on the panel. Build 1305.

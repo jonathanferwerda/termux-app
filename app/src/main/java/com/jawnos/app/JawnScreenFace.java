@@ -345,28 +345,12 @@ public final class JawnScreenFace {
         ui.post(repaintAll);
         new Thread(new Runnable() {
             @Override public void run() {
-                String reply = JawnPhoneBridge.scoVoicemail(app, null);
-                String painted;
-                if (reply == null) {
-                    painted = "the house did not answer the voicemail request";
-                }
-                else {
-                    try {
-                        JSONObject answer = new JSONObject(reply);
-                        if (answer.optInt("ok", 0) == 1) {
-                            // the gateway stops its music before the greeting,
-                            // so the call screen must not keep painting "Hold: on"
-                            JawnInCallService.holdOn = false;
-                            painted = "the caller is on the house voicemail - recording now";
-                        }
-                        else {
-                            painted = "Voicemail: " + answer.optString("error",
-                                    "the gateway refused the voicemail");
-                        }
-                    } catch (Throwable t) {
-                        painted = "Voicemail: the gateway's reply could not be read";
-                    }
-                }
+                JawnInCallService.VoicemailResult result = JawnInCallService.voicemailResult(
+                        JawnPhoneBridge.scoVoicemail(app, null));
+                // the gateway stops its music before the greeting, so the call
+                // screen must not keep painting "Hold: on"
+                if (result.accepted) JawnInCallService.holdOn = false;
+                String painted = result.note;
                 voicemailNote = painted;
                 JawnLog.append("screening: " + painted);
                 ui.post(repaintAll);
@@ -549,7 +533,7 @@ public final class JawnScreenFace {
             // reply to something the person just pressed. The button follows
             // the call: only a screened call the gateway still carries has a
             // voicemail to send it to.
-            boolean canVoicemail = JawnInCallService.audioState(context).gatewayCarried;
+            boolean canVoicemail = JawnInCallService.audioState(context).voicemailOffered;
             voicemail.setEnabled(canVoicemail);
             voicemail.setAlpha(canVoicemail ? 1f : 0.45f);
 

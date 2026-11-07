@@ -593,7 +593,7 @@ public class JawnInCallActivity extends Activity {
 
             // voicemail is the same screened, gateway-carried case as
             // hold: the gateway owns the line and does the recording
-            tint(voicemail, "#243b5e", a.gatewayCarried);
+            tint(voicemail, "#243b5e", a.voicemailOffered);
 
             // One control, two directions: on the gateway it brings the call
             // home, and once home it hands the call back, so it is never a

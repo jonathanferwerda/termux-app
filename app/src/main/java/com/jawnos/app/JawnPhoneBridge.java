@@ -14,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -531,14 +532,15 @@ public class JawnPhoneBridge {
      *
      * The one field is `text`, optional words to speak before the recording.
      * This screen has no typed line, so it posts none and the house's own
-     * greeting plays. The reply is {"ok":1,"flow":"...","step":"voicemail"} or
-     * {"ok":0,"error":"..."} - no call is up, or it is already recording. The
-     * call is deliberately left alone: the gateway ends it when the recording
-     * does, so nothing here hangs up.  A null return means the house did not
-     * answer. Blocks for up to the read timeout, so it belongs on a worker
-     * thread.
+     * greeting plays. A 200 reply is {"ok":1,"flow":"...","step":"voicemail"} or
+     * {"ok":0,"error":"..."} - no call is up, or it is already recording. A
+     * refusal can also arrive on an error status, so the body is read either
+     * way and handed back verbatim; failure says only what the request itself
+     * did (timeout, status, connection). The call is deliberately left alone:
+     * the gateway ends it when the recording does, so nothing here hangs up.
+     * Blocks for up to the read timeout, so it belongs on a worker thread.
      */
-    public static String scoVoicemail(Context context, String text) {
+    public static ScoReply scoVoicemail(Context context, String text) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
@@ -560,26 +562,58 @@ public class JawnPhoneBridge {
             }
             OutputStream out = conn.getOutputStream();
             try { out.write(bytes); } finally { out.close(); }
-            if (conn.getResponseCode() != 200) {
-                JawnLog.append("voicemail: request answered " + conn.getResponseCode());
-                return null;
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                // a refusal can ride an error status; read it before saying
+                // only the number, so the gateway's own words still surface
+                JawnLog.append("voicemail: request answered " + code);
+                return new ScoReply(readQuietly(conn.getErrorStream()), "the house answered " + code);
             }
-            InputStream in = conn.getInputStream();
-            try {
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                byte[] buf = new byte[4096];
-                int n;
-                while ((n = in.read(buf)) > 0) buffer.write(buf, 0, n);
-                return buffer.toString("UTF-8");
-            } finally {
-                in.close();
-            }
+            return new ScoReply(readQuietly(conn.getInputStream()), null);
         } catch (Throwable t) {
             JawnLog.append("voicemail: request failed: " + t);
-            return null;
+            return new ScoReply(null, requestFailure(t));
         } finally {
             if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
         }
+    }
+
+    /**
+     * One house reply, or why there was none.
+     *
+     * body is the raw text whenever the house sent one - a non-200 error page
+     * too, because the gateway puts its refusal there. failure is set only when
+     * the request itself did not produce a body, and names which half broke.
+     */
+    public static final class ScoReply {
+        public final String body;
+        public final String failure;
+        ScoReply(String body, String failure) {
+            this.body = body;
+            this.failure = failure;
+        }
+    }
+
+    private static String readQuietly(InputStream in) {
+        if (in == null) return null;
+        try {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) buffer.write(buf, 0, n);
+            return buffer.toString("UTF-8");
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { in.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /** Which part of the request failed, in words the note line can show. */
+    private static String requestFailure(Throwable t) {
+        if (t instanceof SocketTimeoutException) return "the house did not answer (timeout)";
+        String message = t == null ? "" : t.getMessage();
+        return "the request failed" + (message == null || message.isEmpty() ? "" : ": " + message);
     }
 
     /**
@@ -681,6 +715,51 @@ public class JawnPhoneBridge {
             return null;
         } finally {
             if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    /**
+     * GET /manager/sco/status, reduced to the two facts a caller-side decision
+     * needs: whether the gateway answered, what state it reports, and which
+     * flow it is running.
+     *
+     * This is the cheap proof that the house is really carrying a call. A
+     * Bluetooth route alone looks exactly like any headset, and a press must
+     * not turn Hold on for a link the gateway is not holding. carrying is the
+     * gateway's own `state == in_call`; an unanswered probe is not an error,
+     * just no proof.
+     */
+    public static final class ScoState {
+        public final boolean answered;
+        public final boolean carrying;
+        public final String state;
+        public final String flow;
+        public final String error;
+        ScoState(boolean answered, boolean carrying, String state, String flow, String error) {
+            this.answered = answered;
+            this.carrying = carrying;
+            this.state = state == null ? "" : state;
+            this.flow = flow == null ? "" : flow;
+            this.error = error == null ? "" : error;
+        }
+    }
+
+    public static ScoState scoState(Context context) {
+        String body = scoStatus(context);
+        if (body == null) {
+            return new ScoState(false, false, "", "", "the gateway did not answer");
+        }
+        try {
+            JSONObject json = new JSONObject(body);
+            if (json.optInt("ok", 0) != 1) {
+                return new ScoState(true, false, "", "",
+                        json.optString("error", "the gateway refused the status request"));
+            }
+            String state = json.optString("state", "");
+            String flow = json.optString("flow", "");
+            return new ScoState(true, "in_call".equals(state), state, flow, "");
+        } catch (Throwable t) {
+            return new ScoState(true, false, "", "", "the gateway's status could not be read");
         }
     }
 

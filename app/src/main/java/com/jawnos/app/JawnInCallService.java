@@ -3,6 +3,7 @@ package com.jawnos.app;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
@@ -580,6 +581,8 @@ public class JawnInCallService extends InCallService {
         public boolean conference;
         /** ... and merge is the capability that is actually on offer. */
         public boolean merge;
+        /** ... and swap is the capability on offer inside an existing conference. */
+        public boolean swap;
         public String conferenceWhy = "";
         /** The gateway is playing hold music to this caller right now. */
         public boolean hold;
@@ -590,6 +593,8 @@ public class JawnInCallService extends InCallService {
         public boolean screened;
         /** That flow gateway is carrying the call right now. */
         public boolean gatewayCarried;
+        /** Voicemail can be sent: the same screened, gateway-carried case as Hold. */
+        public boolean voicemailOffered;
         /** "Connect phone" brings the call home; false means the same control hands it back. */
         public boolean connectOffered;
         public String connectWhy = "";
@@ -673,9 +678,16 @@ public class JawnInCallService extends InCallService {
                     : "The call is on this phone - Send to gateway hands it back to the house.";
         }
 
-        // Conference is only offered when Telecom says it is possible. A merge
-        // needs a second call, which the press says out loud; a capability the
-        // platform does not grant is named instead of faked.
+        // Voicemail follows the same rule as Hold: only a screened call the
+        // gateway is still carrying can be sent to the house's box.
+        out.voicemailOffered = out.gatewayCarried;
+
+        // Conference is a property of the call, never of the audio path: who
+        // carries the sound has nothing to do with whether calls can be
+        // joined, so a call on the phone is exactly when it should be offered.
+        // Telecom names merge/swap once it knows of a partner; a call it only
+        // says can be held can still start that conference, and the press names
+        // the missing second call instead of a dead button.
         Call.Details details = null;
         try { details = current == null ? null : current.getDetails(); } catch (Throwable ignored) { }
         if (details == null) {
@@ -683,8 +695,16 @@ public class JawnInCallService extends InCallService {
         }
         else {
             out.merge = details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE);
-            boolean swap = details.can(Call.Details.CAPABILITY_SWAP_CONFERENCE);
-            out.conference = out.merge || swap;
+            out.swap = details.can(Call.Details.CAPABILITY_SWAP_CONFERENCE);
+            boolean partner = false;
+            try {
+                List<Call> waiting = current == null ? null : current.getConferenceableCalls();
+                partner = waiting != null && !waiting.isEmpty();
+            } catch (Throwable ignored) { }
+            boolean holdable = details.can(Call.Details.CAPABILITY_SUPPORT_HOLD)
+                    && (state == Call.STATE_ACTIVE || state == Call.STATE_HOLDING
+                        || state == Call.STATE_DIALING || state == Call.STATE_CONNECTING);
+            out.conference = out.merge || out.swap || partner || holdable;
             if (!out.conference) {
                 out.conferenceWhy = "Conference is unavailable: Telecom says this call cannot be joined.";
             }
@@ -789,10 +809,17 @@ public class JawnInCallService extends InCallService {
      * Move the call on to Bluetooth, or back to the phone when it is already
      * there. The gateway is the device named by the house's own setting, so a
      * second headset connected to the phone does not steal the route.
+     *
+     * This is a route picker, nothing more. A Bluetooth route cannot tell the
+     * house adapter from any other headset, and it says nothing about whether
+     * the gateway is holding the line - so this control never marks the call
+     * gateway-carried. Only "Send to gateway" (the Connect-phone toggle) does,
+     * and it proves the move before it says so. What the button reports here is
+     * read back from the route Telecom actually reached, not from the press.
      */
     public static void toggleBluetooth(Context context) {
-        Context app = context.getApplicationContext();
-        JawnInCallService svc = instance;
+        final Context app = context.getApplicationContext();
+        final JawnInCallService svc = instance;
         Audio now = audioState(app);
         if (now.bluetooth) {
             boolean wasGateway = now.gatewayCarried;
@@ -810,8 +837,9 @@ public class JawnInCallService extends InCallService {
                 say("audio could not leave Bluetooth: " + t);
             }
             if (home) {
-                // the call is home: Hold and "Connect phone" follow it, and a
-                // gateway that was playing hold music is told to stop
+                // the call is home: it is no longer on the gateway, whatever
+                // the route was, and a gateway playing hold music is told to
+                // stop. The flag only ever goes off here, never on.
                 setGatewayCarried(false);
                 if (wasGateway) {
                     holdOn = false;
@@ -825,41 +853,47 @@ public class JawnInCallService extends InCallService {
             return;
         }
         String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        final boolean sco;
         if (svc == null) {
-            boolean sco = JawnIvrAudio.routeToSco(app, gateway);
-            setGatewayCarried(sco && !gateway.isEmpty());
-            say(sco
-                    ? "audio on " + now.bluetoothName
-                    : "the Bluetooth link would not come up");
+            sco = JawnIvrAudio.routeToSco(app, gateway);
+            say(sco ? "audio on Bluetooth" : "the Bluetooth link would not come up");
             return;
         }
         try { svc.setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
-        BluetoothDevice device = null;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            device = JawnIvrAudio.gateway(app, gateway);
+            BluetoothDevice device = JawnIvrAudio.gateway(app, gateway);
             if (device != null) {
                 try { svc.requestBluetoothAudio(device); } catch (Throwable ignored) { }
             }
         }
-        boolean sco = JawnIvrAudio.routeToSco(app, gateway);
-        // a hand-back only when the route really went to the adapter the house
-        // named; some other headset is not the gateway, and Hold stays off
-        setGatewayCarried(!gateway.isEmpty() && (device != null || sco));
-        say("audio on " + (now.bluetoothName.isEmpty() ? "Bluetooth" : now.bluetoothName));
+        sco = JawnIvrAudio.routeToSco(app, gateway);
+        say("moving the audio to Bluetooth...");
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() {
+                Audio after = audioState(app);
+                if (after.bluetooth) {
+                    say("audio on " + (after.bluetoothName.isEmpty() ? "Bluetooth" : after.bluetoothName));
+                }
+                else {
+                    say("Bluetooth: Telecom would not move the audio"
+                            + (sco ? "" : " (the house gateway is not connected)"));
+                }
+            }
+        }, 600);
     }
 
     /**
      * Conference, only where Telecom allows it. A merge joins the call that is
      * waiting (Telecom names the candidates); a swap moves the call into a
      * conference that is already up. Neither is invented: where the platform
-     * withholds the capability the press only says so.
+     * withholds every capability the press only says so.
      */
     public static void joinConference(Context context) {
         JawnInCallService svc = instance;
         if (svc == null || current == null) { say("no call is up"); return; }
         Audio now = audioState(context);
         if (!now.conference) { say(now.conferenceWhy); return; }
-        if (!now.merge) {
+        if (!now.merge && now.swap) {
             try {
                 current.swapConference();
                 say("swapping into the conference");
@@ -923,24 +957,29 @@ public class JawnInCallService extends InCallService {
         say("the call is on this phone");
     }
 
+    private static final long GATEWAY_WAIT_MS = 4_000;
+    private static final long GATEWAY_POLL_MS = 300;
+
     /**
      * Hand a screened call that came home back to the gateway the house named.
      *
      * routeCallToGateway() is the same route answer time applies - Telecom's
      * Bluetooth route, the named Hands-Free device, the SCO link, and its
      * retries for a route Telecom resets as the call settles. The trip's
-     * gateway flag is what Hold, Voicemail and the screening panel read, and
-     * it is set again so all three come back. Nothing is played: hold music
-     * stays off until the person asks for it. A call with no Bluetooth device
-     * is left where it is and says why.
+     * gateway flag is what Hold, Voicemail and the screening panel read, and it
+     * is set only after two proofs: Telecom really put the call on the adapter
+     * the house named, and the gateway itself confirms it has the call. A
+     * Bluetooth route on its own is no proof - it looks exactly like any
+     * headset - and a gateway that is not in a call would leave the caller on a
+     * silent link, so a failed check brings the audio home and says why.
      */
     private static void sendToGateway(Context context) {
-        Context app = context.getApplicationContext();
-        JawnInCallService svc = instance;
+        final Context app = context.getApplicationContext();
+        final JawnInCallService svc = instance;
         if (svc == null || current == null) { say("no call is up"); return; }
         Audio now = audioState(app);
         if (now.gatewayCarried) { say("the call is already on the house gateway"); return; }
-        String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        final String gateway = JawnPhoneBridge.ivrBluetoothName(app);
         if (gateway.isEmpty()) { say("the house has not named a gateway for this call"); return; }
         if (!now.bluetoothOffered) {
             say("no Bluetooth device is connected to carry the call");
@@ -948,12 +987,100 @@ public class JawnInCallService extends InCallService {
         }
         // music would play into a link that is not carrying the call
         holdOn = false;
+        say("handing the call back to " + gateway + "...");
         svc.routeCallToGateway();
-        setGatewayCarried(true);
-        Trip trip = svc.trips.get(current);
-        // the face is the gateway's: the call is back on it, so it comes back
-        JawnScreenFace.show(app, trip == null ? "" : trip.number);
-        say("the call is back on " + gateway);
+        awaitGatewayRoute(app, svc, gateway, System.currentTimeMillis());
+    }
+
+    /** Wait for the named adapter, then let the gateway confirm the call. */
+    private static void awaitGatewayRoute(final Context app, final JawnInCallService svc,
+                                          final String gateway, final long started) {
+        if (instance != svc || current == null || state == Call.STATE_DISCONNECTED) return;
+        if (routeIsGateway(app, gateway)) {
+            probeGateway(app, svc, gateway);
+            return;
+        }
+        if (System.currentTimeMillis() - started >= GATEWAY_WAIT_MS) {
+            say("the call did not move to " + gateway + " - it stays on this phone");
+            return;
+        }
+        svc.handler.postDelayed(new Runnable() {
+            @Override public void run() { awaitGatewayRoute(app, svc, gateway, started); }
+        }, GATEWAY_POLL_MS);
+    }
+
+    /** Is Telecom's route on the exact adapter the house named? */
+    private static boolean routeIsGateway(Context context, String gateway) {
+        BluetoothDevice named = JawnIvrAudio.gateway(context, gateway);
+        String address = "";
+        try { address = named == null ? "" : named.getAddress(); } catch (Throwable ignored) { }
+        JawnInCallService svc = instance;
+        if (svc != null) {
+            CallAudioState cas = null;
+            try { cas = svc.getCallAudioState(); } catch (Throwable ignored) { }
+            if (cas == null || cas.getRoute() != CallAudioState.ROUTE_BLUETOOTH) return false;
+            BluetoothDevice active = cas.getActiveBluetoothDevice();
+            if (active != null) {
+                String activeAddress = "";
+                try { activeAddress = active.getAddress(); } catch (Throwable ignored) { }
+                if (!address.isEmpty() && !activeAddress.isEmpty()) {
+                    return address.equalsIgnoreCase(activeAddress);
+                }
+                String activeName = deviceName(active);
+                if (!activeName.isEmpty()) return activeName.equalsIgnoreCase(gateway);
+                return false;
+            }
+            // Telecom named no device: fall through to AudioManager's answer
+        }
+        AudioManager am = JawnIvrAudio.manager(context);
+        if (am == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                AudioDeviceInfo device = am.getCommunicationDevice();
+                if (device == null || device.getType() != AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return false;
+                if (!address.isEmpty()) return address.equalsIgnoreCase(device.getAddress());
+                return true;
+            }
+            return am.isBluetoothScoOn();
+        } catch (Throwable t) { return false; }
+    }
+
+    /** Ask the gateway itself; the answer, not the route, turns the flag on. */
+    private static void probeGateway(final Context app, final JawnInCallService svc,
+                                     final String gateway) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                JawnPhoneBridge.ScoState probe = JawnPhoneBridge.scoState(app);
+                final boolean carrying = probe != null && probe.carrying;
+                final String why = probe == null
+                        ? "the gateway did not answer"
+                        : !probe.answered
+                            ? "the gateway did not answer"
+                            : !probe.carrying
+                                ? "the gateway is not carrying a call ("
+                                    + (probe.state.isEmpty() ? "idle" : probe.state) + ")"
+                                : "";
+                svc.handler.post(new Runnable() {
+                    @Override public void run() {
+                        if (instance != svc || current == null || state == Call.STATE_DISCONNECTED) return;
+                        if (carrying) {
+                            setGatewayCarried(true);
+                            Trip trip = svc.trips.get(current);
+                            JawnScreenFace.show(app, trip == null ? "" : trip.number);
+                            say("the call is back on " + gateway);
+                            return;
+                        }
+                        // the audio sits on the adapter but the house is not
+                        // holding the line: keep the flag off and bring the
+                        // call home, or the caller talks into a silent link
+                        setGatewayCarried(false);
+                        try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
+                        restoreAudio();
+                        say(why + " - the call stays on this phone");
+                    }
+                });
+            }
+        }, "jawn-gateway-probe").start();
     }
 
     /**
@@ -1048,10 +1175,21 @@ public class JawnInCallService extends InCallService {
      * or it is already recording, that reason is painted in the note line, and
      * the app does not retry.
      */
+    /**
+     * Send this caller to the house's voicemail: the gateway plays its greeting
+     * and records the message now. The call stays up on purpose - the gateway
+     * owns the line and ends it when the recording does, so nothing here hangs
+     * up and "Connect phone" is untouched.
+     *
+     * The house's own reply is shown verbatim. A refusal keeps its
+     * {ok:0,error} words, and a request that never reached the house says
+     * which half failed (timeout, a non-200, an unreadable body) instead of a
+     * generic silence. Nothing is retried.
+     */
     public static void sendToVoicemail(Context context) {
         final Context app = context.getApplicationContext();
         Audio now = audioState(app);
-        if (!now.gatewayCarried) {
+        if (!now.voicemailOffered) {
             say(now.screened
                     ? "Voicemail is unavailable: the call is not on the house gateway."
                     : "Voicemail is unavailable: this call is not being screened by the house.");
@@ -1060,28 +1198,51 @@ public class JawnInCallService extends InCallService {
         say("sending the caller to the house voicemail...");
         new Thread(new Runnable() {
             @Override public void run() {
-                String reply = JawnPhoneBridge.scoVoicemail(app, null);
-                if (reply == null) {
-                    say("the house did not answer the voicemail request");
-                    return;
-                }
-                try {
-                    JSONObject answer = new JSONObject(reply);
-                    if (answer.optInt("ok", 0) == 1) {
-                        // sending the caller to voicemail stops the hold music
-                        // before the greeting plays, so the screen must not keep
-                        // painting "Hold: on"
-                        holdOn = false;
-                        say("the caller is on the house voicemail - recording now");
-                    }
-                    else {
-                        say("Voicemail: " + answer.optString("error", "the gateway refused the voicemail"));
-                    }
-                } catch (Throwable t) {
-                    say("Voicemail: the gateway's reply could not be read");
-                }
+                VoicemailResult result = voicemailResult(JawnPhoneBridge.scoVoicemail(app, null));
+                // sending the caller to voicemail stops the hold music before
+                // the greeting plays, so the screen must not keep painting
+                // "Hold: on"
+                if (result.accepted) holdOn = false;
+                say(result.note);
             }
         }, "jawn-voicemail").start();
+    }
+
+    /** What the note line should say about a voicemail request, and whether it landed. */
+    public static final class VoicemailResult {
+        public final boolean accepted;
+        public final String note;
+        VoicemailResult(boolean accepted, String note) {
+            this.accepted = accepted;
+            this.note = note;
+        }
+    }
+
+    /**
+     * The house's own words when it answered, otherwise which part of the
+     * request failed. A non-200 body is still read: the gateway may put its
+     * refusal there, and that sentence is what the person needs to see.
+     */
+    public static VoicemailResult voicemailResult(JawnPhoneBridge.ScoReply reply) {
+        if (reply == null) {
+            return new VoicemailResult(false, "Voicemail: the house did not answer");
+        }
+        String body = reply.body;
+        if (body != null && !body.trim().isEmpty()) {
+            try {
+                JSONObject answer = new JSONObject(body);
+                if (answer.optInt("ok", 0) == 1) {
+                    return new VoicemailResult(true,
+                            "the caller is on the house voicemail - recording now");
+                }
+                String error = answer.optString("error", "");
+                if (!error.isEmpty()) return new VoicemailResult(false, "Voicemail: " + error);
+            } catch (Throwable ignored) { }
+            return new VoicemailResult(false, "Voicemail: the gateway's reply could not be read"
+                    + (reply.failure == null ? "" : " (" + reply.failure + ")"));
+        }
+        return new VoicemailResult(false,
+                "Voicemail: " + (reply.failure == null ? "the house did not answer" : reply.failure));
     }
 
     private void showScreen() {
