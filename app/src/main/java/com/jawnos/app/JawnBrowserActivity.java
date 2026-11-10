@@ -85,6 +85,9 @@ import javax.net.ssl.X509TrustManager;
  */
 public class JawnBrowserActivity extends Activity {
 
+    public static final String PROCESS = ":browser";
+    public static final String WEBVIEW_DATA_DIR = "jawnbrowser";
+
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_APP = "app";
@@ -157,11 +160,10 @@ public class JawnBrowserActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
 
-        // The browser is its own process and must not share WebView's data
-        // directory with the manager process (Android 9+ enforces this).
-        if (Build.VERSION.SDK_INT >= 28) {
-            try { WebView.setDataDirectorySuffix("jawnbrowser"); } catch (Throwable ignored) { }
-        }
+        // The browser is its own process, so JawnApplication sets its WebView
+        // data directory before the provider loads (see WEBVIEW_DATA_DIR).
+        // Doing it here would be too late: Application.onCreate has already
+        // enabled remote debugging for this process.
 
         Intent intent = getIntent();
         String startUrl = intent == null ? "" : intent.getStringExtra(EXTRA_URL);

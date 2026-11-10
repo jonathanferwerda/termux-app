@@ -1,6 +1,9 @@
 package com.jawnos.app;
 
+import android.app.ActivityManager;
 import android.app.Application;
+import android.content.Context;
+import android.os.Build;
 import android.webkit.WebView;
 
 import com.jawnos.shared.crash.JawnCrashUtils;
@@ -11,6 +14,17 @@ import com.jawnos.shared.logger.Logger;
 public class JawnApplication extends Application {
     public void onCreate() {
         super.onCreate();
+
+        // A WebView in a secondary process must use its own data directory, and
+        // the suffix has to be set before the provider loads. This is the one
+        // call that loads it, so the browser takes its directory first; setting
+        // it inside the activity afterwards is too late and leaves both
+        // processes sharing a directory, which the WebView refuses:
+        // "Using WebView from more than one process at once with the same data
+        // directory is not supported."
+        if (isBrowserProcess() && Build.VERSION.SDK_INT >= 28) {
+            try { WebView.setDataDirectorySuffix(JawnBrowserActivity.WEBVIEW_DATA_DIR); } catch (Throwable ignored) { }
+        }
 
         // A debuggable app (the release variant keeps it for `run-as`) gets
         // WebView remote debugging unless it is told otherwise. Set it once for
@@ -54,6 +68,32 @@ public class JawnApplication extends Application {
         if (JawnTailnetController.isEnabled(this) && JawnTailnetController.isAutoconnect(this)) {
             JawnTailnetController.supervise(this);
         }
+    }
+
+    /** True in the ":browser" activity's own process (AndroidManifest.xml). */
+    private boolean isBrowserProcess() {
+        String name = processName();
+        return name != null && name.endsWith(JawnBrowserActivity.PROCESS);
+    }
+
+    /** The name of the process this Application was created in. */
+    private String processName() {
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                String name = getProcessName();
+                if (name != null) return name;
+            } catch (Throwable ignored) { }
+        }
+        int pid = android.os.Process.myPid();
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                for (ActivityManager.RunningAppProcessInfo info : am.getRunningAppProcesses()) {
+                    if (info.pid == pid) return info.processName;
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
     }
 
     private void setLogLevel() {
