@@ -747,14 +747,24 @@ public class JawnWebViewActivity extends Activity {
             }
             // A lapsed session cookie makes the manager answer with the Gate and
             // the view sits on the login screen though a fresh ticket is on hand.
-            // Spot the Gate, fall back to the ticket once - and if the Gate
-            // stands even after that, show the splash, whose Admin Panel and Try
-            // again buttons always work, so the view is never trapped.
+            // Spot the Gate, fall back to the ticket - re-armed whenever the
+            // manager itself loads, so every lapse gets its own handover. If the
+            // Gate still stands after that ticket, show the splash, whose Admin
+            // Panel and Try again buttons always work, so the view is never
+            // trapped.
             if (url == null) return;
             String manager = JawnLauncher.getManagerUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));
             if (!url.startsWith(manager)) return;
             view.evaluateJavascript("(document.title||'').trim().toLowerCase()==='gate'?'gate':'ok'", value -> {
-                if (value == null || !value.contains("gate")) return;
+                if (value == null) return;
+                if (!value.contains("gate")) {
+                    // The manager answered for real: re-arm the one-ticket
+                    // fallback. Left spent, it made every lapse after the first
+                    // go straight to the splash (the cookieless first request a
+                    // woken WebView sends), with Try again as the only way out.
+                    gateFallback = false;
+                    return;
+                }
                 if (!gateFallback) {
                     gateFallback = true;
                     String ticket = JawnLauncher.getUiUrl(JawnWebViewActivity.this, JawnLauncher.getJawnPort(JawnWebViewActivity.this));

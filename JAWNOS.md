@@ -145,3 +145,11 @@
   the service refuses to start without an `https://` URL and reports
   `needs_server`. The adb provisioning broadcast also accepts `control_url`.
   Build 1309.
+
+- **The Gate fallback re-arms after a real manager load.** `JawnWebViewActivity`
+  kept `gateFallback` set for the life of the activity after the first ticket
+  handover, so the next lapsed session (the cookieless first request a woken
+  WebView sends) went straight to the splash, with Try again as the only way
+  out. A manager page that is not the Gate now clears the flag, so every lapse
+  gets its own ticket handover and the splash stays the escape hatch for a
+  ticket that can no longer sign in. Build 1310.
