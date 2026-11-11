@@ -221,6 +221,7 @@ public class JawnTailnetService extends VpnService implements IPNService {
     private long delayFor(String status) {
         if (JawnTailnetController.NEEDS_APPROVAL.equals(status)
                 || JawnTailnetController.NEEDS_KEY.equals(status)
+                || JawnTailnetController.NEEDS_SERVER.equals(status)
                 || JawnTailnetController.ERROR.equals(status)) {
             return SLOW_RETRY_MS;
         }

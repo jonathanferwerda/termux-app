@@ -29,9 +29,9 @@ public class JawnWakeReceiver extends BroadcastReceiver {
     public static final String PERMISSIONS_ACTION = "com.jawnos.app.JAWN_PERMISSIONS";
     /** Turn the tailnet on and start its service. Startup is the app's job
      *  (the VpnService is not exported and the dashboard is not reachable from
-     *  the tree), so the tree asks through this receiver. An "auth_key"
-     *  string extra joins with a preauth key; without one the node reports a
-     *  login URL to approve. */
+     *  the tree), so the tree asks through this receiver. A "control_url"
+     *  extra sets the Headscale server; an "auth_key" string extra joins with a
+     *  preauth key; without one the node reports a login URL to approve. */
     public static final String TAILNET_ACTION = "com.jawnos.app.JAWN_TAILNET";
 
     @Override
@@ -49,6 +49,12 @@ public class JawnWakeReceiver extends BroadcastReceiver {
         if (TAILNET_ACTION.equals(action)) {
             if (!allowed()) return;
             String key = intent.getStringExtra("auth_key");
+            String server = intent.getStringExtra("control_url");
+            if (server != null && !server.trim().isEmpty()
+                    && !JawnTailnetController.setControlUrl(context, server)) {
+                JawnLog.append("tailnet: refused invalid control_url");
+                return;
+            }
             android.content.SharedPreferences.Editor e = context
                 .getSharedPreferences(JawnTailnetController.PREFS, Context.MODE_PRIVATE)
                 .edit().putBoolean("enabled", true);

@@ -139,3 +139,9 @@
   carry the request's own status (`the house answered <code>`) when there was
   one. A `{ok:0,error}` still surfaces the gateway's words unchanged. Nothing
   is retried. Build 1307.
+
+- **The tailnet control URL is an admin field, not a build constant.** The
+  dashboard's Tailnet card stores `control_url` in the `jawn_tailnet` prefs;
+  the service refuses to start without an `https://` URL and reports
+  `needs_server`. The adb provisioning broadcast also accepts `control_url`.
+  Build 1309.

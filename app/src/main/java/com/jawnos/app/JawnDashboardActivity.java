@@ -68,6 +68,7 @@ public class JawnDashboardActivity extends Activity {
     private boolean resumed = false;
     private TextView tailnetStatus;
     private CheckBox tailnetAutoconnect;
+    private EditText tailnetServer;
     // The switch is written back from the controller on resume; that write must
     // not read as a person turning auto-connect on (which would start the tunnel).
     private boolean tailnetSwitchSyncing = false;
@@ -202,6 +203,19 @@ public class JawnDashboardActivity extends Activity {
 
         // ---- tailnet ----
         LinearLayout tailnet = card(root, "Tailnet");
+        TextView tailnetServerLabel = new TextView(this);
+        tailnetServerLabel.setText("Tailnet server");
+        tailnetServerLabel.setTextColor(DIM);
+        tailnetServerLabel.setTextSize(12);
+        tailnetServerLabel.setPadding(dp(2), 0, 0, dp(2));
+        tailnet.addView(tailnetServerLabel);
+        tailnetServer = new EditText(this);
+        tailnetServer.setHint("https://headscale.example.com");
+        tailnetServer.setText(JawnTailnetController.controlUrl(this));
+        tailnetServer.setTextSize(12);
+        tailnetServer.setSingleLine(true);
+        tailnet.addView(tailnetServer);
+        fullButton(tailnet, "Save server", false, () -> saveTailnetServer());
         tailnetStatus = new TextView(this);
         tailnetStatus.setTextColor(DIM);
         tailnetStatus.setTextSize(13);
@@ -222,7 +236,23 @@ public class JawnDashboardActivity extends Activity {
         fullButton(tailnet, "Stop tailnet", false, () -> stopTailnet());
     }
 
+    private void saveTailnetServer() {
+        if (tailnetServer == null) return;
+        if (!JawnTailnetController.setControlUrl(this, tailnetServer.getText().toString())) {
+            toast("Enter an https:// tailnet server");
+            return;
+        }
+        tailnetServer.setText(JawnTailnetController.controlUrl(this));
+        toast("Saved - reconnect to apply");
+        refreshTailnetStatus();
+    }
+
     private void joinTailnet() {
+        if (JawnTailnetController.controlUrl(this).isEmpty()) {
+            toast("Set the tailnet server first");
+            if (tailnetServer != null) tailnetServer.requestFocus();
+            return;
+        }
         android.content.SharedPreferences p = getSharedPreferences(JawnTailnetController.PREFS, MODE_PRIVATE);
         android.widget.EditText input = new android.widget.EditText(this);
         input.setHint("preauth key (blank = browser approval)");
@@ -295,6 +325,10 @@ public class JawnDashboardActivity extends Activity {
      *  ...) and nothing is cached here. */
     private void refreshTailnetStatus() {
         if (tailnetStatus == null) return;
+        if (tailnetServer != null && !tailnetServer.hasFocus()) {
+            String current = JawnTailnetController.controlUrl(this);
+            if (!current.equals(tailnetServer.getText().toString())) tailnetServer.setText(current);
+        }
         String raw = JawnTailnetController.statusText(this);
         String state = tailnetState(raw);
         String wording;
@@ -306,6 +340,8 @@ public class JawnDashboardActivity extends Activity {
                 wording = "Starting - the tunnel is coming up"; colour = AMBER; break;
             case "needs_key":
                 wording = "Needs a house key - tap to join"; colour = AMBER; break;
+            case "needs_server":
+                wording = "Set the tailnet server above"; colour = AMBER; break;
             case "needs_approval":
                 wording = "Waiting for approval - tap Approve device"; colour = AMBER; break;
             case "no_network":
@@ -323,10 +359,12 @@ public class JawnDashboardActivity extends Activity {
         tailnetStatus.setTextColor(colour);
         boolean key = state.equals("needs_key");
         boolean approval = state.equals("needs_approval");
+        boolean server = state.equals("needs_server");
         View.OnClickListener tap = null;
         if (key) tap = v -> joinTailnet();
         else if (approval) tap = v -> openTailnetLogin();
-        tailnetStatus.setClickable(key || approval);
+        else if (server) tap = v -> { if (tailnetServer != null) tailnetServer.requestFocus(); };
+        tailnetStatus.setClickable(key || approval || server);
         tailnetStatus.setOnClickListener(tap);
     }
 
@@ -339,7 +377,7 @@ public class JawnDashboardActivity extends Activity {
         // counts, so a machine called "office" cannot be read as switched off.
         int bullet = t.lastIndexOf('\u2022');
         if (bullet >= 0) t = t.substring(bullet + 1);
-        String[] known = { "needs_approval", "needs_key", "no_network",
+        String[] known = { "needs_approval", "needs_key", "needs_server", "no_network",
                            "disconnected", "connected", "starting", "error", "off" };
         for (String s : known) {
             if (t.contains(s) || t.contains(s.replace('_', ' '))) return s;

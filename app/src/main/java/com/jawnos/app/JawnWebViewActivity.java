@@ -795,7 +795,8 @@ public class JawnWebViewActivity extends Activity {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
-            if (inHouse(url) || url.startsWith("https://thejunderground.com")) return false;
+            String server = JawnTailnetController.controlUrl(JawnWebViewActivity.this);
+            if (inHouse(url) || (server != null && !server.isEmpty() && url.startsWith(server))) return false;
             try {
                 startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (Throwable ignored) { }

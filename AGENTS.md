@@ -81,9 +81,11 @@ house tailnet is controlled here, not by the Tailscale app.
   were expired because anyone holding one could join the tailnet.
 - **Provision a device over adb** (the receiver accepts only the shell UID):
   `adb shell am broadcast -a com.jawnos.app.JAWN_TAILNET -n
-  com.jawnos/com.jawnos.app.JawnWakeReceiver --es auth_key <key>`.
+  com.jawnos/com.jawnos.app.JawnWakeReceiver --es control_url <url> --es auth_key <key>`.
   Without adb, tap *Join / connect* in the dashboard and paste it (blank means
-  browser approval).
+  browser approval). The server itself is the **Tailnet server** field in the
+  same card: it stores an `https://` URL, and without one the node reports
+  `needs_server` and does not start.
 - **Revoke**: `headscale nodes delete -i <id>` (or `headscale nodes expire`).
 - **Self-healing**: the node state lives in `files/tailnet/`, so a joined device
   reconnects with no key; only a lost state needs a new one, and the dashboard

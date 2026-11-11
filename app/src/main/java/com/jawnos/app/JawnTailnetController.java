@@ -31,7 +31,6 @@ import libtailscale.NotificationManager;
  */
 public class JawnTailnetController {
     public static final String PREFS = "jawn_tailnet";
-    public static final String CONTROL_URL = "https://thejunderground.com";
 
     // The one status vocabulary. The dashboard, the manager's tailnet panel and
     // the retry loop all read these strings, so nothing may invent a new one:
@@ -42,6 +41,7 @@ public class JawnTailnetController {
     public static final String DISCONNECTED = "disconnected";
     public static final String NEEDS_APPROVAL = "needs_approval";
     public static final String NEEDS_KEY = "needs_key";
+    public static final String NEEDS_SERVER = "needs_server";
     public static final String NO_NETWORK = "no_network";
     public static final String ERROR = "error";
 
@@ -51,6 +51,7 @@ public class JawnTailnetController {
     private static final String K_ENABLED = "enabled";
     private static final String K_AUTOCONNECT = "autoconnect";
     private static final String K_AUTH_KEY = "auth_key";
+    private static final String K_CONTROL_URL = "control_url";
     private static final String K_STATUS = "status";
     private static final String K_LAST_OK_AT = "last_ok_at";
     private static final String K_ATTEMPTS = "attempts";
@@ -141,6 +142,11 @@ public class JawnTailnetController {
     }
 
     private void startLocked() {
+        String control = controlUrl(context);
+        if (control.isEmpty()) {
+            setStatus(context, NEEDS_SERVER);
+            return;
+        }
         Application application = ensureApp(context);
         String name = nodeName(context);
         String key = prefs().getString(K_AUTH_KEY, "");
@@ -163,7 +169,7 @@ public class JawnTailnetController {
             // Headscale or DERP after an exit node changes the routes, and the
             // device drops off the tailnet. The base config still comes from
             // the physical network (JawnTailnetAppContext).
-            String masked = "{\"ControlURL\":\"" + CONTROL_URL + "\",\"ControlURLSet\":true"
+            String masked = "{\"ControlURL\":\"" + control + "\",\"ControlURLSet\":true"
                     + ",\"Hostname\":\"" + json(name) + "\",\"HostnameSet\":true"
                     + ",\"CorpDNS\":true,\"CorpDNSSet\":true}";
             String full = call(application, "PATCH", "prefs", masked);
@@ -177,7 +183,7 @@ public class JawnTailnetController {
             // cannot change it. Without it here the client registers against
             // controlplane.tailscale.com, which rejects a headscale hskey as
             // "invalid key: unable to validate API key".
-            prefsObject.put("ControlURL", CONTROL_URL);
+            prefsObject.put("ControlURL", control);
             prefsObject.put("Hostname", name);
             prefsObject.put("CorpDNS", true);
             // Start only calls cc.Login() when the profile is not logged out;
@@ -301,6 +307,38 @@ public class JawnTailnetController {
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** The Headscale control URL this device joins. Empty means it has not been
+     *  set yet: the dashboard asks for it before the tailnet can start. */
+    public static String controlUrl(Context context) {
+        return normalizeControlUrl(prefs(context).getString(K_CONTROL_URL, ""));
+    }
+
+    /** Store a validated control URL. Returns false and keeps the old value
+     *  when the input is not an https:// URL with a host. */
+    public static boolean setControlUrl(Context context, String value) {
+        String normalized = normalizeControlUrl(value);
+        if (normalized.isEmpty()) return false;
+        prefs(context).edit().putString(K_CONTROL_URL, normalized).apply();
+        return true;
+    }
+
+    /** A control URL is a base https URL: trim, drop trailing slashes, and
+     *  require a host. A path is allowed but not expected. */
+    public static String normalizeControlUrl(String value) {
+        if (value == null) return "";
+        String v = value.trim();
+        while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+        if (v.isEmpty()) return "";
+        try {
+            java.net.URI u = new java.net.URI(v);
+            if (u.getScheme() == null || !"https".equalsIgnoreCase(u.getScheme())) return "";
+            if (u.getHost() == null || u.getHost().isEmpty()) return "";
+            return v;
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /** GET /status parsed. Throws when the local API is not up; callers that
@@ -606,7 +644,8 @@ public class JawnTailnetController {
     public static boolean isStatus(String status) {
         return OFF.equals(status) || STARTING.equals(status) || CONNECTED.equals(status)
                 || DISCONNECTED.equals(status) || NEEDS_APPROVAL.equals(status)
-                || NEEDS_KEY.equals(status) || NO_NETWORK.equals(status) || ERROR.equals(status);
+                || NEEDS_KEY.equals(status) || NEEDS_SERVER.equals(status)
+                || NO_NETWORK.equals(status) || ERROR.equals(status);
     }
 
     /** Map a Go BackendState (enum name, or the numeric code it also sends:
