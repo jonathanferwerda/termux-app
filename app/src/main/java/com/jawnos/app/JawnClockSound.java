@@ -51,6 +51,13 @@ public final class JawnClockSound {
      */
     public static synchronized void play(Context context, String relativePath, int volumePercent,
                                          int rampSeconds, boolean loop, int guardMs) {
+        JawnSilence.attach(context);
+        if (JawnSilence.active(context)) {
+            // Silence is king: an alarm or timer may still draw its card, but
+            // it must not play, and any ring already in flight is stopped.
+            stop();
+            return;
+        }
         // The exact wake and jawn's ring broadcast arrive within a second of each
         // other; they describe one alarm, so the second one must not restart it.
         if (player != null && currentPath != null && currentPath.equals(relativePath)
@@ -168,6 +175,7 @@ public final class JawnClockSound {
      *         player gain instead.
      */
     private static boolean setAlarmVolume(Context context, int volumePercent) {
+        if (JawnSilence.active(context)) return false;
         try {
             AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
             if (am == null) return false;
@@ -200,5 +208,7 @@ public final class JawnClockSound {
         }
         alarmAudio = null;
         savedAlarmVolume = -1;
+        // If the house is quiet, the restored stream must go straight back to zero.
+        JawnSilence.reassert();
     }
 }

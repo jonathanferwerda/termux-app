@@ -65,7 +65,33 @@ public class JawnPhoneBridge {
     public void setFacts(String json) {
         try {
             prefs().edit().putString(FACTS, json == null ? "" : json).apply();
+            JSONObject facts = (json == null || json.isEmpty())
+                    ? new JSONObject() : new JSONObject(json);
+            boolean quiet = facts.optBoolean("silence", false);
+            if (!quiet) {
+                JSONObject ivr = facts.optJSONObject("ivr");
+                quiet = ivr != null && ivr.optBoolean("silence", false);
+            }
+            // Facts may turn silence on, never off: a stale sync response can
+            // arrive after the manager's explicit setSilence('0') and must not
+            // make the phone audible again. The page's silence poll is the off
+            // switch.
+            if (quiet) JawnSilence.set(context, true);
         } catch (Throwable ignored) { }
+    }
+
+    /** The manager's silence push, with no wait for the periodic sync. */
+    @JavascriptInterface
+    public void setSilence(String on) {
+        String value = on == null ? "" : on.trim().toLowerCase(java.util.Locale.US);
+        JawnSilence.set(context,
+                "1".equals(value) || "true".equals(value)
+                        || "yes".equals(value) || "on".equals(value));
+    }
+
+    @JavascriptInterface
+    public boolean silence() {
+        return JawnSilence.active(context);
     }
 
     @JavascriptInterface
@@ -157,6 +183,8 @@ public class JawnPhoneBridge {
 
     /** Is the reception flow enabled for this phone? */
     public static boolean ivrEnabled(Context context) {
+        // A silent house keeps the reception on: every call has to go there.
+        if (JawnSilence.active(context)) return true;
         return "yes".equals(ivrFacts(context).optString("enabled", "no"));
     }
 
@@ -215,6 +243,9 @@ public class JawnPhoneBridge {
      * "unknown". With the reception flow off, everything rings.
      */
     public static String ivrFlowFor(Context context, String number) {
+        // Silence is the king of the phone: whoever is calling, the call is
+        // answered by the receptionist, not rung through.
+        if (JawnSilence.active(context)) return "ivr";
         if (!ivrEnabled(context)) return "ring";
         if (isBlocked(context, number)) return flowNamed(context, "blacklisted");
         String route = routeFor(context, number);

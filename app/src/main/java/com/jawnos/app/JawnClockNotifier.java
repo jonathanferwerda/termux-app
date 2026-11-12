@@ -32,6 +32,8 @@ import java.util.Date;
 public final class JawnClockNotifier {
     private static final String LOG_TAG = "JawnClockNotifier";
     public static final String CHANNEL = "jawn_alarms";
+    /** The alarm channel used while the house is silent: no sound, no vibration. */
+    public static final String SILENT_CHANNEL = "jawn_alarms_silent";
     public static final String UPCOMING_CHANNEL = "jawn_alarm_upcoming";
     private static final int NOTIFICATION_ID = 7301;
     /** A fresh id per ring: Android only honours a full-screen intent when the
@@ -112,6 +114,8 @@ public final class JawnClockNotifier {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
         createChannel(nm);
+        boolean quiet = JawnSilence.active(context);
+        if (quiet) createSilentChannel(nm);
 
         Intent open = new Intent(context, JawnClockAlarmActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -145,7 +149,7 @@ public final class JawnClockNotifier {
         PendingIntent snoozePending = PendingIntent.getBroadcast(
                 context, SNOOZE_REQUEST, snooze, flags());
 
-        Notification.Builder builder = new Notification.Builder(context, CHANNEL);
+        Notification.Builder builder = new Notification.Builder(context, quiet ? SILENT_CHANNEL : CHANNEL);
         builder.setSmallIcon(R.drawable.ic_new_session)
                 .setContentTitle(title)
                 .setContentText(timeText(at) + (app == null || app.isEmpty() ? "" : " · " + app.replace('_', ' ')))
@@ -159,6 +163,9 @@ public final class JawnClockNotifier {
                 .setContentIntent(content)
                 .setFullScreenIntent(content, true)
                 .setColor(0xFFC94F4F);
+        if (JawnSilence.active(context)) {
+            builder.setVibrate(null);
+        }
         // A sum or a tag is the way through this alarm; a one-tap Dismiss
         // would walk around it. The notification still opens the activity,
         // where the puzzle or the tag is enforced.
@@ -299,6 +306,9 @@ public final class JawnClockNotifier {
                 .addAction(new Notification.Action.Builder(
                         Icon.createWithResource(context, R.drawable.ic_new_session),
                         "Skip today", skipPending).build());
+        if (JawnSilence.active(context)) {
+            builder.setVibrate(null);
+        }
         try {
             nm.notify(UPCOMING_ID, builder.build());
         } catch (Exception e) {
@@ -338,6 +348,17 @@ public final class JawnClockNotifier {
         // sound here would talk over it.
         channel.setSound(null, null);
         channel.enableVibration(true);
+        nm.createNotificationChannel(channel);
+    }
+
+    /** The same importance, with nothing that can make a sound or a buzz. */
+    private static void createSilentChannel(NotificationManager nm) {
+        NotificationChannel channel = new NotificationChannel(
+                SILENT_CHANNEL, "Alarms (silent)", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("JawnOS alarms while the house is silent");
+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        channel.setSound(null, null);
+        channel.enableVibration(false);
         nm.createNotificationChannel(channel);
     }
 

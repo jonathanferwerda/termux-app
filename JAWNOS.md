@@ -153,3 +153,35 @@
   out. A manager page that is not the Gate now clears the flag, so every lapse
   gets its own ticket handover and the splash stays the escape hatch for a
   ticket that can no longer sign in. Build 1310.
+
+## Deltas round X+6 (the house's Silence is king)
+
+- **One native authority, every audio path secondary.** `JawnSilence` keeps the
+  state and the pre-silence snapshot in SharedPreferences. While it is on, every
+  audio stream except `STREAM_VOICE_CALL` is at zero, the ringer is silent, and
+  the interruption filter is `none` when the app holds DND access. The call
+  stream is deliberately untouched: it is the Hands-Free link the receptionist's
+  IVR travels on. `JawnApplication` attaches and re-applies at every process
+  start, so a restart or an APK update cannot quietly undo it.
+- **The page pushes the state, and the last state survives a closed page.**
+  `JawnPhoneBridge.setFacts` reads `silence` (top level or under `ivr`) and
+  applies it; `window.JawnPhone.setSilence` is the immediate path the manager's
+  `silence.js` uses on a change, so a phone does not wait for the five-minute
+  sync. The facts now carry `routes` as well as `silence`, and a change refreshes
+  the phone facts at once.
+- **Alarm, timer, media, speech and notification are gated.**
+  `JawnClockSound.play` returns before creating a player, never raises the alarm
+  stream, and re-asserts silence after restoring a stream;
+  `DeviceService.media` and `speech` answer `{silent:true}` without starting a
+  player or the TTS engine; `notificationPost`, `JawnNotifyReceiver`, and the
+  alarm notifier use the quiet channel/path and no vibration. An alarm still
+  draws its face and card; it just cannot make a sound.
+- **The manager's volume directive is not above silence.** `DeviceService.volume`
+  ignores a write to any stream but the call stream while the house is quiet.
+  `JawnSilence.enter` stops the app's own clip and speech players, and a stopped
+  alarm cannot restore a raised stream past the re-assert.
+- **Calls route to the receptionist, whoever is calling.**
+  `JawnPhoneBridge.ivrFlowFor` answers `ivr` before numbers or relationships, and
+  `ivrEnabled` is true while silence is on, so `JawnInCallService` screens the
+  call and routes it to the gateway. A gateway that is not there still leaves the
+  call silent rather than ringing through. Build 1311.

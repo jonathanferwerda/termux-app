@@ -130,6 +130,7 @@ public class DeviceService extends Service {
     private static final int MAX_CLIENTS = 8;
 
     private volatile boolean running = true;
+    private static volatile DeviceService instance;
     private ServerSocket serverSocket;
     private Thread acceptor;
     private ExecutorService clients;
@@ -153,6 +154,7 @@ public class DeviceService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         createChannel();
         startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
 
@@ -242,7 +244,23 @@ public class DeviceService extends Service {
         releaseMedia();
         stopRecording();
         Log.i(LOG_TAG, "device bridge stopped");
+        if (instance == this) instance = null;
         super.onDestroy();
+    }
+
+    /**
+     * Silence is king: stop the clip and speech players this service owns.
+     * The system streams are already zeroed by {@link JawnSilence}.
+     */
+    public static void silenceNow() {
+        DeviceService service = instance;
+        if (service == null) return;
+        service.releaseMedia();
+        synchronized (service.ttsLock) {
+            if (service.tts != null) {
+                try { service.tts.stop(); } catch (Throwable ignored) { }
+            }
+        }
     }
 
     @Override
@@ -779,7 +797,8 @@ public class DeviceService extends Service {
         int id = Math.abs(tag.hashCode());
         String title = args.optString("title", "JawnOS");
         String text = args.optString("text", args.optString("message", ""));
-        boolean silent = flag(args, "silent", false);
+        boolean silenced = JawnSilence.active(this);
+        boolean silent = silenced || flag(args, "silent", false);
         boolean ongoing = flag(args, "ongoing", false);
 
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
@@ -1157,6 +1176,12 @@ public class DeviceService extends Service {
             return result;
         }
         if (!"play".equals(action)) throw new IllegalArgumentException("unknown action");
+        if (JawnSilence.active(this)) {
+            JSONObject quiet = new JSONObject();
+            quiet.put("playing", false);
+            quiet.put("silent", true);
+            return quiet;
+        }
 
         String path = args.optString("path", "");
         if (path.isEmpty()) throw new IllegalArgumentException("no path");
@@ -1338,6 +1363,12 @@ public class DeviceService extends Service {
     /** Piper stays first in the tree; this is the Android fallback when it cannot run. */
     private JSONObject speech(JSONObject args) throws Exception {
         String text = args == null ? "" : args.optString("text", "");
+        if (JawnSilence.active(this)) {
+            JSONObject quiet = new JSONObject();
+            quiet.put("spoken", false);
+            quiet.put("silent", true);
+            return quiet;
+        }
         if (text.isEmpty()) throw new IllegalArgumentException("no text");
         if (!ensureTts()) throw new IllegalStateException("tts engine unavailable");
 
@@ -1677,9 +1708,12 @@ public class DeviceService extends Service {
         result.put("streams", streams);
         if (manager == null) return result;
 
+        boolean silenced = JawnSilence.active(this);
         if (args != null && args.has("stream") && args.has("volume")) {
             int id = streamId(args.optString("stream", ""));
-            if (id >= 0) {
+            // Silence outranks the manager's volume directive. The call
+            // stream is the one exception: the IVR needs it.
+            if (id >= 0 && (!silenced || id == AudioManager.STREAM_VOICE_CALL)) {
                 int max = manager.getStreamMaxVolume(id);
                 int level = Math.max(0, Math.min(max, args.optInt("volume", 0)));
                 manager.setStreamVolume(id, level, 0);

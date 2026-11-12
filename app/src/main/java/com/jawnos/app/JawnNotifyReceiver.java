@@ -38,7 +38,9 @@ public class JawnNotifyReceiver extends BroadcastReceiver {
         String title = intent.getStringExtra("title");
         String message = intent.getStringExtra("message");
         String tag = intent.getStringExtra("tag");
-        boolean silent = intent.getBooleanExtra("silent", false);
+        // Silence outranks the caller's own silent flag: every notice is quiet.
+        boolean silenced = JawnSilence.active(context);
+        boolean silent = silenced || intent.getBooleanExtra("silent", false);
         if (title == null || title.isEmpty()) title = "JawnOS";
         if (message == null) message = "";
         int id = Math.abs((tag != null && !tag.isEmpty() ? tag : String.valueOf(System.currentTimeMillis())).hashCode());

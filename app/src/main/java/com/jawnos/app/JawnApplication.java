@@ -37,6 +37,10 @@ public class JawnApplication extends Application {
         // Set log level for the app
         setLogLevel();
 
+        // A process start while the house is quiet must not undo the silence.
+        JawnSilence.attach(this);
+        JawnSilence.ensure();
+
         // M5: targetSdk 36 stops us exec'ing a file the app wrote into its
         // data dir, so the runtime's executables arrive as native libraries.
         // nativeLibraryDir moves on every APK update, so re-point the links
