@@ -24,12 +24,15 @@ public class JawnCallScreeningService extends CallScreeningService {
     @Override
     public void onScreenCall(Call.Details details) {
         boolean blocked = false;
+        // Silence outranks the blacklist too: every call goes to the
+        // receptionist, including a number the desk would otherwise refuse.
+        boolean silenced = JawnSilence.active(this);
         try {
             Uri handle = details.getHandle();
             if (handle != null) {
                 String number = handle.getSchemeSpecificPart();
                 JawnPhoneState.incoming(number);
-                if (JawnPhoneBridge.isBlocked(this, number)) {
+                if (!silenced && JawnPhoneBridge.isBlocked(this, number)) {
                     blocked = true;
                     JawnPhoneBridge.recordBlockedCall(this, number);
                 }
