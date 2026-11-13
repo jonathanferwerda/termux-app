@@ -169,6 +169,12 @@
   `silence.js` uses on a change, so a phone does not wait for the five-minute
   sync. The facts now carry `routes` as well as `silence`, and a change refreshes
   the phone facts at once.
+- **No page needs to be open, in either direction.** The manager's alarm pass
+  reconciles the house against the open silent appointment and calls the device
+  bridge's `silence.set` (`DeviceService`). That method is the off switch as much
+  as the on switch: while no appointment owns the house the pass keeps telling
+  the phone off (throttled to once a minute), so a missed push or a cold start
+  cannot leave the phone applying a stale silence snapshot forever. Build 1313.
 - **Alarm, timer, media, speech and notification are gated.**
   `JawnClockSound.play` returns before creating a player, never raises the alarm
   stream, and re-asserts silence after restoring a stream;

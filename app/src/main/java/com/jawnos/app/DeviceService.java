@@ -494,6 +494,19 @@ public class DeviceService extends Service {
                 reply.put("ok", true);
                 reply.put("result", volume(request.optJSONObject("args")));
             }
+            // The manager's alarm pass drives silence with no page open. This
+            // is the off switch as much as the on switch: without it a phone
+            // can keep its own copy of silence after the appointment has ended.
+            else if ("silence.set".equals(method)) {
+                JSONObject args = request.optJSONObject("args");
+                boolean on = args != null && flag(args, "on", false);
+                JawnSilence.set(this, on);
+                JSONObject result = new JSONObject();
+                result.put("on", on);
+                result.put("active", JawnSilence.active(this));
+                reply.put("ok", true);
+                reply.put("result", result);
+            }
             else if ("hardware.torch".equals(method)) {
                 JSONObject args = request.optJSONObject("args");
                 boolean on = args != null && flag(args, "on", false);
