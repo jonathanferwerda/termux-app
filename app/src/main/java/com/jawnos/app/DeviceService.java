@@ -60,6 +60,8 @@ import android.os.PowerManager;
 import android.service.notification.StatusBarNotification;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.provider.CallLog;
 import android.provider.ContactsContract;
@@ -534,6 +536,10 @@ public class DeviceService extends Service {
             else if ("mms.list".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", mmsList(request.optJSONObject("args")));
+            }
+            else if ("telephony.numbers".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", telephonyNumbers());
             }
             else if ("telephony.call_log".equals(method)) {
                 reply.put("ok", true);
@@ -1446,6 +1452,64 @@ public class DeviceService extends Service {
         out.put("screen", JawnPhoneBridge.ivrFlowFor(this, number));
         out.put("answer", JawnPhoneBridge.ivrShouldScreen(this, number));
         return out;
+    }
+
+    /** The numbers this device answers on: one per inserted SIM, so a dual-SIM
+     *  phone answers twice and a tablet with no radio answers none. A carrier
+     *  that does not provision a number on its SIM leaves it empty - the house
+     *  asks the person for it rather than guessing one. The house keeps these
+     *  to tell its own line from the other people on a group message. */
+    private JSONObject telephonyNumbers() throws Exception {
+        JSONObject result = new JSONObject();
+        JSONArray lines = new JSONArray();
+        result.put("lines", lines);
+        TelephonyManager manager = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+        if (manager == null) return result;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                SubscriptionManager subs = (SubscriptionManager) getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+                java.util.List<SubscriptionInfo> active = subs == null ? null : subs.getActiveSubscriptionInfoList();
+                if (active != null) {
+                    for (SubscriptionInfo info : active) {
+                        JSONObject line = new JSONObject();
+                        line.put("slot", info.getSimSlotIndex());
+                        line.put("subscription", info.getSubscriptionId());
+                        CharSequence carrier = info.getCarrierName();
+                        line.put("carrier", carrier == null ? "" : carrier.toString());
+                        String number = "";
+                        try { number = info.getNumber(); } catch (Throwable ignored) { }
+                        if (number == null || number.trim().isEmpty()) {
+                            try {
+                                TelephonyManager per = manager.createForSubscriptionId(info.getSubscriptionId());
+                                number = per.getLine1Number();
+                            } catch (Throwable ignored) { }
+                        }
+                        line.put("number", bareDigits(number));
+                        lines.put(line);
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+        if (lines.length() == 0) {
+            JSONObject line = new JSONObject();
+            line.put("slot", 0);
+            line.put("subscription", -1);
+            line.put("carrier", manager.getNetworkOperatorName() == null ? "" : manager.getNetworkOperatorName());
+            String number = "";
+            try { number = manager.getLine1Number(); } catch (Throwable ignored) { }
+            line.put("number", bareDigits(number));
+            lines.put(line);
+        }
+        return result;
+    }
+
+    /** A number as the house keeps one: digits only, the leading country 1 of
+     *  an eleven-digit North American number dropped. */
+    private static String bareDigits(String number) {
+        if (number == null) return "";
+        String digits = number.replaceAll("[^0-9]", "");
+        if (digits.length() == 11 && digits.startsWith("1")) digits = digits.substring(1);
+        return digits;
     }
 
     /** TelephonyManager in termux-telephony-deviceinfo's shape. */
