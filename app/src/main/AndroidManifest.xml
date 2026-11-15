@@ -312,11 +312,15 @@
         <service
             android:name="com.android.mms.transaction.TransactionService"
             android:exported="false" />
+        <!-- The download half: the push receiver above stores the envelope and
+             broadcasts this action, and the subclass is what fetches the message
+             from the MMSC. The library's own class is abstract and its push does
+             not send REFRESH, so the old entry could never have run. -->
         <receiver
-            android:name="com.klinker.android.send_message.MmsReceivedReceiver"
-            android:exported="false">
+            android:name=".JawnMmsReceiver"
+            android:exported="true">
             <intent-filter>
-                <action android:name="com.klinker.android.send_message.REFRESH" />
+                <action android:name="com.klinker.android.messaging.MMS_RECEIVED" />
             </intent-filter>
         </receiver>
         <receiver android:name="com.klinker.android.send_message.MmsSentReceiver" android:exported="false" />
