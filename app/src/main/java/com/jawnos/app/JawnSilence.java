@@ -138,6 +138,7 @@ public final class JawnSilence {
         // clip or a ring already in flight does not carry on into the silence.
         DeviceService.silenceNow();
         JawnClockSound.stop();
+        JawnRinger.stop();
     }
 
     private static void exit(Context app) {

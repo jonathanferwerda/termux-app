@@ -143,6 +143,8 @@ public class JawnInCallService extends InCallService {
                     return;
                 }
                 showScreen();
+                JawnRinger.start(JawnInCallService.this);
+                JawnPhoneBridge.notifyRing(JawnInCallService.this, number);
             }
             else if (newState == Call.STATE_DIALING) {
                 if (trips.get(call) == null) {
@@ -152,6 +154,7 @@ public class JawnInCallService extends InCallService {
                 showScreen();
             }
             else if (newState == Call.STATE_ACTIVE) {
+                JawnRinger.stop();
                 // A second call reaching ACTIVE means the person is talking on it:
                 // the pending reject belongs to the old, refused call and must not
                 // disconnect this one (or keep its microphone muted).
@@ -184,6 +187,7 @@ public class JawnInCallService extends InCallService {
                 }
             }
             else if (newState == Call.STATE_DISCONNECTED) {
+                JawnRinger.stop();
                 Trip trip = trips.remove(call);
                 handler.removeCallbacks(watchdog);
                 handler.removeCallbacks(routeLater);
@@ -427,6 +431,7 @@ public class JawnInCallService extends InCallService {
             // the face has no call to follow once the service is gone
             JawnScreenFace.hide(this);
         }
+        JawnRinger.stop();
         instance = null;
         current = null;
         state = Call.STATE_DISCONNECTED;
@@ -443,6 +448,7 @@ public class JawnInCallService extends InCallService {
 
     @Override
     public void onCallRemoved(Call call) {
+        JawnRinger.stop();
         // a call that goes away without ever saying DISCONNECTED still happened
         if (pendingReject != null && call == pendingRejectCall) {
             handler.removeCallbacks(pendingReject);

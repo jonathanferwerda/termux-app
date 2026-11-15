@@ -12,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -529,6 +530,10 @@ public class DeviceService extends Service {
             else if ("sms.list".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", smsList(request.optJSONObject("args")));
+            }
+            else if ("mms.list".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", mmsList(request.optJSONObject("args")));
             }
             else if ("telephony.call_log".equals(method)) {
                 reply.put("ok", true);
@@ -1570,6 +1575,124 @@ public class DeviceService extends Service {
         JSONObject result = new JSONObject();
         result.put("messages", messages);
         return result;
+    }
+
+    /** The last N inbound MMS in a shape the house can file: the text part and
+     *  each media part, base64, capped so a big photo cannot stall the bridge. */
+    private JSONObject mmsList(JSONObject args) throws Exception {
+        int limit = limit(args, 10);
+        ContentResolver resolver = getContentResolver();
+        JSONArray messages = new JSONArray();
+        String[] columns = {
+            Telephony.Mms._ID, Telephony.Mms.THREAD_ID, Telephony.Mms.DATE
+        };
+        String selection = Telephony.Mms.MESSAGE_BOX + " = ?";
+        String[] selectionArgs = { String.valueOf(Telephony.Mms.MESSAGE_BOX_INBOX) };
+        try (Cursor cursor = resolver.query(Telephony.Mms.CONTENT_URI, columns, selection,
+                selectionArgs, Telephony.Mms.DATE + " DESC")) {
+            if (cursor != null) {
+                while (cursor.moveToNext() && messages.length() < limit) {
+                    long id = cursor.getLong(0);
+                    long thread = cursor.getLong(1);
+                    long date = cursor.getLong(2) * 1000L;
+                    StringBuilder body = new StringBuilder();
+                    JSONArray parts = mmsParts(resolver, id, body);
+                    JSONObject message = new JSONObject();
+                    message.put("id", id);
+                    message.put("thread", thread);
+                    message.put("received", date);
+                    message.put("number", mmsAddress(resolver, id));
+                    message.put("body", body.toString());
+                    message.put("parts", parts);
+                    messages.put(message);
+                }
+            }
+        }
+        JSONObject result = new JSONObject();
+        result.put("messages", messages);
+        return result;
+    }
+
+    private String mmsAddress(ContentResolver resolver, long id) {
+        Uri addr = Uri.withAppendedPath(ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, id), "addr");
+        try (Cursor cursor = resolver.query(addr,
+                new String[] { Telephony.Mms.Addr.ADDRESS, Telephony.Mms.Addr.TYPE }, null, null, null)) {
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    // 137 is the MMS addr table's FROM; the SDK does not expose the constant.
+                    if (cursor.getInt(1) == 137) {
+                        String number = cursor.getString(0);
+                        return number == null ? "" : number;
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+        return "";
+    }
+
+    private JSONArray mmsParts(ContentResolver resolver, long id, StringBuilder body) {
+        JSONArray parts = new JSONArray();
+        Uri partUri = Uri.withAppendedPath(ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, id), "part");
+        String[] columns = {
+            Telephony.Mms.Part._ID, Telephony.Mms.Part.CONTENT_TYPE,
+            Telephony.Mms.Part.TEXT, Telephony.Mms.Part._DATA, Telephony.Mms.Part.NAME
+        };
+        try (Cursor cursor = resolver.query(partUri, columns, null, null, null)) {
+            if (cursor == null) return parts;
+            while (cursor.moveToNext()) {
+                long partId = cursor.getLong(0);
+                String mime = cursor.getString(1);
+                String text = cursor.getString(2);
+                String dataPath = cursor.getString(3);
+                String name = cursor.getString(4);
+                if (mime == null) continue;
+                if (mime.startsWith("text/plain")) {
+                    if (text != null) body.append(text);
+                    continue;
+                }
+                boolean media = mime.startsWith("image/") || mime.startsWith("audio/")
+                        || mime.startsWith("video/") || mime.startsWith("application/");
+                if (!media) continue;
+                byte[] bytes = readPart(resolver, partUri, partId, dataPath);
+                if (bytes == null || bytes.length == 0) continue;
+                JSONObject part = new JSONObject();
+                part.put("name", name == null || name.isEmpty() ? "part" : name);
+                part.put("mime", mime);
+                part.put("data", Base64.encodeToString(bytes, Base64.NO_WRAP));
+                parts.put(part);
+            }
+        } catch (Throwable ignored) { }
+        return parts;
+    }
+
+    private byte[] readPart(ContentResolver resolver, Uri partUri, long partId, String dataPath) {
+        final int cap = 8 * 1024 * 1024;
+        if (dataPath != null && !dataPath.isEmpty()) {
+            File file = new File(dataPath);
+            if (file.isFile() && file.length() > 0 && file.length() <= cap) {
+                try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
+                    return readCapped(in, cap);
+                } catch (Throwable ignored) { }
+            }
+        }
+        try (java.io.InputStream in = resolver.openInputStream(ContentUris.withAppendedId(partUri, partId))) {
+            return in == null ? null : readCapped(in, cap);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private byte[] readCapped(java.io.InputStream in, int cap) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        int total = 0;
+        while ((n = in.read(buf)) > 0) {
+            total += n;
+            if (total > cap) return null;
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
     }
 
     /** The last N calls in the termux-call-log shape ({name, phone_number, date, duration}). */

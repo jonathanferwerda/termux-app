@@ -846,6 +846,60 @@ public class JawnPhoneBridge {
         } catch (Throwable ignored) { }
     }
 
+    /** The ringtone this phone chose, from the facts /manager/phone/sync hands
+     *  over. A missing or malformed value falls back to the classic ring. */
+    public static String ringtoneFor(Context context) {
+        String tone = "notifications/ring.mp3";
+        try {
+            JSONObject facts = factsOf(context);
+            String saved = facts.optString("ringtone", "");
+            if (saved != null && !saved.isEmpty()) tone = saved;
+        } catch (Throwable ignored) { }
+        if (!tone.startsWith("notifications/")) tone = "notifications/" + tone;
+        return tone;
+    }
+
+    /**
+     * Tell the house a call is ringing, so its live-call appointment exists
+     * before the hangup. That is what lets the Alarm loop fire for a live call
+     * instead of waiting for the record at the end. Best effort and off the
+     * main thread; a missed post only leaves the call's usual record.
+     */
+    public static void notifyRing(final Context context, final String number) {
+        final Context app = context.getApplicationContext();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int port = JawnLauncher.getJawnPort(app);
+                String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
+                HttpURLConnection conn = null;
+                try {
+                    String body = "event=ring&number=" + Uri.encode(number == null ? "" : number)
+                            + "&direction=incoming&timestamp=" + System.currentTimeMillis();
+                    byte[] bytes = body.getBytes("UTF-8");
+                    conn = (HttpURLConnection) new URL(origin + "/manager/phone/call").openConnection();
+                    trustHouse(conn);
+                    conn.setConnectTimeout(2000);
+                    conn.setReadTimeout(3000);
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    conn.setFixedLengthStreamingMode(bytes.length);
+                    String cookie = presidentCookie(app, origin, port);
+                    if (cookie != null && !cookie.isEmpty()) {
+                        conn.setRequestProperty("Cookie", cookie);
+                    }
+                    OutputStream out = conn.getOutputStream();
+                    try { out.write(bytes); } finally { out.close(); }
+                    conn.getResponseCode();
+                } catch (Throwable t) {
+                    JawnLog.append("ring: could not file the live call: " + t);
+                } finally {
+                    if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
+                }
+            }
+        }, "jawn-ring").start();
+    }
+
     private static JSONObject factsOf(Context context) {
         try {
             String raw = context.getApplicationContext()
