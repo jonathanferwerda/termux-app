@@ -1598,10 +1598,14 @@ public class DeviceService extends Service {
                     StringBuilder body = new StringBuilder();
                     JSONArray parts = mmsParts(resolver, id, body);
                     JSONObject message = new JSONObject();
+                    // every address on the PDU: the sender names the thread the
+                    // house draws today, the rest are the people it was sent to
+                    JSONArray recipients = mmsAddresses(resolver, id);
                     message.put("id", id);
                     message.put("thread", thread);
                     message.put("received", date);
-                    message.put("number", mmsAddress(resolver, id));
+                    message.put("number", mmsFrom(recipients));
+                    message.put("recipients", recipients);
                     message.put("body", body.toString());
                     message.put("parts", parts);
                     messages.put(message);
@@ -1613,20 +1617,36 @@ public class DeviceService extends Service {
         return result;
     }
 
-    private String mmsAddress(ContentResolver resolver, long id) {
+    /** Every address the MMS carries - FROM, TO, CC and BCC - in the addr
+     *  table's own order, each with its type. The type is the table's MMS
+     *  address token: 137 FROM, 151 TO, 130 CC, 129 BCC (the SDK does not
+     *  expose all four as constants). This is what makes a group a group. */
+    private JSONArray mmsAddresses(ContentResolver resolver, long id) {
+        JSONArray addresses = new JSONArray();
         Uri addr = Uri.withAppendedPath(ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, id), "addr");
         try (Cursor cursor = resolver.query(addr,
                 new String[] { Telephony.Mms.Addr.ADDRESS, Telephony.Mms.Addr.TYPE }, null, null, null)) {
             if (cursor != null) {
                 while (cursor.moveToNext()) {
-                    // 137 is the MMS addr table's FROM; the SDK does not expose the constant.
-                    if (cursor.getInt(1) == 137) {
-                        String number = cursor.getString(0);
-                        return number == null ? "" : number;
-                    }
+                    String number = cursor.getString(0);
+                    if (number == null || number.isEmpty()) continue;
+                    JSONObject entry = new JSONObject();
+                    entry.put("number", number);
+                    entry.put("type", cursor.getInt(1));
+                    addresses.put(entry);
                 }
             }
         } catch (Throwable ignored) { }
+        return addresses;
+    }
+
+    /** The MMS sender: the address the PDU typed FROM. Kept as the message's
+     *  `number` so a one-to-one message reads exactly as it did before. */
+    private String mmsFrom(JSONArray addresses) {
+        for (int i = 0; i < addresses.length(); i++) {
+            JSONObject entry = addresses.optJSONObject(i);
+            if (entry != null && entry.optInt("type") == 137) return entry.optString("number", "");
+        }
         return "";
     }
 
