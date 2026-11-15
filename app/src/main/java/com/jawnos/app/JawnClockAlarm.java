@@ -111,15 +111,7 @@ public final class JawnClockAlarm {
 
         long wakeAt = Math.max(now + 1_000L, at - LEAD_MS);
         try {
-            // The app targets SDK 28, so Android 12's exact-alarm permission gate
-            // does not apply; setExactAndAllowWhileIdle is the strongest wake this
-            // compile target can ask for.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAt, pending);
-                Log.i(LOG_TAG, "clock alarm at " + wakeAt + " (" + label + ")");
-            } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, wakeAt, pending);
-            }
+            setWake(am, wakeAt, pending, label);
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not schedule clock alarm", e);
         }
@@ -127,14 +119,37 @@ public final class JawnClockAlarm {
         long noticeAt = at - UPCOMING_LEAD_MS;
         try {
             if (noticeAt > now + 60_000L) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, noticeAt, upcoming);
-                Log.i(LOG_TAG, "alarm notice at " + noticeAt + " (" + label + ")");
+                setWake(am, noticeAt, upcoming, "notice " + label);
             } else {
                 am.cancel(upcoming);
                 upcoming.cancel();
             }
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not schedule the alarm notice", e);
+        }
+    }
+
+    /**
+     * The strongest wake this app is allowed. USE_EXACT_ALARM is declared, so
+     * the exact alarm access is normally granted; if an Android 12+ device has
+     * it turned off (or an update revoked SCHEDULE_EXACT_ALARM), an inexact
+     * doze-surviving wake still rings late rather than not at all. The
+     * permissions screen offers the "Alarms &amp; reminders" page.
+     */
+    private static void setWake(AlarmManager am, long wakeAt, PendingIntent pending, String label) {
+        boolean exact = true;
+        if (Build.VERSION.SDK_INT >= 31) {
+            try { exact = am.canScheduleExactAlarms(); } catch (Exception e) { exact = true; }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            am.set(AlarmManager.RTC_WAKEUP, wakeAt, pending);
+            Log.i(LOG_TAG, "clock wake at " + wakeAt + " (" + label + ")");
+        } else if (exact) {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAt, pending);
+            Log.i(LOG_TAG, "clock exact wake at " + wakeAt + " (" + label + ")");
+        } else {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAt, pending);
+            Log.w(LOG_TAG, "exact alarms are off; inexact wake at " + wakeAt + " (" + label + ")");
         }
     }
 

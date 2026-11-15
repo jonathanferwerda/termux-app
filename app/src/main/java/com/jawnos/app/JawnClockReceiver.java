@@ -14,6 +14,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 /**
  * The bridge between jawn's Clock and Android's alarm machinery.
@@ -100,6 +101,13 @@ public class JawnClockReceiver extends BroadcastReceiver {
         }
 
         if (ACTION_UPCOMING.equals(action)) {
+            // The schedule may have moved since this notice was armed: a skip,
+            // a dismiss or an edit replaces the file the wake is checked
+            // against. A stale notice must not announce a cancelled alarm.
+            if (staleWake(context, intent)) {
+                Log.i(LOG_TAG, "ignoring a notice for a schedule that moved");
+                return;
+            }
             JawnClockNotifier.showUpcoming(context,
                     intent.getStringExtra("label"),
                     intent.getStringExtra("uuid"),
@@ -128,6 +136,16 @@ public class JawnClockReceiver extends BroadcastReceiver {
         if (JawnClockAlarm.ACTION_ALARM.equals(action)) {
             // The exact alarm has done its job and does not repeat. The ring
             // starts at the named moment, not at this five-second lead.
+            //
+            // An AlarmManager wake is a promise made when it was armed, and a
+            // Skip, Dismiss or edit after that cannot un-queue it from another
+            // process. The file jawn writes on every schedule change is the
+            // authority: if it now names a different moment (or no alarm), this
+            // wake is stale and must not ring a day the person skipped.
+            if (staleWake(context, intent)) {
+                Log.i(LOG_TAG, "ignoring a wake for a schedule that moved");
+                return;
+            }
             show(context, intent, true);
             playSound(context, intent, true, true);
         }
@@ -249,6 +267,25 @@ public class JawnClockReceiver extends BroadcastReceiver {
         }
     }
 
+    /**
+     * Is this wake still the alarm the schedule names? jawn rewrites
+     * clock_alarm.json before it arms a wake and again whenever the next alarm
+     * moves (a skip, a dismiss, an edit, another machine's change). A wake whose
+     * moment or uuid no longer matches that file is a promise already broken.
+     */
+    private static boolean staleWake(Context context, Intent intent) {
+        long at = intent.getLongExtra("at", 0L);
+        if (at <= 0L) return false;
+        JSONObject data = JawnClockAlarm.read(context);
+        if (data == null) return true;
+        long fileAt = data.optLong("at", 0L);
+        if (fileAt <= 0L) return true;
+        if (at != fileAt) return true;
+        String uuid = intent.getStringExtra("uuid");
+        String fileUuid = data.optString("uuid", "");
+        return uuid != null && uuid.length() > 0 && !uuid.equals(fileUuid);
+    }
+
     /** Skip the next occurrence for today: end the phone's wake and ask jawn. */
     private void skipToday(Context context, Intent intent) {
         String uuid = intent.getStringExtra("uuid");
@@ -260,13 +297,28 @@ public class JawnClockReceiver extends BroadcastReceiver {
         JawnClockAlarm.cancel(context);
         if (uuid == null || uuid.isEmpty()) return;
         try {
-            File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
-            if (!dir.exists()) dir.mkdirs();
             JSONObject json = new JSONObject();
             json.put("uuid", uuid);
             if (at > 0L) json.put("at", at);
+            String raw = json.toString();
+            // One file per tap: two Skips a moment apart used to overwrite the
+            // same clock_skip.json and lose the first. The legacy single file
+            // is still written for a tree that has not taken the queue yet;
+            // the daemon reads both and applies each request once.
+            File dir = new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president");
+            if (!dir.exists()) dir.mkdirs();
             try (FileOutputStream out = new FileOutputStream(new File(dir, "clock_skip.json"))) {
-                out.write(json.toString().getBytes(StandardCharsets.UTF_8));
+                out.write(raw.getBytes(StandardCharsets.UTF_8));
+            }
+            File queue = new File(dir, "clock_skip.d");
+            if (!queue.exists()) queue.mkdirs();
+            if (queue.isDirectory()) {
+                String base = "skip-" + System.currentTimeMillis() + "-" + UUID.randomUUID();
+                File tmp = new File(queue, base + ".tmp");
+                try (FileOutputStream out = new FileOutputStream(tmp)) {
+                    out.write(raw.getBytes(StandardCharsets.UTF_8));
+                }
+                if (!tmp.renameTo(new File(queue, base + ".json"))) tmp.delete();
             }
             Log.i(LOG_TAG, "skip today written for " + uuid);
         } catch (Exception e) {

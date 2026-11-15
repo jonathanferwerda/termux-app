@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -73,6 +74,8 @@ public class JawnDashboardActivity extends Activity {
     // not read as a person turning auto-connect on (which would start the tunnel).
     private boolean tailnetSwitchSyncing = false;
     private static final int REQ_VPN = 0x4A41;
+    /** The version whose permission audit has already run (see onResume). */
+    private static final String KEY_AUDITED_VERSION = "audited_version_code";
     private long startRequestedAt = 0;
     private final JawnDashboardActivity self = this;
 
@@ -542,6 +545,7 @@ public class JawnDashboardActivity extends Activity {
         refreshTailnetStatus();
         resumed = true;
         updateEnvStatus();
+        auditPermissionsAfterUpdate();
         pollNow();
         // An app update, an OS kill, or a process restart can take the Termux
         // session that runs jawn down with it. Self-test on open and bring it
@@ -669,6 +673,29 @@ public class JawnDashboardActivity extends Activity {
     private void openUi() {
         int port = JawnLauncher.getJawnPort(this);
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(JawnLauncher.getUiUrl(this, port))));
+    }
+
+    /**
+     * Android 14+ resets USE_FULL_SCREEN_INTENT on every APK update for a
+     * sideloaded build. The alarm no longer depends on it (the overlay opens
+     * the same face), but if the overlay or notifications were lost too, open
+     * the grant screen once for this version instead of leaving a person to
+     * discover it when an alarm fails to appear. One prompt per update.
+     */
+    private void auditPermissionsAfterUpdate() {
+        int version = JawnUpdater.installedVersionCode(this);
+        if (version <= 0) return;
+        int audited = JawnLauncher.prefs(this).getInt(KEY_AUDITED_VERSION, 0);
+        if (audited == version) return;
+        JawnLauncher.prefs(this).edit().putInt(KEY_AUDITED_VERSION, version).apply();
+        if (audited == 0) return; // a first run uses the normal grant flow
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        boolean overlay = Settings.canDrawOverlays(this);
+        boolean notify = nm == null || nm.areNotificationsEnabled();
+        if (!overlay || !notify) {
+            toast("Android reset an alarm permission - grant it here");
+            grantDevicePermissions();
+        }
     }
 
     /** Launch the JawnOS API app's grant-all screen (it owns the device permissions). */

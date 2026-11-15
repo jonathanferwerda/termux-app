@@ -1,6 +1,5 @@
 package com.jawnos.app;
 
-import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -58,7 +57,7 @@ public final class JawnClockNotifier {
     private static final int CONTENT_REQUEST = 7302;
     private static final int DISMISS_REQUEST = 7307;
     private static final int SNOOZE_REQUEST = 7308;
-    private static final int FULLSCREEN_REQUEST = 7309;
+    private static final int OVERLAY_REQUEST = 7309;
     private static final int DEFAULT_SNOOZE_MINUTES = 5;
     private static final int UPCOMING_ID = 7304;
     private static final int UPCOMING_CONTENT_REQUEST = 7305;
@@ -182,24 +181,25 @@ public final class JawnClockNotifier {
                             snoozePending).build());
         }
         boolean fullScreen = fullScreenAllowed(context);
-        // A phone with notifications turned off still needs a way to answer.
-        // The alarm face is asked for directly below in that case, just as it
-        // is when the full-screen permission is missing.
+        // The overlay grant is the alarm's durable road: it survives an APK
+        // update and it is the exemption Android needs to open the face while
+        // the screen is on and unlocked. USE_FULL_SCREEN_INTENT is reset on
+        // every update for a sideloaded build, so it is a bonus, never the
+        // requirement. A phone with notifications off still needs the face;
+        // it is asked for directly below.
+        boolean overlay = canDrawOver(context);
         boolean canNotify = nm.areNotificationsEnabled();
         if (!canNotify) {
             Log.w(LOG_TAG, "notifications are disabled; the alarm face is the fallback");
         }
-        if (!fullScreen) {
-            // Android 14 made USE_FULL_SCREEN_INTENT a special access. The app
-            // is an alarm app, but a sideloaded build is not classified by a
-            // store, so the system can leave it denied and turn the alarm into
-            // a heads-up notice. Offer the switch that grants it; the alarm
-            // still opens the face directly below where Android permits it.
-            Log.w(LOG_TAG, "full-screen intent not allowed; offering the lock-screen permission");
+        if (!overlay) {
+            Log.w(LOG_TAG, "overlay not granted; offer it so the alarm face opens over an unlocked screen");
             builder.addAction(new Notification.Action.Builder(
                     Icon.createWithResource(context, R.drawable.ic_new_session),
-                    context.getString(R.string.clock_alarm_fullscreen_permission),
-                    fullScreenSettings(context)).build());
+                    context.getString(R.string.clock_alarm_overlay_permission),
+                    overlaySettings(context)).build());
+        } else if (!fullScreen) {
+            Log.i(LOG_TAG, "full-screen intent not allowed; the overlay path still opens the face");
         }
         try {
             // A new id each time, so the full-screen intent fires again on a
@@ -219,7 +219,7 @@ public final class JawnClockNotifier {
         // The intent is the sanctioned road, but a restricted or OEM build can
         // ignore it; the activity is singleTask, so when both arrive the second
         // one just brings the same face forward.
-        startOverLockScreen(context, open);
+        showAlarmFace(context, open);
     }
 
     /**
@@ -240,29 +240,32 @@ public final class JawnClockNotifier {
         }
     }
 
-    private static PendingIntent fullScreenSettings(Context context) {
-        Intent allow = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+    /** Whether this app may draw over other apps: the durable alarm grant. */
+    public static boolean canDrawOver(Context context) {
+        try {
+            return Settings.canDrawOverlays(context);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static PendingIntent overlaySettings(Context context) {
+        Intent allow = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + context.getPackageName()));
         allow.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        return PendingIntent.getActivity(context, FULLSCREEN_REQUEST, allow, flags());
+        return PendingIntent.getActivity(context, OVERLAY_REQUEST, allow, flags());
     }
 
     /**
-     * The permission-free road: with the phone locked or asleep, ask for the
-     * alarm face directly, whether or not the full-screen intent was accepted.
-     * Android may refuse a background activity start, in which case the
-     * notification above (or the intent) is still the way in once unlocked.
+     * Ask for the alarm face directly, in every screen state. With the overlay
+     * grant Android allows a background activity start; when the app is in the
+     * foreground, or the phone is locked or asleep, the start is allowed too.
+     * If the system refuses, the notification above is still the way in.
      */
-    private static void startOverLockScreen(Context context, Intent open) {
+    private static void showAlarmFace(Context context, Intent open) {
         try {
-            KeyguardManager km = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            boolean locked = km != null && km.isKeyguardLocked();
-            boolean awake = pm != null && pm.isInteractive();
-            if (locked || !awake) {
-                context.startActivity(open);
-                Log.i(LOG_TAG, "asked for the alarm face directly");
-            }
+            context.startActivity(open);
+            Log.i(LOG_TAG, "asked for the alarm face directly");
         } catch (Exception e) {
             Log.w(LOG_TAG, "could not show the alarm face directly", e);
         }

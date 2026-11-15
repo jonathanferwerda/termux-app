@@ -191,3 +191,37 @@
   `ivrEnabled` is true while silence is on, so `JawnInCallService` screens the
   call and routes it to the gateway. A gateway that is not there still leaves the
   call silent rather than ringing through. Build 1311.
+
+## Deltas round X+7 (the alarm face is the overlay's, and a skipped day stays skipped)
+
+- **The alarm face no longer depends on USE_FULL_SCREEN_INTENT.**
+  `JawnClockNotifier` uses `Settings.canDrawOverlays` as the durable grant:
+  Android 14+ resets the full-screen-intent special access on every APK update
+  for a sideloaded build (the "alarms over lock screen" permission that had to
+  be switched on again each time), while the overlay app-op persists. The
+  overlay is also the background-activity-start exemption that lets the face
+  open while the screen is on and unlocked, which a full-screen intent does not
+  do. When the overlay is missing the ring notification offers it; the
+  full-screen intent stays a logged bonus.
+- **The face is asked for in every screen state.** `showAlarmFace` replaces
+  `startOverLockScreen` and starts `JawnClockAlarmActivity` without the old
+  "locked or asleep only" condition, so an alarm during ordinary use comes to
+  the front instead of waiting in the notification drawer.
+- **A queued wake is checked against the schedule before it rings.**
+  `JawnClockReceiver.staleWake` compares the exact-alarm wake's `at`/`uuid`
+  with `clock_alarm.json`, which jawn rewrites whenever the next alarm moves.
+  A Skip, Dismiss, edit or another machine's change leaves the armed wake in
+  AlarmManager; the stale one is now ignored, so a skipped day cannot still
+  sound. The half-hour notice gets the same check.
+- **Skip requests are queued.** `skipToday` writes one `clock_skip.d/<id>.json`
+  per tap (renamed from `.tmp`) as well as the legacy `clock_skip.json`, so two
+  Skips a moment apart cannot overwrite each other.
+- **Exact alarms degrade, never vanish.** `JawnClockAlarm.setWake` checks
+  `canScheduleExactAlarms()` on Android 12+ and falls back to
+  `setAndAllowWhileIdle` (late but doze-surviving) instead of failing to arm.
+  The permissions screen names overlay as the alarm grant, adds the
+  "Alarms & reminders" page, and marks the full-screen intent optional.
+- **One permission prompt per update.** `JawnDashboardActivity` compares the
+  installed versionCode with `audited_version_code`; if the overlay or
+  notifications were lost in an update it opens the grant screen once for that
+  version. Build 1314.

@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Activity;
+import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -57,16 +58,28 @@ public class JawnPermissionsActivity extends Activity {
         add(ll, "Request all runtime permissions", new Runnable() {
             public void run() { requestAll(); }
         });
-        add(ll, "Overlay: draw over other apps", new Runnable() {
+        add(ll, "Alarms: show over the screen (overlay)", new Runnable() {
             public void run() {
                 open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             }
         });
+        if (Build.VERSION.SDK_INT >= 31) {
+            // Exact alarms are their own access on Android 12+. USE_EXACT_ALARM
+            // normally grants it, but a device can have it turned off; an alarm
+            // should then still ring (late) instead of vanishing.
+            add(ll, "Alarms: exact timing", new Runnable() {
+                public void run() {
+                    open(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()));
+                }
+            });
+        }
         if (Build.VERSION.SDK_INT >= 34) {
-            // Android 14 made USE_FULL_SCREEN_INTENT a special access; without
-            // it a Clock alarm is only a heads-up notice, not the face over
-            // the lock screen.
-            add(ll, "Alarms: show over the lock screen", new Runnable() {
+            // USE_FULL_SCREEN_INTENT became a special access in Android 14.
+            // Android revokes it on every APK update for a sideloaded build, so
+            // the alarm does not depend on it any more: the overlay above opens
+            // the same face, locked or unlocked. This page is for a person who
+            // still wants the platform's own full-screen intent.
+            add(ll, "Alarms: full-screen intent (optional)", new Runnable() {
                 public void run() {
                     open(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()));
                 }
@@ -214,10 +227,21 @@ public class JawnPermissionsActivity extends Activity {
             boolean bg = checkSelfPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
             sb.append("background location: ").append(bg ? "granted" : "missing").append('\n');
         }
+        if (Build.VERSION.SDK_INT >= 31) {
+            AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+            boolean exact = true;
+            try { exact = am == null || am.canScheduleExactAlarms(); } catch (Exception e) { exact = true; }
+            sb.append("exact alarms: ").append(exact ? "granted" : "missing (alarms ring late)").append('\n');
+        }
         if (Build.VERSION.SDK_INT >= 34) {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             boolean fsi = nm != null && nm.canUseFullScreenIntent();
-            sb.append("alarms over the lock screen: ").append(fsi ? "granted" : "missing").append('\n');
+            // The overlay grant opens the alarm face on every screen state and
+            // survives an update; the full-screen intent is a bonus the system
+            // resets on each update, so it is not a "missing" failure here.
+            sb.append("alarms over the lock screen: ")
+              .append(fsi ? "granted" : (Settings.canDrawOverlays(this) ? "optional (overlay is set)" : "missing"))
+              .append('\n');
         }
         String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
         sb.append("notification access: ").append(flat != null && flat.contains(getPackageName()) ? "granted" : "missing");
