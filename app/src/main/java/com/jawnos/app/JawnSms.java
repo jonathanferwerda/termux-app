@@ -142,13 +142,20 @@ public class JawnSms {
         }
         try {
             JSONArray arr = new JSONArray(partsJson == null ? "[]" : partsJson);
-            Settings settings = new Settings();
-            settings.setUseSystemSending(true);
-            Transaction transaction = new Transaction(activity, settings);
             // the words are the message's text part, not its subject: an mms
             // with a subject and a separate sms for the same words put two
             // bubbles in the system thread for one thing the person sent
             Message message = new Message(text == null ? "" : text, digits == null ? "" : digits.trim());
+            Settings settings = new Settings();
+            settings.setUseSystemSending(true);
+            // Several addresses on one thread is a group MMS. Left to itself
+            // the library broadcasts instead: one MMS per person when there is
+            // a picture, and a plain SMS each when there are only words - so a
+            // reply to a group would arrive as one thread per person, which is
+            // exactly what a group thread exists to avoid.
+            String[] groupAddresses = message.getAddresses();
+            if (groupAddresses != null && groupAddresses.length > 1) settings.setGroup(true);
+            Transaction transaction = new Transaction(activity, settings);
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject part = arr.optJSONObject(i);
                 if (part == null) continue;
