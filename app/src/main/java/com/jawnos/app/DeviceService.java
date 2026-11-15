@@ -1673,7 +1673,11 @@ public class DeviceService extends Service {
                 boolean media = mime.startsWith("image/") || mime.startsWith("audio/")
                         || mime.startsWith("video/") || mime.startsWith("application/");
                 if (!media) continue;
-                byte[] bytes = readPart(resolver, partUri, partId, dataPath);
+                // SMIL is the slideshow layout, not a slide: it has no bytes a
+                // bubble can draw, and asking for them is what made an earlier
+                // group of images arrive with no attachments at all.
+                if (mime.equalsIgnoreCase("application/smil")) continue;
+                byte[] bytes = readPart(resolver, partId, dataPath);
                 if (bytes == null || bytes.length == 0) continue;
                 JSONObject part = new JSONObject();
                 part.put("name", name == null || name.isEmpty() ? "part" : name);
@@ -1685,7 +1689,14 @@ public class DeviceService extends Service {
         return parts;
     }
 
-    private byte[] readPart(ContentResolver resolver, Uri partUri, long partId, String dataPath) {
+    /** One media part's bytes. The provider is the authority for a part:
+     *  content://mms/part/<id> (Telephony.Mms.Part.CONTENT_URI). It is NOT
+     *  content://mms/<id>/part/<id> - that URI does not resolve, which is why
+     *  inbound images were silently dropped. The _data file stays a fast path
+     *  where it is readable, but a release build cannot open the telephony
+     *  provider's private app_parts directory, so the provider read is what
+     *  actually works on a phone. */
+    private byte[] readPart(ContentResolver resolver, long partId, String dataPath) {
         final int cap = 8 * 1024 * 1024;
         if (dataPath != null && !dataPath.isEmpty()) {
             File file = new File(dataPath);
@@ -1695,7 +1706,8 @@ public class DeviceService extends Service {
                 } catch (Throwable ignored) { }
             }
         }
-        try (java.io.InputStream in = resolver.openInputStream(ContentUris.withAppendedId(partUri, partId))) {
+        Uri part = ContentUris.withAppendedId(Telephony.Mms.Part.CONTENT_URI, partId);
+        try (java.io.InputStream in = resolver.openInputStream(part)) {
             return in == null ? null : readCapped(in, cap);
         } catch (Throwable ignored) {
             return null;
