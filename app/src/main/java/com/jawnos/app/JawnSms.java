@@ -373,6 +373,32 @@ public class JawnSms {
         }
     }
 
+    /** Is this app the messages app? Without the SMS role, Android sends
+     *  texts through another app, and a picture message can only be handed to
+     *  that app. */
+    @JavascriptInterface
+    public String smsRole() {
+        try {
+            android.app.role.RoleManager rm =
+                (android.app.role.RoleManager) activity.getSystemService(Context.ROLE_SERVICE);
+            if (rm == null || !rm.isRoleAvailable(android.app.role.RoleManager.ROLE_SMS)) return "no";
+            return rm.isRoleHeld(android.app.role.RoleManager.ROLE_SMS) ? "yes" : "no";
+        } catch (Throwable t) { return "no"; }
+    }
+
+    /** Ask to become the messages app. The system shows its own confirmation. */
+    @JavascriptInterface
+    public void requestSms() {
+        try {
+            android.app.role.RoleManager rm =
+                (android.app.role.RoleManager) activity.getSystemService(Context.ROLE_SERVICE);
+            if (rm == null) return;
+            Intent intent = rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_SMS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(intent);
+        } catch (Throwable ignored) { }
+    }
+
     private boolean isDefaultSmsApp() {
         // Android 16 no longer reports the SMS role through the deprecated
         // Telephony.Sms.getDefaultSmsPackage() - it answered null while the role
