@@ -836,6 +836,21 @@ public class DeviceService extends Service {
         String url = args.optString("url", "");
         String app = args.optString("app", "").trim();
         String stamp = args.optString("timestamp", "").trim();
+        if (app.isEmpty() && !url.isEmpty()) {
+            // Older callers name the app only in the url. Read it there too,
+            // so a tap still opens the app itself rather than the manager desk
+            // even before the manager sends the separate fields.
+            try {
+                Uri deep = Uri.parse(url);
+                String named = deep.getQueryParameter("app");
+                if (named != null) app = named.trim();
+                if (stamp.isEmpty()) {
+                    String at = deep.getQueryParameter("timestamp");
+                    if (at != null) stamp = at.trim();
+                }
+            }
+            catch (Throwable ignored) { }
+        }
         Intent open;
         if (!app.isEmpty()) {
             open = new Intent(this, JawnAppActivity.class);
