@@ -321,6 +321,17 @@
              broadcasts this action, and the subclass is what fetches the message
              from the MMSC. The library's own class is abstract and its push does
              not send REFRESH, so the old entry could never have run. -->
+        <!-- The push half: fetch what the library's own download cannot on
+             Android 14 (it registers its receiver without the exported flag). -->
+        <receiver
+            android:name=".JawnMmsPush"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".JawnMmsReceiver"
             android:exported="true">

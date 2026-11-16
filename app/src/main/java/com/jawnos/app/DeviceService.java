@@ -1655,46 +1655,7 @@ public class DeviceService extends Service {
      *  asked for. */
     private JSONObject mmsDownload(JSONObject args) throws Exception {
         JSONObject result = new JSONObject();
-        int limit = limit(args, 10);
-        ContentResolver resolver = getContentResolver();
-        int asked = 0;
-        String selection = Telephony.Mms.MESSAGE_BOX + " = ? AND " + Telephony.Mms.MESSAGE_TYPE + " = ?";
-        String[] selectionArgs = {
-            String.valueOf(Telephony.Mms.MESSAGE_BOX_INBOX),
-            // 130 is the provider's own token for NOTIFICATION_IND (the SDK
-            // does not expose it as a constant)
-            "130"
-        };
-        String[] columns = { Telephony.Mms._ID, Telephony.Mms.CONTENT_LOCATION, Telephony.Mms.SUBSCRIPTION_ID };
-        try (Cursor cursor = resolver.query(Telephony.Mms.CONTENT_URI, columns, selection, selectionArgs,
-                Telephony.Mms.DATE + " DESC")) {
-            if (cursor != null) {
-                while (cursor.moveToNext() && asked < limit) {
-                    long id = cursor.getLong(0);
-                    String location = cursor.getString(1);
-                    if (location == null || location.isEmpty()) continue;
-                    int subId = cursor.isNull(2) ? -1 : cursor.getInt(2);
-                    Uri row = ContentUris.withAppendedId(Telephony.Mms.CONTENT_URI, id);
-                    Intent downloaded = new Intent("com.jawnos.mms.DOWNLOADED");
-                    downloaded.setPackage(getPackageName());
-                    PendingIntent done = PendingIntent.getBroadcast(this, (int) id, downloaded,
-                            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-                    try {
-                        SmsManager sms = subId >= 0
-                                ? SmsManager.getSmsManagerForSubscriptionId(subId)
-                                : SmsManager.getSmsManagerForSubscriptionId(
-                                        SubscriptionManager.getDefaultSmsSubscriptionId());
-                        sms.downloadMultimediaMessage(this, location, row, null, done);
-                        asked++;
-                    } catch (Throwable t) {
-                        android.util.Log.e("JawnMms", "download " + id + ": " + t);
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            android.util.Log.e("JawnMms", "pending scan: " + t);
-        }
-        result.put("requested", asked);
+        result.put("requested", MmsPull.pending(this));
         return result;
     }
 
