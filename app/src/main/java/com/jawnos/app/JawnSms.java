@@ -155,6 +155,12 @@ public class JawnSms {
             // exactly what a group thread exists to avoid.
             String[] groupAddresses = message.getAddresses();
             if (groupAddresses != null && groupAddresses.length > 1) settings.setGroup(true);
+            // The library's own logs are compiled out unless this is set. It is
+            // what says why an MMS cannot go out (no APN, no MMSC, a refused
+            // send), which is invisible from the outside - the send is async and
+            // its callback is a broadcast the app only hears about on success.
+            try { com.klinker.android.logger.Log.setDebug(true); } catch (Throwable ignored) { }
+            android.util.Log.i("JawnSms", "mms apn: " + mmsApnSummary());
             Transaction transaction = new Transaction(activity, settings);
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject part = arr.optJSONObject(i);
@@ -187,6 +193,34 @@ public class JawnSms {
                 + ",\"mms_thread\":" + saved[1] + ",\"jawn_uuid\":" + js(jawnUuid) + "}");
         } catch (Throwable t) {
             emit("{\"ok\":false,\"error\":" + js(String.valueOf(t.getMessage())) + ",\"id\":" + js(id) + "}");
+        }
+    }
+
+    /** What the phone will use to reach the carrier's MMSC, in one line: the
+     *  current APN and its MMS settings. An MMS that cannot go out or come in is
+     *  almost always an APN with no mmsc, and nothing else reports it. */
+    private String mmsApnSummary() {
+        try (Cursor c = activity.getContentResolver().query(
+                android.net.Uri.parse("content://telephony/carriers"),
+                new String[] { "name", "apn", "mmsc", "mmsproxy", "mmsport", "current", "type" },
+                null, null, "current DESC")) {
+            if (c == null) return "no apn cursor";
+            StringBuilder out = new StringBuilder();
+            int n = 0;
+            while (c.moveToNext() && n < 4) {
+                String type = c.getString(6) == null ? "" : c.getString(6);
+                String current = c.getString(5) == null ? "" : c.getString(5);
+                if (!type.contains("mms") && !"1".equals(current)) continue;
+                if (n > 0) out.append(" | ");
+                out.append(c.getString(0)).append(" apn=").append(c.getString(1))
+                   .append(" mmsc=").append(c.getString(2))
+                   .append(" proxy=").append(c.getString(3)).append(":").append(c.getString(4))
+                   .append(" current=").append(current).append(" type=").append(type);
+                n++;
+            }
+            return n == 0 ? "no mms apn" : out.toString();
+        } catch (Throwable t) {
+            return "apn read failed: " + t;
         }
     }
 
