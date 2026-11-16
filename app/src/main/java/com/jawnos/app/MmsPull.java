@@ -32,12 +32,18 @@ final class MmsPull {
     static int pending(Context context) {
         ContentResolver resolver = context.getContentResolver();
         int asked = 0;
-        String selection = Telephony.Mms.MESSAGE_BOX + " = ? AND " + Telephony.Mms.MESSAGE_TYPE + " = ?";
-        // 130 is the provider's own token for NOTIFICATION_IND
-        String[] selectionArgs = { String.valueOf(Telephony.Mms.MESSAGE_BOX_INBOX), "130" };
-        String[] columns = { Telephony.Mms._ID, Telephony.Mms.CONTENT_LOCATION, Telephony.Mms.SUBSCRIPTION_ID };
+        // The columns are named as the provider itself names them: the SDK's
+        // constants are not the column strings (a selection built from them
+        // matched everything, so every push re-asked for the whole history).
+        // 1 is the inbox box and 130 is NOTIFICATION_IND - an envelope, not a
+        // message. Only today's envelopes are worth asking for: an MMSC's
+        // retrieve URL stops working, and asking again cannot revive it.
+        long since = System.currentTimeMillis() - 2L * 24 * 60 * 60 * 1000;
+        String selection = "msg_box = ? AND m_type = ? AND date > ?";
+        String[] selectionArgs = { "1", "130", String.valueOf(since / 1000L) };
+        String[] columns = { "_id", "ct_l", "sub_id" };
         try (Cursor cursor = resolver.query(Telephony.Mms.CONTENT_URI, columns, selection, selectionArgs,
-                Telephony.Mms.DATE + " DESC")) {
+                "date DESC")) {
             if (cursor == null) return 0;
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(0);
