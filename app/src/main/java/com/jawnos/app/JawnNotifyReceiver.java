@@ -67,7 +67,25 @@ public class JawnNotifyReceiver extends BroadcastReceiver {
             }
         }
 
-        Intent open = new Intent(context, JawnWebViewActivity.class);
+        // A notice that names an app opens that app on its own, full screen,
+        // the way the Home row does. The older fallback carries no app, so it
+        // keeps the WebView (and its url when the sender gave one).
+        String app = intent.getStringExtra("app");
+        String timestamp = intent.getStringExtra("timestamp");
+        String url = intent.getStringExtra("url");
+        app = app == null ? "" : app.trim();
+        timestamp = timestamp == null ? "" : timestamp.trim();
+        url = url == null ? "" : url;
+        Intent open;
+        if (!app.isEmpty()) {
+            open = new Intent(context, JawnAppActivity.class);
+            open.putExtra(JawnAppActivity.EXTRA_APP, app);
+            if (!timestamp.isEmpty()) open.putExtra(JawnAppActivity.EXTRA_TIMESTAMP, timestamp);
+        }
+        else {
+            open = new Intent(context, JawnWebViewActivity.class);
+            if (!url.isEmpty()) open.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+        }
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT
             | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);

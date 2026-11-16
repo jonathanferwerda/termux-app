@@ -815,8 +815,10 @@ public class DeviceService extends Service {
      * A native notification with the app's own control: two channels (normal and
      * quiet), a small-icon name (system or app drawable), a large icon from any
      * file, actions that open the WebView at a URL, a progress bar, grouping,
-     * vibration and colour. The tap opens JawnWebViewActivity, with the caller's
-     * url when it names one.
+     * vibration and colour. When the caller names an app, the tap opens
+     * JawnAppActivity - that app on its own, full screen, the same view the
+     * Home row opens - at the notice's timestamp when one is given. A notice
+     * with no app falls back to JawnWebViewActivity and the caller's url.
      */
     private JSONObject notificationPost(JSONObject args) throws Exception {
         ensureChannels();
@@ -831,10 +833,20 @@ public class DeviceService extends Service {
 
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
             | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
-        Intent open = new Intent(this, JawnWebViewActivity.class);
-        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         String url = args.optString("url", "");
-        if (!url.isEmpty()) open.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+        String app = args.optString("app", "").trim();
+        String stamp = args.optString("timestamp", "").trim();
+        Intent open;
+        if (!app.isEmpty()) {
+            open = new Intent(this, JawnAppActivity.class);
+            open.putExtra(JawnAppActivity.EXTRA_APP, app);
+            if (!stamp.isEmpty()) open.putExtra(JawnAppActivity.EXTRA_TIMESTAMP, stamp);
+        }
+        else {
+            open = new Intent(this, JawnWebViewActivity.class);
+            if (!url.isEmpty()) open.putExtra(JawnWebViewActivity.EXTRA_URL, url);
+        }
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent contentIntent = PendingIntent.getActivity(this, id, open, piFlags);
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26

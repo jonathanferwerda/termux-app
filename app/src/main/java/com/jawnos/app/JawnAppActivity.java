@@ -65,6 +65,8 @@ public class JawnAppActivity extends Activity {
     public static final String EXTRA_APP = "app";
     /** Words the Home search hands to the manager Search app. */
     public static final String EXTRA_QUERY = "query";
+    /** The moment a notification's app window should open at. */
+    public static final String EXTRA_TIMESTAMP = "timestamp";
 
     private static final int STAGE_STARTED = 0;
     private static final int STAGE_READY = 1;
@@ -117,6 +119,7 @@ public class JawnAppActivity extends Activity {
     private TextView opening;
     private String appName = "";
     private String query = "";
+    private String appTimestamp = "";
     private String houseHost = "";
     private int stage = STAGE_STARTED;
     private boolean ticketTried;
@@ -157,6 +160,11 @@ public class JawnAppActivity extends Activity {
         query = intent == null ? "" : intent.getStringExtra(EXTRA_QUERY);
         if (query == null) query = "";
         query = query.trim();
+        // A notification carries the moment it is about; an app opened from
+        // the Home row carries none and opens at now.
+        appTimestamp = intent == null ? "" : intent.getStringExtra(EXTRA_TIMESTAMP);
+        if (appTimestamp == null) appTimestamp = "";
+        appTimestamp = appTimestamp.trim();
         String label = formatAppName(appName);
         setTitle(label);
         // The Recents card is the app, with its own name and colour, rather
@@ -459,9 +467,11 @@ public class JawnAppActivity extends Activity {
     private void injectApp() {
         stage = STAGE_READY;
         final String quotedApp = JSONObject.quote(appName);
+        final String quotedAt = JSONObject.quote(appTimestamp);
         String js =
             "(function(){"
                 + "var app=" + quotedApp + ";"
+                + "var at=" + quotedAt + ";"
                 // Every manager app has its own opener: the start menu's icon
                 // handler (music opens the player, gallery the gallery, passes
                 // the ticket maker). The start menu is not part of this page,
@@ -479,13 +489,13 @@ public class JawnAppActivity extends Activity {
                 + "  return true;};"
                 + "if(!go()){"
                 + "  $.getJSON('/manager/start_menu',{menu:'app'},function(d){"
-                + "    if(!d||!d.html){appointmentGrabber(app,Date.now());return;}"
+                + "    if(!d||!d.html){appointmentGrabber(app,at);return;}"
                 + "    var box=document.getElementById('jawnos_hidden_start_menu');"
                 + "    if(!box){box=document.createElement('div');box.id='jawnos_hidden_start_menu';"
                 + "      box.style.display='none';document.body.appendChild(box);}"
                 + "    box.innerHTML=d.html;"
-                + "    if(!go()){appointmentGrabber(app,Date.now());}"
-                + "  }).fail(function(){appointmentGrabber(app,Date.now());});"
+                + "    if(!go()){appointmentGrabber(app,at);}"
+                + "  }).fail(function(){appointmentGrabber(app,at);});"
                 + "}"
                 + "}catch(e){}"
                 + "var st=document.getElementById('jawnos_single_app_style');"
