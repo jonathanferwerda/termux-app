@@ -56,6 +56,11 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- An inbound MMS is a WAP push. The system grants this to the default sms
+         app on its own ("lost android:receive_wap_push: (fixing)"), but only when
+         it next resolves the default - and a reinstall drops the grant first, so
+         pushes that arrive in that window are dropped. Declare it instead. -->
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
     <uses-permission android:name="android.permission.RECEIVE_MMS" />
     <uses-permission android:name="android.permission.SEND_RESPOND_VIA_MESSAGE" />
     <uses-permission android:name="android.permission.READ_SMS" />
