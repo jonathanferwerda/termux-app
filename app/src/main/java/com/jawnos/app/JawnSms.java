@@ -188,11 +188,58 @@ public class JawnSms {
             // persistent sent row first - that row is the system thread's own
             // copy, and its id is what the house row wears too.
             long[] saved = copyOutboxToSent(digits);
+            // ...and finish the hand-off ourselves. klinker 5.2.6 builds its
+            // send PendingIntent without a mutability flag, which Android 12+
+            // refuses for an app targeting 31+ (this one targets 36): its system
+            // send throws before the message leaves and swallows the exception,
+            // so every mms was written and copied here and never transmitted.
+            finishMmsSend();
             emit("{\"ok\":true,\"via\":\"mms\",\"id\":" + js(id)
                 + ",\"mms_id\":" + saved[0] + ",\"mms_date\":" + saved[2]
                 + ",\"mms_thread\":" + saved[1] + ",\"jawn_uuid\":" + js(jawnUuid) + "}");
         } catch (Throwable t) {
             emit("{\"ok\":false,\"error\":" + js(String.valueOf(t.getMessage())) + ",\"id\":" + js(id) + "}");
+        }
+    }
+
+    /**
+     * Send the PDU the library left in the outbox, with a PendingIntent that is
+     * allowed on this API level. The system's own MMS service does the transport
+     * - the app cannot read the APN on this device, and the carrier's MMS APN is
+     * the service's business anyway. Nothing happens when the outbox is empty,
+     * which is what a successful library send leaves behind.
+     */
+    private void finishMmsSend() {
+        ContentResolver cr = activity.getContentResolver();
+        Uri outbox = Uri.parse("content://mms/outbox");
+        long rowId = -1;
+        int subId = -1;
+        try (Cursor c = cr.query(outbox, new String[] { "_id", "sub_id" }, null, null, "_id DESC")) {
+            if (c != null && c.moveToNext()) {
+                rowId = c.getLong(0);
+                if (!c.isNull(1)) subId = c.getInt(1);
+            }
+        } catch (Throwable t) {
+            android.util.Log.e("JawnSms", "mms outbox: " + t);
+        }
+        if (rowId < 0) return;
+        Uri pdu = ContentUris.withAppendedId(outbox, rowId);
+        Intent sent = new Intent("com.jawnos.mms.SENT");
+        sent.setPackage(activity.getPackageName());
+        PendingIntent sentIntent = PendingIntent.getBroadcast(activity, (int) rowId, sent,
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        try {
+            SmsManager sms;
+            if (subId >= 0) {
+                sms = SmsManager.getSmsManagerForSubscriptionId(subId);
+            } else {
+                sms = SmsManager.getSmsManagerForSubscriptionId(
+                        android.telephony.SubscriptionManager.getDefaultSmsSubscriptionId());
+            }
+            sms.sendMultimediaMessage(activity, pdu, null, null, sentIntent);
+            android.util.Log.i("JawnSms", "mms handed to the system service: " + pdu);
+        } catch (Throwable t) {
+            android.util.Log.e("JawnSms", "mms system send: " + t);
         }
     }
 
