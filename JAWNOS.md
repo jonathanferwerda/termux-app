@@ -228,11 +228,11 @@
 
 ## Deltas round X+8 (the alarm stays until it is answered)
 
-- **A ring has no timeout, on either side.** `clock_alarm_ring_length` is 0 in
-  jawn now, so the alarm worker keeps the ring and its card until Dismiss or
-  Snooze. `JawnClockReceiver.playSound` also forces `guard = 0` for an alarm
-  ring, so a phone talking to an older jawn does not lose its face after five
-  minutes. `JawnClockSound` records `ringing` for the face's use.
+- **A ring is answered, or stops after five minutes.** `clock_alarm_ring_length`
+  is 300000 in jawn, so the alarm worker keeps the ring and its card that long
+  and then clears both; the phone honours the guard it is sent. Dismiss or
+  Snooze still ends it at once, and `JawnClockSound` records `ringing` for the
+  face and closes that face when the local guard runs out.
 - **Home cannot hide the ringing face.** `JawnClockAlarmActivity.reassertFace`
   asks for the screen back from `onUserLeaveHint` and `onStop` while the sound
   is still ringing and the display is interactive. The re-show carries the full

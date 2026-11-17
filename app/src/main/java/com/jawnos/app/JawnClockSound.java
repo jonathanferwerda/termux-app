@@ -32,9 +32,10 @@ import java.nio.charset.StandardCharsets;
  * gain then ramps from a quiet start to that level. The phone is left where
  * the person left it instead of being forced to maximum.
  *
- * An alarm's chime or long recording loops until Dismiss or Snooze; a timer's
- * chime plays once. An alarm has no guard: it sounds until it is answered, and
- * stops if the house's own ring record says it is over (the watcher below).
+ * An alarm's chime or long recording loops until Dismiss or Snooze, or its
+ * five-minute guard; a timer's chime plays once. The watcher below also stops
+ * an alarm when the house's own ring record says it is over, so a missed
+ * dismiss broadcast cannot leave the phone ringing.
  */
 public final class JawnClockSound {
     private static final String LOG_TAG = "JawnClockSound";
@@ -158,6 +159,8 @@ public final class JawnClockSound {
                 guard = new Runnable() {
                     @Override public void run() {
                         Log.i(LOG_TAG, "ring guard reached; stopping");
+                        // An unanswered alarm's face comes down with its sound.
+                        if (loop) JawnClockAlarmActivity.closeIfShowing();
                         stop();
                     }
                 };

@@ -215,9 +215,8 @@ public class JawnClockReceiver extends BroadcastReceiver {
                 if (at <= 0L) at = data.optLong("at", 0L);
             }
         }
-        // A ring is answered, not timed out: an older jawn's guard must not
-        // take the sound and the face down while the alarm still rings.
-        if (alarmRing) guard = 0;
+        // The house's five-minute guard is the backstop for an unanswered
+        // ring; Dismiss or Snooze still ends it at once.
         if (file == null || file.isEmpty()) {
             Log.w(LOG_TAG, "ring without a sound file");
             return;
