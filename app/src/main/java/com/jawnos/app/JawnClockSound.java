@@ -9,7 +9,13 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 
+import com.jawnos.shared.jawnos.JawnConstants;
+
+import org.json.JSONObject;
+
 import java.io.File;
+import java.io.FileInputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * The sound of a Clock alarm or timer, played by the app on Android's alarm
@@ -26,8 +32,9 @@ import java.io.File;
  * gain then ramps from a quiet start to that level. The phone is left where
  * the person left it instead of being forced to maximum.
  *
- * An alarm's chime or long recording loops until Dismiss; a timer's chime plays
- * once. A guard stops a ring that nobody answered.
+ * An alarm's chime or long recording loops until Dismiss or Snooze; a timer's
+ * chime plays once. An alarm has no guard: it sounds until it is answered, and
+ * stops if the house's own ring record says it is over (the watcher below).
  */
 public final class JawnClockSound {
     private static final String LOG_TAG = "JawnClockSound";
@@ -42,6 +49,11 @@ public final class JawnClockSound {
     /** The alarm stream's volume before the ring, so stop() can put it back. */
     private static AudioManager alarmAudio;
     private static int savedAlarmVolume = -1;
+    /** True from the moment an alarm's sound starts until it stops. */
+    private static boolean ringing;
+    /** The house's ring record is polled while an alarm sounds. */
+    private static Runnable watch;
+    private static final long WATCH_MS = 2000L;
 
     private JawnClockSound() {}
 
@@ -51,6 +63,16 @@ public final class JawnClockSound {
      */
     public static synchronized void play(Context context, String relativePath, int volumePercent,
                                          int rampSeconds, boolean loop, int guardMs) {
+        play(context, relativePath, volumePercent, rampSeconds, loop, guardMs, null);
+    }
+
+    /**
+     * @param uuid the alarm's id, so the sound can stop when the house says
+     *             the ring is over even if the dismiss broadcast was missed;
+     *             null for a timer or a preview.
+     */
+    public static synchronized void play(Context context, String relativePath, int volumePercent,
+                                         int rampSeconds, boolean loop, int guardMs, String uuid) {
         JawnSilence.attach(context);
         if (JawnSilence.active(context)) {
             // Silence is king: an alarm or timer may still draw its card, but
@@ -96,6 +118,8 @@ public final class JawnClockSound {
             player = mp;
             currentPath = relativePath;
             startedAt = System.currentTimeMillis();
+            ringing = loop;
+            if (loop && uuid != null && !uuid.isEmpty()) startWatch(uuid);
 
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
@@ -149,9 +173,12 @@ public final class JawnClockSound {
         if (handler != null) {
             if (ramp != null) handler.removeCallbacks(ramp);
             if (guard != null) handler.removeCallbacks(guard);
+            if (watch != null) handler.removeCallbacks(watch);
         }
         ramp = null;
         guard = null;
+        watch = null;
+        ringing = false;
         handler = null;
         currentPath = null;
         if (player != null) {
@@ -162,6 +189,57 @@ public final class JawnClockSound {
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         wakeLock = null;
         restoreAlarmVolume();
+    }
+
+    /** True while an alarm (not a timer or a preview) is sounding. */
+    public static synchronized boolean isRinging() {
+        return ringing && player != null;
+    }
+
+    /**
+     * Follow the house's own ring record while the alarm sounds. The dismiss
+     * broadcast is the fast path; this is the promise that a missed or frozen
+     * broadcast cannot leave the phone ringing. The record is written on the
+     * same device by the alarm worker, so it needs no network.
+     */
+    private static void startWatch(final String uuid) {
+        final File file = new File(new File(JawnConstants.TERMUX_HOME_DIR_PATH, ".president"),
+                "clock_rings.json");
+        watch = new Runnable() {
+            @Override public void run() {
+                if (handler == null || !ringing) return;
+                if (watchStopped(file, uuid)) {
+                    Log.i(LOG_TAG, "house says the ring is over; stopping");
+                    JawnClockAlarmActivity.closeIfShowing();
+                    stop();
+                    return;
+                }
+                handler.postDelayed(this, WATCH_MS);
+            }
+        };
+        handler.postDelayed(watch, WATCH_MS);
+    }
+
+    /**
+     * Has the house marked this ring stopped? Absent or unreadable state is
+     * not a stop: the record must name the alarm and carry a stop that is at
+     * or after its own start.
+     */
+    private static boolean watchStopped(File file, String uuid) {
+        if (file == null || !file.exists()) return false;
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] bytes = new byte[(int) Math.min(file.length(), 1 << 20)];
+            int read = in.read(bytes);
+            if (read <= 0) return false;
+            JSONObject rings = new JSONObject(new String(bytes, 0, read, StandardCharsets.UTF_8));
+            JSONObject ring = rings.optJSONObject(uuid);
+            if (ring == null) return false;
+            long started = ring.optLong("started", 0L);
+            long stopped = ring.optLong("stopped", 0L);
+            return !ring.optBoolean("ringing", true) && started > 0L && stopped >= started;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

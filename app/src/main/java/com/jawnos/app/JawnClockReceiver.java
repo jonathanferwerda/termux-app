@@ -64,7 +64,14 @@ public class JawnClockReceiver extends BroadcastReceiver {
             JawnClockNotifier.cancel(context);
             JawnClockNotifier.cancelUpcoming(context);
             JawnClockNotifier.releaseWakeLock();
-            JawnClockAlarm.sync(context);
+            // The house has already written the next alarm before it sends
+            // this. Re-reading the moment that just ended would arm the ring
+            // again; only a genuinely future schedule is re-armed here, and
+            // otherwise ACTION_SYNC brings the next one.
+            JSONObject next = JawnClockAlarm.read(context);
+            long nextAt = next == null ? 0L : next.optLong("at", 0L);
+            if (nextAt > System.currentTimeMillis() + 60_000L) JawnClockAlarm.sync(context);
+            else JawnClockAlarm.cancel(context);
             JawnClockAlarmActivity.closeIfShowing();
             return;
         }
@@ -187,6 +194,7 @@ public class JawnClockReceiver extends BroadcastReceiver {
     /** Sound an alarm or a timer on the alarm stream, at the alarm's own level. */
     private void playSound(Context context, Intent intent, boolean delayToAt, boolean alarmRing) {
         String file = intent.getStringExtra("file");
+        String uuid = intent.getStringExtra("uuid");
         int volume = intent.getIntExtra("volume", 70);
         int ramp = intent.getIntExtra("ramp", 0);
         int guard = intent.getIntExtra("guard", 300_000);
@@ -203,9 +211,13 @@ public class JawnClockReceiver extends BroadcastReceiver {
                 ramp = data.optInt("ramp", ramp);
                 guard = data.optInt("guard", guard);
                 loop = data.optInt("loop", loop ? 1 : 0) == 1;
+                if (uuid == null || uuid.isEmpty()) uuid = data.optString("uuid", "");
                 if (at <= 0L) at = data.optLong("at", 0L);
             }
         }
+        // A ring is answered, not timed out: an older jawn's guard must not
+        // take the sound and the face down while the alarm still rings.
+        if (alarmRing) guard = 0;
         if (file == null || file.isEmpty()) {
             Log.w(LOG_TAG, "ring without a sound file");
             return;
@@ -214,16 +226,17 @@ public class JawnClockReceiver extends BroadcastReceiver {
         final String path = file;
         final int v = volume, r = ramp, g = guard;
         final boolean l = loop;
+        final String watch = (alarmRing && uuid != null && !uuid.isEmpty()) ? uuid : null;
         long wait = (delayToAt && at > System.currentTimeMillis()) ? at - System.currentTimeMillis() : 0L;
         if (wait > 100L) {
             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                 @Override public void run() {
-                    JawnClockSound.play(app, path, v, r, l, g);
+                    JawnClockSound.play(app, path, v, r, l, g, watch);
                 }
             }, wait);
         }
         else {
-            JawnClockSound.play(app, path, v, r, l, g);
+            JawnClockSound.play(app, path, v, r, l, g, watch);
         }
     }
 

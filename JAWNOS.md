@@ -225,3 +225,28 @@
   installed versionCode with `audited_version_code`; if the overlay or
   notifications were lost in an update it opens the grant screen once for that
   version. Build 1314.
+
+## Deltas round X+8 (the alarm stays until it is answered)
+
+- **A ring has no timeout, on either side.** `clock_alarm_ring_length` is 0 in
+  jawn now, so the alarm worker keeps the ring and its card until Dismiss or
+  Snooze. `JawnClockReceiver.playSound` also forces `guard = 0` for an alarm
+  ring, so a phone talking to an older jawn does not lose its face after five
+  minutes. `JawnClockSound` records `ringing` for the face's use.
+- **Home cannot hide the ringing face.** `JawnClockAlarmActivity.reassertFace`
+  asks for the screen back from `onUserLeaveHint` and `onStop` while the sound
+  is still ringing and the display is interactive. The re-show carries the full
+  ring payload and a `resume=1` extra, so `onNewIntent` keeps the math problem
+  and an answer already given; a rebuilt face still knows its alarm.
+- **Volume down is a snooze.** The activity consumes `KEYCODE_VOLUME_DOWN` and
+  calls the same `snooze()` the tap does, including the math/NFC gate, so the
+  key cannot walk around a gate.
+- **The sound stops when the house says so, even if the broadcast was lost.**
+  While an alarm plays, `JawnClockSound` polls `~/.president/clock_rings.json`
+  every two seconds and stops when this alarm is marked stopped (the record
+  must carry `stopped >= started`; an absent record is not a stop). This is the
+  safety net for a frozen or missed `JAWN_CLOCK_DISMISSED`.
+- **A dismiss cannot re-arm the moment that just ended.** `ACTION_DISMISSED`
+  reads `clock_alarm.json` and only re-arms a schedule more than a minute in
+  the future; otherwise it cancels the pending wake and lets `ACTION_SYNC`
+  bring the real next alarm.

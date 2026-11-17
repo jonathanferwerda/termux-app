@@ -1,6 +1,7 @@
 package com.jawnos.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.RectF;
 import android.nfc.NfcAdapter;
@@ -9,11 +10,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -43,8 +46,9 @@ import com.jawnos.R;
  * It wakes and shows over the lock screen, so the person never has to unlock
  * the phone to silence it. The gesture is the whole interface: the logo's
  * filled circle sits under the thumb, an empty ring waits at the top. A tap
- * snoozes; dragging the logo into the ring dismisses. Releasing anywhere else
- * animates the logo home.
+ * snoozes, and so does the volume-down key; dragging the logo into the ring
+ * dismisses. Releasing anywhere else animates the logo home. Home cannot keep
+ * the face away: it asks for itself back while the alarm is still sounding.
  *
  * An alarm can also ask for a little work before it lets go. With
  * {@code play=math} a sum is shown and must be answered; with {@code nfc=1}
@@ -85,6 +89,7 @@ public class JawnClockAlarmActivity extends Activity implements NfcAdapter.Reade
     private float downRawY;
     private boolean touching;
     private volatile boolean closing;
+    private long lastReassert;
 
     private String uuid = "";
     private String label = "";
@@ -594,10 +599,64 @@ public class JawnClockAlarmActivity extends Activity implements NfcAdapter.Reade
         super.onPause();
     }
 
+    /**
+     * The face is a promise, so Home cannot keep it away. Android gives no
+     * way to refuse Home; it does let this screen ask for itself back while
+     * the alarm is still sounding. A screen that is off is left alone, and a
+     * face that is closing (answered) never returns.
+     */
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        reassertFace();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (!isChangingConfigurations()) reassertFace();
+    }
+
+    private void reassertFace() {
+        if (closing || isFinishing() || isDestroyed()) return;
+        if (!JawnClockSound.isRinging()) return;
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null && !pm.isInteractive()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastReassert < 1000L) return;
+        lastReassert = now;
+        ui.postDelayed(() -> {
+            if (closing || isFinishing() || isDestroyed() || !JawnClockSound.isRinging()) return;
+            Intent again = new Intent(this, JawnClockAlarmActivity.class);
+            again.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            // Full payload, so a face the system rebuilt can still answer the alarm.
+            again.putExtra("resume", 1);
+            again.putExtra("uuid", uuid);
+            again.putExtra("label", label);
+            again.putExtra("app", app);
+            again.putExtra("at", at);
+            again.putExtra("snooze", snoozeMinutes);
+            again.putExtra("play", play);
+            again.putExtra("nfc", nfc);
+            again.putExtra("nfc_action", nfcAction);
+            try {
+                startActivity(again);
+            } catch (Exception e) {
+                Log.w(LOG_TAG, "could not bring the alarm face back", e);
+            }
+        }, 350L);
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        // A face put back in front after Home keeps the problem and the
+        // answer it was already showing: it is the same ring, not a new one.
+        if (intent != null && intent.getIntExtra("resume", 0) == 1) {
+            if (nfcRequired) ui.postDelayed(this::enableNfcReader, NFC_RESUME_DELAY_MS);
+            return;
+        }
         // singleTask: a second alarm reuses this screen, so put it back in its
         // starting state before showing the new alarm.
         closing = false;
@@ -630,6 +689,29 @@ public class JawnClockAlarmActivity extends Activity implements NfcAdapter.Reade
             return;
         }
         snooze();
+    }
+
+    /**
+     * Volume down is the snooze in the dark: a hand finds the key without the
+     * screen. A puzzle or a tag still stands in the way, exactly as it does
+     * for the gesture, so the key cannot walk around a gate.
+     */
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (!closing) {
+                if (blocked()) promptRequirement();
+                else snooze();
+            }
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) return true;
+        return super.onKeyUp(keyCode, event);
     }
 
     private void showStatus(int res) {
