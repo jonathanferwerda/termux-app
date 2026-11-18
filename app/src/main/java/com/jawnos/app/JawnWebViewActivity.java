@@ -54,6 +54,7 @@ public class JawnWebViewActivity extends Activity {
     private JawnCamera camera;
     private JawnContactsBridge contacts;
     private JawnSpeech speech;
+    private JawnAudioOboe audio;
     public static final String EXTRA_URL = "com.jawnos.app.EXTRA_URL";
     public static final String EXTRA_SHOW_WHEN_LOCKED = "com.jawnos.app.EXTRA_SHOW_WHEN_LOCKED";
     private String houseHost = "";
@@ -146,6 +147,11 @@ public class JawnWebViewActivity extends Activity {
         // the manager's only source of place: a GPS-provider foreground service
         web.addJavascriptInterface(new JawnLocationBridge(this), "JawnLocation");
         web.addJavascriptInterface(new JawnBrowseBridge(this), "JawnBrowse");
+        // Studio's native audio path: a WebView's getUserMedia cannot ask for
+        // an exclusive stream or read back the granted buffer, so the page
+        // reads those facts from this bridge instead.
+        audio = new JawnAudioOboe(this, this::ensureAudioPermission);
+        web.addJavascriptInterface(audio, "JawnAudioOboe");
         // the Network app: Wi-Fi/SSID/signal, interfaces, VPN and the connect
         // path. Only the local manager page may use it (see onPageStarted).
         network = new JawnNetwork(this);
@@ -583,6 +589,7 @@ public class JawnWebViewActivity extends Activity {
     protected void onDestroy() {
         loadGeneration++;
         if (speech != null) { speech.destroy(); speech = null; }
+        if (audio != null) { audio.stop(); audio = null; }
         JawnPhoneState.poster = null;
         super.onDestroy();
     }
@@ -674,10 +681,26 @@ public class JawnWebViewActivity extends Activity {
         JawnLocationService.start(this, 0, -1);
     }
 
+    /** The Studio page asked for the native stream: ask for the microphone
+     *  once, then let the waiting start run. */
+    public void ensureAudioPermission() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            // The bridge is called on the WebView's JS thread; the prompt must
+            // be raised on the UI thread.
+            runOnUiThread(() -> requestPermissions(
+                    new String[] { Manifest.permission.RECORD_AUDIO },
+                    JawnAudioOboe.REQ_PERMS));
+            return;
+        }
+        if (audio != null) audio.onPermissionResult();
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (speech != null && speech.onPermissionResult(requestCode, permissions, results)) return;
+        if (requestCode == JawnAudioOboe.REQ_PERMS) { if (audio != null) audio.onPermissionResult(); return; }
         if (requestCode == JawnContactsBridge.REQ_PERMS) { if (contacts != null) contacts.onPermissionResult(); return; }
         if (requestCode == REQ_LOC) {
             boolean locationOk = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
@@ -717,6 +740,9 @@ public class JawnWebViewActivity extends Activity {
             // A navigation ends whatever the old page was playing. The new page
             // says playing(true) again when a track actually starts.
             mediaPlaying = false;
+            // The page that opened the native monitor is gone with it; a new
+            // document must ask again rather than inherit a live microphone.
+            if (audio != null) audio.stop();
             updateNetworkAccess(view, url);
             super.onPageStarted(view, url, favicon);
         }

@@ -94,6 +94,12 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
+    <!-- A class-compliant interface (the UM2) is a Studio input. It is reached
+         through Android's own audio HAL, not a private USB stack, so host mode
+         is optional: a phone without OTG installs and simply has no USB input
+         to select. No USB permission is requested because the app never claims
+         the device itself. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <queries>
         <intent>

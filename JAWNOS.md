@@ -265,3 +265,34 @@
   notification channel's vibration, and a routed-away audio stream can hide
   the sound, so the haptic is the alarm's own backstop. It is cancelled with
   the sound: Dismiss, Snooze, the guard, or the house's ring record.
+
+## Deltas round X+10 (the phone's own low-latency audio path)
+
+- **Studio can open the phone's native stream, and the page is told what it
+  was granted.** `window.JawnAudioOboe` (`JawnAudioOboe.java`, registered in
+  `JawnWebViewActivity`) is a thin JNI bridge to
+  `app/src/main/cpp/JawnAudioOboe.cpp`. The native half opens an Oboe duplex
+  at 48 kHz with `PerformanceMode::LowLatency`, an `Unprocessed` input preset
+  and `Exclusive` sharing falling back to `Shared` per stream, then reports
+  `getSharingMode()`, `getPerformanceMode()`, the sample rate, frames per
+  burst, buffer size in frames, xrun count, the granted input/output channel
+  counts and a running frame count as JSON. Oboe no longer exposes
+  `Direction::FullDuplex`, so the duplex is its own recipe, followed here: an
+  input stream read from the output stream's data callback, the input drained
+  once at start, and a fixed input buffer allocated before the stream runs -
+  no allocation or lock in the callback. The monitoring path applies the
+  page's gain and nothing else; there is no audio policy in Java.
+- **The microphone grant is the only permission step.** `start` asks for
+  `RECORD_AUDIO` once through the activity when it is missing and answers
+  `waiting:true`; the request resumes when the prompt is answered, and the
+  page reads the outcome from `stats()`. A navigation or `onDestroy` stops the
+  stream, so no page inherits a live microphone. `usb.host` is declared
+  optional, because a class-compliant interface arrives through Android's
+  audio HAL; the app never claims the device itself, so there is no USB
+  permission prompt.
+- **Oboe 1.11.0 arrives through prefab.** `com.google.oboe:oboe` in
+  `app/build.gradle`, `prefab true`, `externalNativeBuild` at
+  `src/main/cpp/CMakeLists.txt` with CMake 3.22.1, and the existing
+  arm64-v8a-only `abiFilters` unchanged. The slice is monitoring and reporting
+  only: no take is written to disk yet, and audio focus is not requested.
+  Build 1333.

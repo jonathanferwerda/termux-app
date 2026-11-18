@@ -25,6 +25,9 @@ android {
     // WebView inspector off in a shipped build.
     buildFeatures {
         buildConfig true
+        // Oboe ships its headers and .so files as a prefab package, so the
+        // native build finds them without copying anything into the tree.
+        prefab true
     }
     compileSdk project.properties.compileSdkVersion.toInteger()
     ndkVersion = System.getenv("JITPACK_NDK_VERSION") ?: project.properties.ndkVersion
@@ -47,6 +50,9 @@ android {
         implementation "com.klinkerapps:android-smsmms:5.2.6"
         implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
         implementation(name: 'libtailscale', ext: 'aar')
+        // Oboe is the low-latency audio C++ library; the prefab package above
+        // hands its headers and arm64-v8a library to app/src/main/cpp.
+        implementation "com.google.oboe:oboe:1.11.0"
 
         implementation project(":jawnos-shared")
     }
@@ -55,8 +61,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1332
-        versionName "0.118.334"
+        versionCode 1333
+        versionName "0.118.335"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -74,6 +80,14 @@ android {
             abiFilters "arm64-v8a"
         }
 
+        // The Studio page's native audio path (app/src/main/cpp). The same
+        // arm64-v8a-only rule as the APK applies: CMake receives only that ABI.
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-26"
+            }
+        }
+
         splits {
             abi {
                 enable ((gradle.startParameter.taskNames.any { it.contains("Debug") } && splitAPKsForDebugBuilds == "1") ||
@@ -82,6 +96,16 @@ android {
                 include 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
                 universalApk true
             }
+        }
+    }
+
+    // The native audio slice's own CMake project.
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            // The SDK-installed CMake (3.22.1) that AGP expects; CMake 4.x is
+            // not accepted by this AGP and is not what the NDK documents.
+            version '3.22.1'
         }
     }
 
