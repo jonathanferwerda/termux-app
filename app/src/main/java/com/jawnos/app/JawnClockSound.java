@@ -4,9 +4,14 @@ import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.VibrationAttributes;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.util.Log;
 
 import com.jawnos.shared.jawnos.JawnConstants;
@@ -35,7 +40,9 @@ import java.nio.charset.StandardCharsets;
  * An alarm's chime or long recording loops until Dismiss or Snooze, or its
  * five-minute guard; a timer's chime plays once. The watcher below also stops
  * an alarm when the house's own ring record says it is over, so a missed
- * dismiss broadcast cannot leave the phone ringing.
+ * dismiss broadcast cannot leave the phone ringing. An alarm also buzzes on
+ * the alarm stream's usage, because a silent ringer and a routed-away audio
+ * stream can each hide the sound.
  */
 public final class JawnClockSound {
     private static final String LOG_TAG = "JawnClockSound";
@@ -54,6 +61,8 @@ public final class JawnClockSound {
     private static boolean ringing;
     /** The house's ring record is polled while an alarm sounds. */
     private static Runnable watch;
+    /** The buzzer, while an alarm rings. */
+    private static Vibrator vibrator;
     private static final long WATCH_MS = 2000L;
 
     private JawnClockSound() {}
@@ -120,7 +129,15 @@ public final class JawnClockSound {
             currentPath = relativePath;
             startedAt = System.currentTimeMillis();
             ringing = loop;
+            // The watcher, the ramp and the guard all post through this
+            // handler, so it has to exist before any of them starts.
+            handler = new Handler(Looper.getMainLooper());
             if (loop && uuid != null && !uuid.isEmpty()) startWatch(uuid);
+            // An alarm also buzzes. A silent ringer suppresses the channel's
+            // vibration and the alarm stream can be routed away from the
+            // phone, so the haptic is what makes a ring felt when it cannot
+            // be heard.
+            if (loop) startVibration(context);
 
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
@@ -133,7 +150,6 @@ public final class JawnClockSound {
                 }
             }
 
-            handler = new Handler(Looper.getMainLooper());
             if (rampSeconds > 0) {
                 final long total = rampSeconds * 1000L;
                 final long began = System.currentTimeMillis();
@@ -182,6 +198,7 @@ public final class JawnClockSound {
         guard = null;
         watch = null;
         ringing = false;
+        stopVibration();
         handler = null;
         currentPath = null;
         if (player != null) {
@@ -220,6 +237,7 @@ public final class JawnClockSound {
                 handler.postDelayed(this, WATCH_MS);
             }
         };
+        if (handler == null) handler = new Handler(Looper.getMainLooper());
         handler.postDelayed(watch, WATCH_MS);
     }
 
@@ -243,6 +261,49 @@ public final class JawnClockSound {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Buzz the alarm while it rings. USAGE_ALARM keeps it going through a
+     * silent ringer and Do Not Disturb, where the notification's own vibration
+     * is suppressed; the pattern repeats until {@link #stop()} cancels it.
+     */
+    private static void startVibration(Context context) {
+        stopVibration();
+        try {
+            Vibrator v;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                VibratorManager manager = (VibratorManager)
+                        context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                v = manager == null ? null : manager.getDefaultVibrator();
+            }
+            else {
+                v = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            }
+            if (v == null || !v.hasVibrator()) return;
+            // Two pulses and a pause, over and over: unmistakable beside a
+            // chime, and it keeps going for as long as the sound loops.
+            long[] pattern = { 0L, 700L, 500L, 700L, 1200L };
+            VibrationEffect effect = VibrationEffect.createWaveform(pattern, 0);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                v.vibrate(effect, new VibrationAttributes.Builder()
+                        .setUsage(VibrationAttributes.USAGE_ALARM)
+                        .build());
+            }
+            else {
+                v.vibrate(effect);
+            }
+            vibrator = v;
+        }
+        catch (Throwable t) {
+            Log.w(LOG_TAG, "could not vibrate", t);
+        }
+    }
+
+    private static void stopVibration() {
+        if (vibrator == null) return;
+        try { vibrator.cancel(); } catch (Throwable ignored) {}
+        vibrator = null;
     }
 
     /**

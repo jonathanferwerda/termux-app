@@ -250,3 +250,18 @@
   reads `clock_alarm.json` and only re-arms a schedule more than a minute in
   the future; otherwise it cancels the pending wake and lets `ACTION_SYNC`
   bring the real next alarm.
+
+## Deltas round X+9 (the ring keeps its sound, and an alarm buzzes)
+
+- **The ring no longer silences itself.** `JawnClockSound.play` started the
+  ring-record watcher before it created the main-thread `Handler` the watcher
+  posts through, so every real ring (loop + uuid) threw a
+  `NullPointerException`, was caught as a failed play, and called `stop()`:
+  the face showed and the alarm was mute. The handler now exists before the
+  watcher, the ramp or the guard starts, and `startWatch` makes one if it is
+  ever called without it.
+- **An alarm buzzes while it rings.** `startVibration` runs a repeating
+  `USAGE_ALARM` waveform until `stop()`. A silent ringer suppresses the
+  notification channel's vibration, and a routed-away audio stream can hide
+  the sound, so the haptic is the alarm's own backstop. It is cancelled with
+  the sound: Dismiss, Snooze, the guard, or the house's ring record.
