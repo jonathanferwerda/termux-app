@@ -192,6 +192,9 @@ public:
                             0.0f);
         input_ = std::move(input.stream);
         output_ = std::move(output.stream);
+        systemVolumeApplies_.store(
+                output_->getSharingMode() == oboe::SharingMode::Exclusive,
+                std::memory_order_relaxed);
 
         oboe::Result started = input_->requestStart();
         if (started != oboe::Result::OK) {
@@ -232,6 +235,14 @@ public:
         gain_.store(gain, std::memory_order_relaxed);
     }
 
+    // The phone's media level, 0..1. Applied only when the output is exclusive:
+    // a shared stream is mixed by AudioFlinger, which already applies it.
+    void setSystemVolume(float volume) {
+        if (!(volume >= 0.0f)) volume = 0.0f;
+        if (volume > 1.0f) volume = 1.0f;
+        systemVolume_.store(volume, std::memory_order_relaxed);
+    }
+
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream * /*output*/,
                                           void *audioData,
                                           int32_t numFrames) override {
@@ -240,6 +251,10 @@ public:
 
         const int32_t outChannels = outChannels_.load(std::memory_order_relaxed);
         const float gain = gain_.load(std::memory_order_relaxed);
+        const bool applySystem = systemVolumeApplies_.load(std::memory_order_relaxed);
+        const float level =
+                applySystem ? systemVolume_.load(std::memory_order_relaxed) : 1.0f;
+        const float mix = gain * level;
         oboe::AudioStream *input = input_.get();
 
         if (priming_.load(std::memory_order_relaxed)) {
@@ -272,7 +287,7 @@ public:
 
         for (int32_t i = 0; i < numFrames; ++i) {
             const float sample =
-                    (i < got) ? inputBuffer_[static_cast<size_t>(i) * inChannels] * gain : 0.0f;
+                    (i < got) ? inputBuffer_[static_cast<size_t>(i) * inChannels] * mix : 0.0f;
             for (int32_t c = 0; c < outChannels; ++c) {
                 out[static_cast<size_t>(i) * outChannels + c] = sample;
             }
@@ -383,7 +398,10 @@ private:
             << ",\"running\":" << (running ? "true" : "false")
             << ",\"microphone\":" << (microphoneGranted ? "true" : "false")
             << ",\"frames\":" << frames_.load(std::memory_order_relaxed)
-            << ",\"gain\":" << gain_.load(std::memory_order_relaxed);
+            << ",\"gain\":" << gain_.load(std::memory_order_relaxed)
+            << ",\"systemVolume\":" << systemVolume_.load(std::memory_order_relaxed)
+            << ",\"systemVolumeApplied\":"
+            << (systemVolumeApplies_.load(std::memory_order_relaxed) ? "true" : "false");
 
         if (input != nullptr) {
             out << ",\"sampleRate\":" << input->getSampleRate()
@@ -449,6 +467,8 @@ private:
     std::shared_ptr<oboe::AudioStream> output_;
     std::vector<float> inputBuffer_;
     std::atomic<float> gain_{1.0f};
+    std::atomic<float> systemVolume_{1.0f};
+    std::atomic<bool> systemVolumeApplies_{false};
     std::atomic<int64_t> frames_{0};
     std::atomic<int32_t> inChannels_{1};
     std::atomic<int32_t> outChannels_{1};
@@ -502,4 +522,10 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_jawnos_app_JawnAudioOboe_nativeSetGain(JNIEnv *, jclass, jfloat gain) {
     std::lock_guard<std::mutex> guard(gLock);
     if (gMonitor) gMonitor->setGain(gain);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_jawnos_app_JawnAudioOboe_nativeSetSystemVolume(JNIEnv *, jclass, jfloat volume) {
+    std::lock_guard<std::mutex> guard(gLock);
+    if (gMonitor) gMonitor->setSystemVolume(volume);
 }

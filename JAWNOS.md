@@ -296,3 +296,9 @@
   arm64-v8a-only `abiFilters` unchanged. The slice is monitoring and reporting
   only: no take is written to disk yet, and audio focus is not requested.
   Build 1333.
+- **The monitor follows the media stream.** `window.JawnAudioOboe.volume('70')`
+  reads or sets `STREAM_MUSIC`, and a 250 ms watch copies that level into the
+  native stream. An exclusive (MMAP) output bypasses the system mixer, so the
+  callback multiplies by the level itself; a shared stream already gets it from
+  the mixer, and `stats()` says which path with `systemVolume` and
+  `systemVolumeApplied`. The page's monitoring gain stays separate. Build 1335.
