@@ -321,4 +321,9 @@
   left without children, and `notification.remove` prunes too. The per-app
   channels are new ids, so a person's existing `jawn_notifications` sound and
   importance apply to app-less notices only: the app channels start at their
-  defaults and are theirs to tune. Build 1344.
+  defaults and are theirs to tune.
+- **Home tiles wear the count.** `JawnHomeActivity` reads the live notices per
+  app from the house's own `notifications` table (read-only, the same rows the
+  taskbar clears) and badges the JawnOS row. An app with notices that the start
+  menu does not list gets its own tile, so an appointment app's start/stop
+  stands with its own count. Build 1345.

@@ -82,10 +82,12 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -190,6 +192,8 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     private boolean statusInFlight;
     private static final long STATUS_REFRESH_MS = 10000L;
     private List<JawnAppEntry> lastStartApps;
+    /** Lower-cased app title -> live notices, for both home surfaces. */
+    private Map<String,Integer> notifyCountsByLabel = new HashMap<>();
     private List<RunningEntry> lastRunning;
     // The clothesline is polled every ten seconds but its picture changes
     // only when the icon set or a main image does, so keep each for a minute.
@@ -364,8 +368,9 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         refreshClock();
         updateRoleBanner();
         // Jawn may have been started (or finished booting) while Home was
-        // behind another app; the throttle keeps this cheap.
-        loadJawnApps(false);
+        // behind another app, and a notice may have been answered or cleared:
+        // refresh the row and its counts when Home comes back.
+        loadJawnApps(true);
         loadHomeStatus();
         ui.removeCallbacks(statusTick);
         ui.postDelayed(statusTick, STATUS_REFRESH_MS);
@@ -1060,18 +1065,52 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         final String app;
         final String title;
         final Bitmap icon;
+        int count;
 
         JawnAppEntry(String app, String title, Bitmap icon) {
+            this(app, title, icon, 0);
+        }
+
+        JawnAppEntry(String app, String title, Bitmap icon, int count) {
             this.app = app;
             this.title = title;
             this.icon = icon;
+            this.count = count;
         }
     }
 
+    /**
+     * The row is the start menu's apps, plus any app with live notices that the
+     * menu does not list (an appointment app's start/stop, for one). Apps with
+     * notices come first and keep the menu's order among themselves.
+     */
     private List<JawnAppEntry> fetchJawnApps() {
-        List<JawnAppEntry> entries = new ArrayList<>();
         String base = managerOrigin();
-        if (base.isEmpty()) return entries;
+        List<JawnAppEntry> entries = base.isEmpty()
+            ? new ArrayList<>() : fetchStartApps(base);
+        Map<String,Integer> counts = loadNotifyCounts();
+        Set<String> seen = new HashSet<>();
+        for (JawnAppEntry entry : entries) {
+            seen.add(entry.app);
+            Integer n = counts.get(entry.app);
+            entry.count = n == null ? 0 : n;
+        }
+        for (Map.Entry<String,Integer> item : counts.entrySet()) {
+            String app = item.getKey();
+            if (seen.contains(app)) continue;
+            Bitmap icon = base.isEmpty() ? null
+                : fetchJawnIcon(base, "/apps/icon?app=" + Uri.encode(app));
+            entries.add(new JawnAppEntry(app, prettyApp(app), icon, item.getValue()));
+        }
+        entries.sort((a, b) -> b.count - a.count);
+        if (entries.size() > JAWN_APPS_LIMIT) {
+            entries = new ArrayList<>(entries.subList(0, JAWN_APPS_LIMIT));
+        }
+        return entries;
+    }
+
+    private List<JawnAppEntry> fetchStartApps(String base) {
+        List<JawnAppEntry> entries = new ArrayList<>();
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(base + "/apps/start").openConnection();
@@ -1106,7 +1145,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
 
             JSONArray apps = new JSONObject(body.toString()).optJSONArray("apps");
             if (apps == null) return entries;
-            for (int i = 0; i < apps.length() && entries.size() < JAWN_APPS_LIMIT; i++) {
+            for (int i = 0; i < apps.length(); i++) {
                 JSONObject item = apps.optJSONObject(i);
                 if (item == null) continue;
                 String app = item.optString("app", "").trim();
@@ -1125,6 +1164,52 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) { } }
         }
         return entries;
+    }
+
+    /**
+     * Live notices per app, from the house's own database. The taskbar and the
+     * tile read the same rows, so a dismissed notice leaves the badge on the
+     * next refresh.
+     */
+    private Map<String,Integer> loadNotifyCounts() {
+        Map<String,Integer> counts = new HashMap<>();
+        java.io.File dbFile = new java.io.File(
+            JawnLauncher.getJawnDirPath(this), "database/jawnos.db");
+        if (!dbFile.isFile()) return counts;
+        SQLiteDatabase db = null;
+        Cursor cursor = null;
+        try {
+            db = SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(), null,
+                SQLiteDatabase.OPEN_READONLY);
+            cursor = db.rawQuery(
+                "select app, count(*) from notifications"
+                    + " where app is not null and app <> '' group by app", null);
+            while (cursor.moveToNext()) {
+                String app = cursor.getString(0);
+                int n = cursor.getInt(1);
+                if (app != null && !app.isEmpty() && n > 0) counts.put(app, n);
+            }
+        } catch (Throwable ignored) {
+            // a locked or older database simply means no badges
+        } finally {
+            if (cursor != null) { try { cursor.close(); } catch (Throwable ignored) { } }
+            if (db != null) { try { db.close(); } catch (Throwable ignored) { } }
+        }
+        return counts;
+    }
+
+    /** "email_test" -> "Email Test" for an app with no start-menu tile. */
+    private static String prettyApp(String app) {
+        String raw = app == null ? "" : app.replace('_', ' ').replace('-', ' ').trim();
+        if (raw.isEmpty()) return "JawnOS";
+        StringBuilder out = new StringBuilder();
+        for (String word : raw.split("\\s+")) {
+            if (word.isEmpty()) continue;
+            if (out.length() > 0) out.append(' ');
+            out.append(Character.toUpperCase(word.charAt(0)));
+            if (word.length() > 1) out.append(word.substring(1));
+        }
+        return out.length() == 0 ? "JawnOS" : out.toString();
     }
 
     /** The server origin, with the manager path removed. */
@@ -1299,6 +1384,8 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         lastStartApps = apps;
         jawnosRow.removeAllViews();
         if (apps == null || apps.isEmpty()) {
+            notifyCountsByLabel = new HashMap<>();
+            if (adapter != null) adapter.notifyDataSetChanged();
             jawnosSection.setVisibility(View.GONE);
             return;
         }
@@ -1322,15 +1409,30 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             int selector = selectableBackground();
             if (selector != 0) item.setBackgroundResource(selector);
 
+            FrameLayout iconHost = new FrameLayout(this);
+            iconHost.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+
             ImageView icon = new ImageView(this);
-            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+            icon.setLayoutParams(new FrameLayout.LayoutParams(dp(46), dp(46)));
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
             if (entry.icon != null) {
                 icon.setImageDrawable(new BitmapDrawable(getResources(), entry.icon));
             } else {
                 icon.setImageDrawable(placeholder);
             }
-            item.addView(icon);
+            iconHost.addView(icon);
+
+            TextView badge = badgeView();
+            badge.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END));
+            if (entry.count > 0) {
+                badge.setText(badgeText(entry.count));
+            } else {
+                badge.setVisibility(View.GONE);
+            }
+            iconHost.addView(badge);
+            item.addView(iconHost);
 
             TextView label = new TextView(this);
             label.setText(entry.title);
@@ -1365,7 +1467,40 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             jawnosRow.addView(item, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
+        Map<String,Integer> byLabel = new HashMap<>();
+        for (JawnAppEntry entry : apps) {
+            if (entry.count > 0) {
+                byLabel.put(entry.title.trim().toLowerCase(Locale.US), entry.count);
+            }
+        }
+        notifyCountsByLabel = byLabel;
+        if (adapter != null) adapter.notifyDataSetChanged();
         jawnosSection.setVisibility(View.VISIBLE);
+    }
+
+    private TextView badgeView() {
+        TextView badge = new TextView(this);
+        badge.setTextColor(0xFFFFFFFF);
+        badge.setTextSize(10);
+        badge.setGravity(Gravity.CENTER);
+        badge.setMinWidth(dp(16));
+        badge.setMinHeight(dp(16));
+        badge.setPadding(dp(4), 0, dp(4), 0);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setCornerRadius(dp(8));
+        shape.setColor(0xFFE5484D);
+        badge.setBackground(shape);
+        return badge;
+    }
+
+    private static String badgeText(int count) {
+        return count > 99 ? "99+" : String.valueOf(count);
+    }
+
+    private int notifyCountFor(JawnHomeApps.AppEntry entry) {
+        if (entry == null) return 0;
+        Integer n = notifyCountsByLabel.get(entry.label.trim().toLowerCase(Locale.US));
+        return n == null ? 0 : n;
     }
 
     private void applyFilter(String query) {
@@ -1430,6 +1565,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             LinearLayout item;
             ImageView icon;
             TextView label;
+            TextView badge;
 
             if (convertView instanceof LinearLayout
                 && convertView.getTag() instanceof View[]) {
@@ -1437,6 +1573,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 View[] parts = (View[]) convertView.getTag();
                 icon = (ImageView) parts[0];
                 label = (TextView) parts[1];
+                badge = (TextView) parts[2];
             } else {
                 item = new LinearLayout(JawnHomeActivity.this);
                 item.setOrientation(LinearLayout.VERTICAL);
@@ -1445,10 +1582,20 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 int selector = selectableBackground();
                 if (selector != 0) item.setBackgroundResource(selector);
 
+                FrameLayout iconHost = new FrameLayout(JawnHomeActivity.this);
+                iconHost.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+
                 icon = new ImageView(JawnHomeActivity.this);
-                icon.setLayoutParams(new LinearLayout.LayoutParams(dp(46), dp(46)));
+                icon.setLayoutParams(new FrameLayout.LayoutParams(dp(46), dp(46)));
                 icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                item.addView(icon);
+                iconHost.addView(icon);
+
+                badge = badgeView();
+                badge.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.END));
+                iconHost.addView(badge);
+                item.addView(iconHost);
 
                 label = new TextView(JawnHomeActivity.this);
                 label.setTextColor(themeInk);
@@ -1462,7 +1609,7 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 label.setLayoutParams(lp);
                 item.addView(label);
 
-                item.setTag(new View[] { icon, label });
+                item.setTag(new View[] { icon, label, badge });
             }
 
             final JawnHomeApps.AppEntry entry = shownApps.get(position);
@@ -1497,6 +1644,13 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
                 icon.setImageResource(android.R.drawable.sym_def_app_icon);
             }
             label.setText(entry.label);
+            int count = notifyCountFor(entry);
+            if (count > 0) {
+                badge.setText(badgeText(count));
+                badge.setVisibility(View.VISIBLE);
+            } else {
+                badge.setVisibility(View.GONE);
+            }
             item.setContentDescription(entry.label);
             return item;
         }
