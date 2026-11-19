@@ -321,4 +321,4 @@
   left without children, and `notification.remove` prunes too. The per-app
   channels are new ids, so a person's existing `jawn_notifications` sound and
   importance apply to app-less notices only: the app channels start at their
-  defaults and are theirs to tune. Build 1336.
+  defaults and are theirs to tune. Build 1344.

@@ -8,11 +8,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.service.notification.StatusBarNotification;
+import android.util.Log;
 
 import com.jawnos.R;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +46,11 @@ final class JawnNotify {
     static final String GROUP_PREFIX = "jawn:";
     private static final String SUMMARY_PREFIX = "jawn-summary:";
     private static final int SUMMARY_BASE_ID = 0x6a770001;
+
+    // The notices this process has posted, by group. getActiveNotifications()
+    // returns nothing on some phones (the SM-X400 reported zero while three
+    // notices were live), so the summary count cannot depend on it alone.
+    private static final Map<String, Set<String>> CHILDREN = new HashMap<>();
 
     private JawnNotify() { }
 
@@ -157,9 +164,15 @@ final class JawnNotify {
                                String group, int icon, int color, String tag) {
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null || group == null || group.isEmpty()) return;
-        String summaryTag = SUMMARY_PREFIX + group;
-        int id = SUMMARY_BASE_ID + (group.hashCode() & 0x0fffffff);
-        int count = childrenIn(manager, group, tag) + 1;
+        String summaryTag = summaryTag(group);
+        int id = summaryId(group);
+        int remembered = remember(group, tag);
+        int active = childrenIn(manager, group, tag) + 1;
+        // The listener sees every live child; the map only fills in when the
+        // person has not granted notification access.
+        int count = JawnNotificationListener.active() != null
+            ? active : Math.max(remembered, active);
+        Log.d("JawnNotify", "summary " + group + " map=" + remembered + " active=" + active);
         if (count < 2) {
             manager.cancel(summaryTag, id);
             return;
@@ -194,12 +207,29 @@ final class JawnNotify {
     static void pruneSummaries(Context context, String group, String dismissedTag) {
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
-        StatusBarNotification[] active;
-        try { active = manager.getActiveNotifications(); }
-        catch (Throwable ignored) { return; }
+        Set<String> touched = new HashSet<>();
+        if (dismissedTag != null) {
+            if (group != null && !group.isEmpty()) {
+                forget(group, dismissedTag);
+                touched.add(group);
+            }
+            else {
+                touched.addAll(forgetEverywhere(dismissedTag));
+            }
+            // The listener sees the whole shade; the manager's own query
+            // answers only the newest notice on some phones.
+            boolean listener = JawnNotificationListener.active() != null;
+            for (String g : touched) {
+                int left = listener ? childrenIn(manager, g, dismissedTag) : groupSize(g);
+                Log.d("JawnNotify", "prune " + dismissedTag + " " + g + " left=" + left);
+                if (left < 2) manager.cancel(summaryTag(g), summaryId(g));
+            }
+            if (!touched.isEmpty()) return;
+        }
+        // A stale tag (the process restarted) falls through to the scan.
+        StatusBarNotification[] active = active(manager);
         if (active == null) return;
         Map<String, StatusBarNotification> summaries = new HashMap<>();
-        Set<String> live = new HashSet<>();
         for (StatusBarNotification sbn : active) {
             if (sbn == null) continue;
             String tag = sbn.getTag();
@@ -209,13 +239,64 @@ final class JawnNotify {
                 continue;
             }
             if (dismissedTag != null && dismissedTag.equals(tag)) continue;
-            if (key != null) live.add(key);
         }
         for (Map.Entry<String, StatusBarNotification> entry : summaries.entrySet()) {
             if (group != null && !group.equals(entry.getKey())) continue;
-            if (live.contains(entry.getKey())) continue;
+            int left = countIn(active, entry.getKey(), null);
+            if (left >= 2) continue;
             StatusBarNotification summary = entry.getValue();
             manager.cancel(summary.getTag(), summary.getId());
+        }
+    }
+
+    /** Add this notice to its group and return how many are remembered. */
+    private static int remember(String group, String tag) {
+        synchronized (CHILDREN) {
+            Set<String> tags = CHILDREN.get(group);
+            if (tags == null) {
+                tags = new HashSet<>();
+                CHILDREN.put(group, tags);
+            }
+            if (tag != null) tags.add(tag);
+            return tags.size();
+        }
+    }
+
+    private static void forget(String group, String tag) {
+        synchronized (CHILDREN) {
+            Set<String> tags = CHILDREN.get(group);
+            if (tags == null) return;
+            if (tag != null) tags.remove(tag);
+            if (tags.isEmpty()) CHILDREN.remove(group);
+        }
+    }
+
+    private static Set<String> forgetEverywhere(String tag) {
+        Set<String> touched = new HashSet<>();
+        synchronized (CHILDREN) {
+            Iterator<Map.Entry<String, Set<String>>> it = CHILDREN.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Set<String>> entry = it.next();
+                Set<String> tags = entry.getValue();
+                if (tag != null && tags.remove(tag)) touched.add(entry.getKey());
+                if (tags.isEmpty()) it.remove();
+            }
+        }
+        return touched;
+    }
+
+    private static String summaryTag(String group) {
+        return SUMMARY_PREFIX + group;
+    }
+
+    private static int summaryId(String group) {
+        return SUMMARY_BASE_ID + (group.hashCode() & 0x0fffffff);
+    }
+
+    private static int groupSize(String group) {
+        synchronized (CHILDREN) {
+            Set<String> tags = CHILDREN.get(group);
+            return tags == null ? 0 : tags.size();
         }
     }
 
@@ -230,9 +311,10 @@ final class JawnNotify {
     }
 
     private static int childrenIn(NotificationManager manager, String group, String excludeTag) {
-        StatusBarNotification[] active;
-        try { active = manager.getActiveNotifications(); }
-        catch (Throwable ignored) { return 0; }
+        return countIn(active(manager), group, excludeTag);
+    }
+
+    private static int countIn(StatusBarNotification[] active, String group, String excludeTag) {
         if (active == null) return 0;
         int count = 0;
         for (StatusBarNotification sbn : active) {
@@ -240,9 +322,52 @@ final class JawnNotify {
             if (sbn.getNotification() != null
                 && (sbn.getNotification().flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
             if (excludeTag != null && excludeTag.equals(sbn.getTag())) continue;
-            if (group.equals(sbn.getGroupKey())) count++;
+            if (inGroup(sbn, group)) count++;
         }
         return count;
+    }
+
+    /**
+     * A notice belongs to the group when its channel is that app's channel.
+     * The listener may report an autogroup override key instead of the key the
+     * app set, so the channel is the stable handle; the key is the fallback.
+     */
+    private static boolean inGroup(StatusBarNotification sbn, String group) {
+        String appKey = group.startsWith(GROUP_PREFIX)
+            ? group.substring(GROUP_PREFIX.length()) : "";
+        if (!appKey.isEmpty() && sbn.getNotification() != null) {
+            String channel = sbn.getNotification().getChannelId();
+            if (channel != null
+                && (channel.startsWith(DEFAULT_CHANNEL) || channel.startsWith(SILENT_CHANNEL))
+                && channel.endsWith("__" + appKey)) return true;
+        }
+        return sameGroup(group, sbn.getGroupKey());
+    }
+
+    /**
+     * The system may report an autogroup override key ("0|pkg|g:jawn:mailbox")
+     * instead of the key the app set, so match the suffix as well.
+     */
+    private static boolean sameGroup(String group, String key) {
+        if (key == null) return false;
+        if (group.equals(key)) return true;
+        return key.endsWith("g:" + group);
+    }
+
+    /**
+     * The listener is the only reliable view of the shade; the manager's own
+     * query can report just the newest notice. Without notification access it
+     * is null and the manager is the fallback.
+     */
+    private static StatusBarNotification[] active(NotificationManager manager) {
+        StatusBarNotification[] fromListener = JawnNotificationListener.active();
+        if (fromListener != null) return fromListener;
+        try {
+            return manager.getActiveNotifications();
+        }
+        catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static int flags() {
