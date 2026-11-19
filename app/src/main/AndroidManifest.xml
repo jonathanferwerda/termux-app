@@ -185,6 +185,7 @@
         <receiver android:name=".app.JawnNotifyReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="com.jawnos.app.JAWN_NOTIFY" />
+                <action android:name="com.jawnos.app.JAWN_NOTIFY_PRUNE" />
             </intent-filter>
         </receiver>
 

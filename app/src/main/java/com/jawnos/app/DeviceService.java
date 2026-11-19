@@ -128,8 +128,8 @@ public class DeviceService extends Service {
     private static final int NOTIFICATION_ID = 46001;
     private static final String CHANNEL_ID = "jawn-device";
     private static final String TOKEN_NAME = "device.token";
-    private static final String CHANNEL_DEFAULT = "jawn_notifications";
-    private static final String CHANNEL_SILENT = "jawn_notifications_silent";
+    private static final String CHANNEL_DEFAULT = JawnNotify.DEFAULT_CHANNEL;
+    private static final String CHANNEL_SILENT = JawnNotify.SILENT_CHANNEL;
     private static final int MAX_CLIENTS = 8;
 
     private volatile boolean running = true;
@@ -851,6 +851,10 @@ public class DeviceService extends Service {
             }
             catch (Throwable ignored) { }
         }
+        String appKey = JawnNotify.appKey(app);
+        String appLabel = JawnNotify.label(app, args.optString("app_name", ""));
+        String channelId = JawnNotify.channel(this, appKey, appLabel, silent);
+        int icon = JawnNotify.smallIcon(this, args.optString("small_icon", ""));
         Intent open;
         if (!app.isEmpty()) {
             open = new Intent(this, JawnAppActivity.class);
@@ -865,11 +869,11 @@ public class DeviceService extends Service {
         PendingIntent contentIntent = PendingIntent.getActivity(this, id, open, piFlags);
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26
-            ? new Notification.Builder(this, silent ? CHANNEL_SILENT : CHANNEL_DEFAULT)
+            ? new Notification.Builder(this, channelId)
             : new Notification.Builder(this);
         builder.setContentTitle(title)
                .setContentText(text)
-               .setSmallIcon(smallIcon(args.optString("small_icon", "")))
+               .setSmallIcon(icon)
                .setContentIntent(contentIntent)
                .setAutoCancel(!ongoing && flag(args, "auto_cancel", true))
                .setShowWhen(true);
@@ -881,8 +885,17 @@ public class DeviceService extends Service {
         String bigText = args.optString("big_text", "");
         if (!bigText.isEmpty()) builder.setStyle(new Notification.BigTextStyle().bigText(bigText));
         String group = args.optString("group", "");
-        if (!group.isEmpty()) builder.setGroup(group);
-        if (args.has("color")) builder.setColor((int) args.optLong("color", 0));
+        boolean ownGroup = false;
+        if (group.isEmpty() && !appKey.isEmpty()) {
+            group = JawnNotify.groupFor(appKey);
+            ownGroup = true;
+        }
+        if (!group.isEmpty()) {
+            builder.setGroup(group);
+            if (ownGroup) builder.setDeleteIntent(JawnNotify.pruneIntent(this, group, tag));
+        }
+        int color = args.has("color") ? (int) args.optLong("color", 0) : 0;
+        if (args.has("color")) builder.setColor(color);
         if (args.has("number")) builder.setNumber(args.optInt("number", 0));
 
         JSONObject progress = args.optJSONObject("progress");
@@ -923,6 +936,9 @@ public class DeviceService extends Service {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null) throw new IllegalStateException("no notification manager");
         manager.notify(tag, id, builder.build());
+        if (ownGroup) {
+            JawnNotify.refreshSummary(this, app, appLabel, channelId, group, icon, color, tag);
+        }
 
         JSONObject result = new JSONObject();
         result.put("id", tag);
@@ -934,6 +950,7 @@ public class DeviceService extends Service {
         if (tag == null || tag.isEmpty()) return;
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) manager.cancel(tag, Math.abs(tag.hashCode()));
+        JawnNotify.pruneSummaries(this, null, tag);
     }
 
     /** "200,150,200" -> {200, 150, 200}; anything unparsable is ignored. */
@@ -949,38 +966,6 @@ public class DeviceService extends Service {
             }
         }
         return out;
-    }
-
-    /**
-     * A small icon is a resource: a drawable name the app ships, then a known
-     * jawn concept, then the launcher-ish default. The large icon is a file the
-     * caller names, so a notification can wear its own picture.
-     */
-    private int smallIcon(String name) {
-        if (name != null && !name.isEmpty()) {
-            int res = getResources().getIdentifier(name, "drawable", getPackageName());
-            if (res != 0) return res;
-        }
-        String key = name == null ? "" : name.toLowerCase(java.util.Locale.US);
-        switch (key) {
-            case "message": case "chat": case "sms": return android.R.drawable.stat_notify_chat;
-            case "mail": case "email": return android.R.drawable.ic_dialog_email;
-            case "alarm": case "clock": case "timer": return android.R.drawable.ic_lock_idle_alarm;
-            case "call": case "phone": return android.R.drawable.stat_notify_missed_call;
-            case "warning": case "alert": case "error": return android.R.drawable.ic_dialog_alert;
-            case "info": return android.R.drawable.ic_dialog_info;
-            case "download": return android.R.drawable.stat_sys_download;
-            case "sync": case "refresh": return android.R.drawable.stat_notify_sync;
-            case "camera": case "photo": return android.R.drawable.ic_menu_camera;
-            case "location": case "gps": return android.R.drawable.ic_menu_mylocation;
-            case "music": case "media": return android.R.drawable.ic_media_play;
-            case "battery": return android.R.drawable.ic_lock_idle_charging;
-            case "lock": case "security": return android.R.drawable.ic_lock_lock;
-            case "check": case "done": return android.R.drawable.checkbox_on_background;
-            case "store": case "cart": case "market": return android.R.drawable.ic_menu_agenda;
-            case "print": case "printer": return android.R.drawable.ic_menu_share;
-            case "session": case "jawn": default: return R.drawable.ic_new_session;
-        }
     }
 
     /** The two channels the app already uses, so the person's own settings hold. */

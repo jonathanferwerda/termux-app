@@ -302,3 +302,23 @@
   callback multiplies by the level itself; a shared stream already gets it from
   the mixer, and `stats()` says which path with `systemVolume` and
   `systemVolumeApplied`. The page's monitoring gain stays separate. Build 1335.
+
+## Deltas round X+11 (each app's notice stands on its own)
+
+- **A notice's app names its channel, group and icon.** `JawnNotify.java` maps
+  the `app` jawn already sends (`mailbox`, `clock`, `market`, ...) to a channel
+  named for the app ("Mail"), a group key (`jawn:mailbox`) and one of the new
+  monochrome `ic_notify_*` drawables (`ic_notify_mail`, `ic_notify_clock`, ...),
+  with `ic_new_session` as the house fallback. `DeviceService.notificationPost`
+  and the `JawnNotifyReceiver` fallback both use it, so mail no longer shares
+  the automatic JawnOS bundle and no longer wears the house mark in the status
+  bar. Android still attributes the posting package, so the header and badge
+  remain JawnOS.
+- **A second waiting notice gets an app-named header.** `JawnNotify` posts a
+  group summary titled with the app ("Mail" with "New notifications") while two or more of its
+  notices are waiting; with one it removes the summary so the notice shows on
+  its own. A dismissed notice carries a delete intent that prunes a summary
+  left without children, and `notification.remove` prunes too. The per-app
+  channels are new ids, so a person's existing `jawn_notifications` sound and
+  importance apply to app-less notices only: the app channels start at their
+  defaults and are theirs to tune. Build 1336.

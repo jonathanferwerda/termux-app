@@ -1,15 +1,11 @@
 package com.jawnos.app;
 
 import android.app.Notification;
-import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
-
-import com.jawnos.R;
 
 /**
  * Posts one of jawn's notifications from the app itself, so the badge lands on
@@ -19,22 +15,30 @@ import com.jawnos.R;
  * termux-notification, which belongs to the JawnOS API app - an app with no
  * launcher icon, so nothing ever badged. It now broadcasts here instead
  * (com.jawnos.app.JAWN_NOTIFY: title, message, tag), and falls back to
- * termux-notification only when this app is not installed. The app's own
- * notifications (the service and friends) are made badge-less, so the icon
- * shows jawn's notifications and nothing else.
+ * termux-notification only when this app is not installed.
  *
- * A notification marked silent (a Clock alarm or timer, whose sound the app
- * plays on the alarm stream) goes to a quiet channel so the notification
- * system does not add its own chime over it.
+ * The app's own notifications (the service and friends) are made badge-less, so
+ * the icon shows jawn's notifications and nothing else. Each notice's app names
+ * its channel, group and small icon (JawnNotify); a notification marked silent
+ * (a Clock alarm or timer, whose sound the app plays on the alarm stream) uses
+ * that app's quiet channel.
+ *
+ * This is the fallback for a build older than the device bridge. The bridge
+ * (DeviceService.notificationPost) posts the same notice with the same names.
  */
 public class JawnNotifyReceiver extends BroadcastReceiver {
 
     public static final String ACTION = "com.jawnos.app.JAWN_NOTIFY";
-    public static final String CHANNEL = "jawn_notifications";
-    public static final String SILENT_CHANNEL = "jawn_notifications_silent";
+    public static final String ACTION_PRUNE = "com.jawnos.app.JAWN_NOTIFY_PRUNE";
+    public static final String CHANNEL = JawnNotify.DEFAULT_CHANNEL;
+    public static final String SILENT_CHANNEL = JawnNotify.SILENT_CHANNEL;
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (ACTION_PRUNE.equals(intent.getAction())) {
+            JawnNotify.pruneSummaries(context, intent.getStringExtra("group"), intent.getStringExtra("tag"));
+            return;
+        }
         String title = intent.getStringExtra("title");
         String message = intent.getStringExtra("message");
         String tag = intent.getStringExtra("tag");
@@ -43,37 +47,26 @@ public class JawnNotifyReceiver extends BroadcastReceiver {
         boolean silent = silenced || intent.getBooleanExtra("silent", false);
         if (title == null || title.isEmpty()) title = "JawnOS";
         if (message == null) message = "";
-        int id = Math.abs((tag != null && !tag.isEmpty() ? tag : String.valueOf(System.currentTimeMillis())).hashCode());
+        String app = intent.getStringExtra("app");
+        app = app == null ? "" : app.trim();
+        String appKey = JawnNotify.appKey(app);
+        String appLabel = JawnNotify.label(app, intent.getStringExtra("app_name"));
+        String iconName = intent.getStringExtra("small_icon");
+        if (iconName == null || iconName.isEmpty()) iconName = app;
+        int icon = JawnNotify.smallIcon(context, iconName);
+        String channelId = JawnNotify.channel(context, appKey, appLabel, silent);
+        String group = JawnNotify.groupFor(appKey);
+        String notifyTag = tag != null && !tag.isEmpty() ? tag : String.valueOf(System.currentTimeMillis());
+        int id = notifyTag.hashCode() & 0x7fffffff;
 
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
 
-        String channelId = silent ? SILENT_CHANNEL : CHANNEL;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (silent) {
-                NotificationChannel channel = new NotificationChannel(
-                    SILENT_CHANNEL, "JawnOS (quiet)", NotificationManager.IMPORTANCE_LOW);
-                channel.setShowBadge(true);
-                channel.setSound(null, null);
-                channel.enableVibration(false);
-                nm.createNotificationChannel(channel);
-            }
-            else {
-                // badges ON here: this is the channel the launcher icon should count
-                NotificationChannel channel = new NotificationChannel(
-                    CHANNEL, "JawnOS", NotificationManager.IMPORTANCE_DEFAULT);
-                channel.setShowBadge(true);
-                nm.createNotificationChannel(channel);
-            }
-        }
-
         // A notice that names an app opens that app on its own, full screen,
         // the way the Home row does. The older fallback carries no app, so it
         // keeps the WebView (and its url when the sender gave one).
-        String app = intent.getStringExtra("app");
         String timestamp = intent.getStringExtra("timestamp");
         String url = intent.getStringExtra("url");
-        app = app == null ? "" : app.trim();
         timestamp = timestamp == null ? "" : timestamp.trim();
         url = url == null ? "" : url;
         Intent open;
@@ -88,18 +81,25 @@ public class JawnNotifyReceiver extends BroadcastReceiver {
         }
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT
-            | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+            | (android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
         PendingIntent contentIntent = PendingIntent.getActivity(context, id, open, flags);
 
         Notification.Builder builder = new Notification.Builder(context, channelId);
         builder.setContentTitle(title)
                .setContentText(message)
-               .setSmallIcon(R.drawable.ic_new_session)
+               .setSmallIcon(icon)
                .setAutoCancel(true)
                .setContentIntent(contentIntent);
+        if (!group.isEmpty()) {
+            builder.setGroup(group);
+            builder.setDeleteIntent(JawnNotify.pruneIntent(context, group, notifyTag));
+        }
         if (silent) {
             builder.setOnlyAlertOnce(true);
         }
-        nm.notify(id, builder.build());
+        nm.notify(notifyTag, id, builder.build());
+        if (!group.isEmpty()) {
+            JawnNotify.refreshSummary(context, app, appLabel, channelId, group, icon, 0, notifyTag);
+        }
     }
 }
