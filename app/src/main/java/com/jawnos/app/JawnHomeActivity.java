@@ -1061,6 +1061,12 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     }
 
     /** One JawnOS app: the app id, its title and (when it downloaded) its icon. */
+    /** How many notices an app has, and the picture the newest one carries. */
+    private static final class NotifyInfo {
+        int count;
+        String image;
+    }
+
     private static final class JawnAppEntry {
         final String app;
         final String title;
@@ -1088,19 +1094,24 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         String base = managerOrigin();
         List<JawnAppEntry> entries = base.isEmpty()
             ? new ArrayList<>() : fetchStartApps(base);
-        Map<String,Integer> counts = loadNotifyCounts();
+        Map<String,NotifyInfo> notices = loadNotifyInfo();
         Set<String> seen = new HashSet<>();
         for (JawnAppEntry entry : entries) {
             seen.add(entry.app);
-            Integer n = counts.get(entry.app);
-            entry.count = n == null ? 0 : n;
+            NotifyInfo info = notices.get(entry.app);
+            entry.count = info == null ? 0 : info.count;
         }
-        for (Map.Entry<String,Integer> item : counts.entrySet()) {
+        for (Map.Entry<String,NotifyInfo> item : notices.entrySet()) {
             String app = item.getKey();
             if (seen.contains(app)) continue;
-            Bitmap icon = base.isEmpty() ? null
-                : fetchJawnIcon(base, "/apps/icon?app=" + Uri.encode(app));
-            entries.add(new JawnAppEntry(app, prettyApp(app), icon, item.getValue()));
+            NotifyInfo info = item.getValue();
+            Bitmap icon = localNoticeImage(info.image);
+            if (icon == null && !base.isEmpty()) {
+                String iconPath = (info.image == null || info.image.isEmpty())
+                    ? "/apps/icon?app=" + Uri.encode(app) : info.image;
+                icon = fetchJawnIcon(base, iconPath);
+            }
+            entries.add(new JawnAppEntry(app, prettyApp(app), icon, info.count));
         }
         entries.sort((a, b) -> b.count - a.count);
         if (entries.size() > JAWN_APPS_LIMIT) {
@@ -1167,27 +1178,37 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
     }
 
     /**
-     * Live notices per app, from the house's own database. The taskbar and the
-     * tile read the same rows, so a dismissed notice leaves the badge on the
-     * next refresh.
+     * Live notices per app, from the house's own database. The taskbar reads
+     * the same unfiltered rows, so a dismissed notice leaves the badge on the
+     * next refresh. The newest row's image is the app's tile picture when it
+     * has one; the app's own icon is the fallback.
      */
-    private Map<String,Integer> loadNotifyCounts() {
-        Map<String,Integer> counts = new HashMap<>();
+    private Map<String,NotifyInfo> loadNotifyInfo() {
+        Map<String,NotifyInfo> notices = new HashMap<>();
         java.io.File dbFile = new java.io.File(
             JawnLauncher.getJawnDirPath(this), "database/jawnos.db");
-        if (!dbFile.isFile()) return counts;
+        if (!dbFile.isFile()) return notices;
         SQLiteDatabase db = null;
         Cursor cursor = null;
         try {
             db = SQLiteDatabase.openDatabase(dbFile.getAbsolutePath(), null,
                 SQLiteDatabase.OPEN_READONLY);
             cursor = db.rawQuery(
-                "select app, count(*) from notifications"
-                    + " where app is not null and app <> '' group by app", null);
+                "select app, image from notifications"
+                    + " where app is not null and app <> '' order by rowid desc", null);
             while (cursor.moveToNext()) {
                 String app = cursor.getString(0);
-                int n = cursor.getInt(1);
-                if (app != null && !app.isEmpty() && n > 0) counts.put(app, n);
+                if (app == null || app.isEmpty()) continue;
+                NotifyInfo info = notices.get(app);
+                if (info == null) {
+                    info = new NotifyInfo();
+                    notices.put(app, info);
+                }
+                info.count++;
+                if (info.image == null) {
+                    String image = cursor.getString(1);
+                    if (image != null && !image.trim().isEmpty()) info.image = image.trim();
+                }
             }
         } catch (Throwable ignored) {
             // a locked or older database simply means no badges
@@ -1195,7 +1216,25 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             if (cursor != null) { try { cursor.close(); } catch (Throwable ignored) { } }
             if (db != null) { try { db.close(); } catch (Throwable ignored) { } }
         }
-        return counts;
+        return notices;
+    }
+
+    /**
+     * The notice's picture lives in the house's own tree (the same file the
+     * manager renders), so it is read directly rather than through a gated
+     * HTTP path. A path that is not local (or an SVG) falls through to the
+     * app-icon route.
+     */
+    private Bitmap localNoticeImage(String path) {
+        if (path == null || path.isEmpty() || !path.startsWith("/")) return null;
+        java.io.File file = new java.io.File(
+            JawnLauncher.getJawnDirPath(this), "public" + path);
+        if (!file.isFile()) return null;
+        try {
+            return BitmapFactory.decodeFile(file.getAbsolutePath());
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /** "email_test" -> "Email Test" for an app with no start-menu tile. */

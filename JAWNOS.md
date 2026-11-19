@@ -326,4 +326,5 @@
   app from the house's own `notifications` table (read-only, the same rows the
   taskbar clears) and badges the JawnOS row. An app with notices that the start
   menu does not list gets its own tile, so an appointment app's start/stop
-  stands with its own count. Build 1345.
+  stands with its own count, and the tile wears the newest notice's picture
+  when it has one (read straight from the house's public tree). Build 1347.
