@@ -329,4 +329,10 @@
   stands with its own count, and the tile wears the newest notice's picture
   when it has one (read straight from the house's public tree). A shared stock
   picture or a sealed photo falls back to a distinct colour and initials, so
-  every appointment app still has its own tile. Build 1348.
+  every appointment app still has its own tile.
+- **A sealed photo reaches the notification, not the disk.** `Notify.pm`
+  decrypts the app's sealed `main_image` in memory (openssl with the passphrase
+  in the environment, then magick through a pipe) and carries the JPEG to the
+  app as `large_icon_b64`; `DeviceService.notificationPost` decodes it for the
+  notification's large icon. The `.enc` stays sealed on disk: no `.thumbs`
+  entry and no temporary output are written. Build 1349.

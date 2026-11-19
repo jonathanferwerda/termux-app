@@ -910,7 +910,23 @@ public class DeviceService extends Service {
         }
 
         String large = args.optString("large_icon", "");
-        if (!large.isEmpty()) {
+        String largeB64 = args.optString("large_icon_b64", "");
+        boolean haveLarge = false;
+        if (!largeB64.isEmpty()) {
+            // The manager decrypts a sealed main image in memory and sends the
+            // JPEG here; nothing plaintext was written on either machine.
+            try {
+                byte[] bytes = Base64.decode(largeB64, Base64.DEFAULT);
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap != null) {
+                    builder.setLargeIcon(bitmap);
+                    haveLarge = true;
+                }
+            } catch (Throwable ignored) {
+                // fall through to the file path
+            }
+        }
+        if (!haveLarge && !large.isEmpty()) {
             Bitmap bitmap = BitmapFactory.decodeFile(large);
             if (bitmap != null) builder.setLargeIcon(bitmap);
         }
