@@ -25,7 +25,11 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -1095,6 +1099,12 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         List<JawnAppEntry> entries = base.isEmpty()
             ? new ArrayList<>() : fetchStartApps(base);
         Map<String,NotifyInfo> notices = loadNotifyInfo();
+        Map<String,Integer> imageUse = new HashMap<>();
+        for (NotifyInfo info : notices.values()) {
+            if (info.image == null || info.image.isEmpty()) continue;
+            Integer n = imageUse.get(info.image);
+            imageUse.put(info.image, n == null ? 1 : n + 1);
+        }
         Set<String> seen = new HashSet<>();
         for (JawnAppEntry entry : entries) {
             seen.add(entry.app);
@@ -1105,12 +1115,14 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
             String app = item.getKey();
             if (seen.contains(app)) continue;
             NotifyInfo info = item.getValue();
-            Bitmap icon = localNoticeImage(info.image);
-            if (icon == null && !base.isEmpty()) {
-                String iconPath = (info.image == null || info.image.isEmpty())
-                    ? "/apps/icon?app=" + Uri.encode(app) : info.image;
-                icon = fetchJawnIcon(base, iconPath);
-            }
+            // A picture shared by several apps is the house's stock chart, not
+            // this app's identity; a sealed photo cannot be decoded here. Draw
+            // a distinct monogram tile for those, and use a genuinely unique
+            // local picture when one exists.
+            boolean shared = info.image != null
+                && imageUse.getOrDefault(info.image, 0) > 1;
+            Bitmap icon = shared ? null : localNoticeImage(info.image);
+            if (icon == null) icon = generatedTile(app);
             entries.add(new JawnAppEntry(app, prettyApp(app), icon, info.count));
         }
         entries.sort((a, b) -> b.count - a.count);
@@ -1235,6 +1247,46 @@ public class JawnHomeActivity extends Activity implements NfcAdapter.ReaderCallb
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** A distinct rounded tile for an app whose notices share a stock picture. */
+    private Bitmap generatedTile(String app) {
+        int size = 96;
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(tileColor(app));
+        float radius = size * 0.22f;
+        canvas.drawRoundRect(new RectF(0, 0, size, size), radius, radius, paint);
+        paint.setColor(0xFFFFFFFF);
+        paint.setTextSize(size * 0.40f);
+        paint.setTypeface(Typeface.DEFAULT_BOLD);
+        paint.setTextAlign(Paint.Align.CENTER);
+        Paint.FontMetrics metrics = paint.getFontMetrics();
+        float y = size / 2f - (metrics.ascent + metrics.descent) / 2f;
+        canvas.drawText(initialsFor(app), size / 2f, y, paint);
+        return bmp;
+    }
+
+    private static String initialsFor(String app) {
+        String label = prettyApp(app);
+        String[] words = label.split("\\s+");
+        String initials;
+        if (words.length >= 2 && !words[0].isEmpty() && !words[1].isEmpty()) {
+            initials = words[0].substring(0, 1) + words[1].substring(0, 1);
+        } else {
+            initials = label.substring(0, Math.min(2, label.length()));
+        }
+        return initials.toUpperCase(Locale.US);
+    }
+
+    private static int tileColor(String app) {
+        int[] colors = {
+            0xFF6C5CE7, 0xFF00A8A8, 0xFFE17055, 0xFF2D7FF9,
+            0xFFD63031, 0xFFE84393, 0xFF8E44AD, 0xFF00897B
+        };
+        int hash = app == null ? 0 : app.hashCode();
+        return colors[(hash & 0x7fffffff) % colors.length];
     }
 
     /** "email_test" -> "Email Test" for an app with no start-menu tile. */

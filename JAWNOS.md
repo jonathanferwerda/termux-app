@@ -327,4 +327,6 @@
   taskbar clears) and badges the JawnOS row. An app with notices that the start
   menu does not list gets its own tile, so an appointment app's start/stop
   stands with its own count, and the tile wears the newest notice's picture
-  when it has one (read straight from the house's public tree). Build 1347.
+  when it has one (read straight from the house's public tree). A shared stock
+  picture or a sealed photo falls back to a distinct colour and initials, so
+  every appointment app still has its own tile. Build 1348.
