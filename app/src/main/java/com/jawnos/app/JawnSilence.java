@@ -99,6 +99,30 @@ public final class JawnSilence {
         }
     }
 
+    /**
+     * Re-assert silence as a call is left ringing through.
+     *
+     * A screened call that no ranked gateway can answer is left to ring like any
+     * other, and the house's silence still owns that ring: this re-applies the
+     * live state - every stream but the call at zero, the ringer silent, and the
+     * interruption filter none when DND access is held, which is also what
+     * suppresses the call's vibration - at the moment the call is left ringing,
+     * so a ringer or a stream restored elsewhere in the meantime cannot make it
+     * audible or shake the phone. It acts only while silence is on (it never
+     * turns it on), never touches the call stream, and says whether it acted.
+     */
+    public static boolean quietRing(Context context) {
+        if (context == null) return false;
+        attach(context);
+        final Context app = appContext;
+        if (app == null) return false;
+        synchronized (LOCK) {
+            if (!active(app)) return false;
+            apply(app);
+            return true;
+        }
+    }
+
     private static void enter(Context app) {
         JSONObject snapshot = new JSONObject();
         AudioManager am = audio(app);

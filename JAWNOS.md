@@ -359,3 +359,18 @@
   default. The call record carries `gateway`, and the page posts it to
   `/manager/phone/call`, so the transcript is filed from that machine's live
   status; a local `.jsonl` is read only when the gateway is this machine.
+
+## Deltas round X+13 (silence rings a call through without a sound)
+
+- **A screened call no gateway can take still rings through silently.**
+  `JawnSilence.quietRing(Context)` re-applies the live silence under the same
+  lock as `set()`/`reassert()` - every stream but the call at zero, the ringer
+  silent, and the interruption filter `none` when DND access is held, which is
+  also what stops the call's vibration - at the moment the call is left
+  ringing, so a ringer or a volume restored elsewhere in the meantime cannot
+  make it audible or shake the phone. It acts only while silence is on, never
+  turns it on, never touches `STREAM_VOICE_CALL`, and returns whether it acted.
+  `JawnInCallService.screenWhenGatewayReady` calls it in the no-candidate
+  branch, before `showScreen()`, and logs
+  `ivr: no gateway can answer; ringing through silently` only when it acted:
+  with silence off the ring path is unchanged. Build 1352.

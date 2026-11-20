@@ -300,7 +300,8 @@ public class JawnInCallService extends InCallService {
      * with this phone and answers with a live gateway wins the call. If none
      * does, the call is left to ring and the normal screen is shown, exactly as
      * the "ring" flow does: a screened call must never be answered into
-     * silence. No list at all is the older single machine.
+     * silence. While the house is silent that ring is re-asserted quiet with
+     * no sound and no vibration. No list at all is the older single machine.
      */
     private void screenWhenGatewayReady(final Call call, final Trip trip, final String flow) {
         new Thread(new Runnable() {
@@ -341,6 +342,11 @@ public class JawnInCallService extends InCallService {
                         if (trips.get(call) != trip) return;
                         if (pick == null) {
                             JawnLog.append("ivr: not screening " + trip.number + ": " + why);
+                            // Silence still owns the ring: a call left to ring
+                            // through here must not sound or shake the phone.
+                            if (JawnSilence.quietRing(JawnInCallService.this)) {
+                                JawnLog.append("ivr: no gateway can answer; ringing through silently");
+                            }
                             showScreen();
                             return;
                         }
