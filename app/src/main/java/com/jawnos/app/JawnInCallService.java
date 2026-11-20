@@ -94,6 +94,9 @@ public class JawnInCallService extends InCallService {
         /** The gateway is carrying the audio right now; false once the person
          *  takes the call back on the phone. */
         boolean gateway;
+        /** The ranked gateway this call chose, and its Bluetooth adapter. */
+        String gatewayMachine = "";
+        String gatewayBluetooth = "";
         String flow = "";
 
         Trip(String number, String direction, long started) {
@@ -202,7 +205,7 @@ public class JawnInCallService extends InCallService {
                 holdOn = false;
                 if (trip != null && trip.ivr) {
                     JawnIvrAudio.restore(JawnInCallService.this);
-                    JawnPhoneBridge.cancelGateway(JawnInCallService.this);
+                    JawnPhoneBridge.cancelGateway(JawnInCallService.this, trip.gatewayMachine);
                     JawnScreenFace.hide(JawnInCallService.this);
                 }
                 if (trip != null) writeTrip(trip);
@@ -291,22 +294,51 @@ public class JawnInCallService extends InCallService {
     }
 
     /**
-     * Answer an IVR/voicemail call once the gateway adapter is bonded,
-     * connected and carrying Hands-Free audio. If it is not, the call is left
-     * to ring and the normal screen is shown, exactly as the "ring" flow does:
-     * a screened call must never be answered into silence.
+     * Answer an IVR/voicemail call once one of the ranked gateways is bonded,
+     * connected and carrying Hands-Free audio. The list is the house's order:
+     * the first candidate that is online, advertises the ability, is paired
+     * with this phone and answers with a live gateway wins the call. If none
+     * does, the call is left to ring and the normal screen is shown, exactly as
+     * the "ring" flow does: a screened call must never be answered into
+     * silence. No list at all is the older single machine.
      */
     private void screenWhenGatewayReady(final Call call, final Trip trip, final String flow) {
-        final String gateway = JawnPhoneBridge.ivrBluetoothName(this);
         new Thread(new Runnable() {
             @Override public void run() {
-                final String problem = JawnIvrAudio.gatewayProblem(
-                        JawnInCallService.this, gateway);
+                final boolean ranked = JawnPhoneBridge.ivrHasMachines(JawnInCallService.this);
+                JawnPhoneBridge.Gateway chosen = null;
+                String problem = "no gateway is configured for this phone";
+                for (JawnPhoneBridge.Gateway gateway
+                        : JawnPhoneBridge.ivrCandidates(JawnInCallService.this)) {
+                    if (!gateway.enabled) continue;
+                    if (ranked && (!gateway.available || !gateway.able)) {
+                        problem = gateway.signatorial + " is not advertising as able";
+                        continue;
+                    }
+                    String link = JawnIvrAudio.gatewayProblem(
+                            JawnInCallService.this, gateway.bluetooth);
+                    if (!link.isEmpty()) {
+                        problem = gateway.signatorial + ": " + link;
+                        continue;
+                    }
+                    JawnPhoneBridge.ScoState probe =
+                            JawnPhoneBridge.scoState(JawnInCallService.this, gateway.key);
+                    if (probe == null || !probe.answered) {
+                        problem = gateway.signatorial + ": "
+                                + (probe == null || probe.error.isEmpty()
+                                    ? "the gateway did not answer" : probe.error);
+                        continue;
+                    }
+                    chosen = gateway;
+                    break;
+                }
+                final JawnPhoneBridge.Gateway pick = chosen;
+                final String why = problem;
                 handler.post(new Runnable() {
                     @Override public void run() {
                         if (trips.get(call) != trip) return;
-                        if (!problem.isEmpty()) {
-                            JawnLog.append("ivr: not screening " + trip.number + ": " + problem);
+                        if (pick == null) {
+                            JawnLog.append("ivr: not screening " + trip.number + ": " + why);
                             showScreen();
                             return;
                         }
@@ -315,10 +347,14 @@ public class JawnInCallService extends InCallService {
                         if (now != Call.STATE_RINGING) return;
                         trip.ivr = true;
                         trip.gateway = true;
+                        trip.gatewayMachine = pick.key;
+                        trip.gatewayBluetooth = pick.bluetooth;
+                        JawnLog.append("ivr: screening " + trip.number + " on "
+                                + pick.signatorial + " (" + pick.key + ")");
                         // the house may run a different plan per caller: name
                         // this one before the link is answered, so it is the
                         // flow the gateway starts with
-                        postFlowToGateway(flow);
+                        postFlowToGateway(flow, pick.key);
                         routeCallToGateway();
                         try { call.answer(VideoProfile.STATE_AUDIO_ONLY); } catch (Throwable ignored) { }
                         handler.removeCallbacks(watchdog);
@@ -342,12 +378,12 @@ public class JawnInCallService extends InCallService {
      * unknown bucket's flow. "ivr" is the phone's older word for the built-in
      * receptionist; every other key is passed through as the house named it.
      */
-    private void postFlowToGateway(final String flow) {
+    private void postFlowToGateway(final String flow, final String machine) {
         if (flow == null || flow.isEmpty()) return;
         final String key = "ivr".equals(flow) ? "receptionist" : flow;
         new Thread(new Runnable() {
             @Override public void run() {
-                String reply = JawnPhoneBridge.scoFlow(JawnInCallService.this, key);
+                String reply = JawnPhoneBridge.scoFlow(JawnInCallService.this, key, machine);
                 if (reply == null) return;
                 try {
                     JSONObject answer = new JSONObject(reply);
@@ -392,7 +428,10 @@ public class JawnInCallService extends InCallService {
         if (!isScreened(JawnPhoneBridge.ivrFlowFor(this, JawnPhoneState.freshNumber(120_000)))) {
             return;
         }
-        String gatewayName = JawnPhoneBridge.ivrBluetoothName(this);
+        Trip routeTrip = trips.get(current);
+        String gatewayName = routeTrip != null && routeTrip.gatewayBluetooth != null
+                && !routeTrip.gatewayBluetooth.isEmpty()
+                ? routeTrip.gatewayBluetooth : JawnPhoneBridge.ivrBluetoothName(this);
         try { setAudioRoute(CallAudioState.ROUTE_BLUETOOTH); } catch (Throwable ignored) { }
         // Telecom carries the call on one of the Bluetooth devices it knows, and
         // with a second headset connected it picks the one it made active last.
@@ -462,7 +501,7 @@ public class JawnInCallService extends InCallService {
         holdOn = false;
         if (trip != null && trip.ivr) {
             JawnIvrAudio.restore(this);
-            JawnPhoneBridge.cancelGateway(this);
+            JawnPhoneBridge.cancelGateway(this, trip.gatewayMachine);
             JawnScreenFace.hide(this);
         }
         if (trip != null) writeTrip(trip);
@@ -489,7 +528,7 @@ public class JawnInCallService extends InCallService {
                 return;
             }
             JawnPhoneBridge.recordCall(this, trip.number, trip.direction, trip.started, ended,
-                    trip.answered, trip.ivr);
+                    trip.answered, trip.ivr, trip.gatewayMachine);
             JawnLog.append("call " + trip.direction + " " + trip.number + " "
                     + (trip.answered ? "answered" : "unanswered")
                     + (trip.ivr ? " (reception " + trip.flow + ")" : "")
@@ -644,8 +683,11 @@ public class JawnInCallService extends InCallService {
                 } catch (Throwable ignored) { }
             }
         }
+        Trip trip = svc == null ? null : svc.trips.get(current);
         if (out.bluetoothName.isEmpty()) {
-            out.bluetoothName = JawnPhoneBridge.ivrBluetoothName(context);
+            out.bluetoothName = trip != null && trip.gatewayBluetooth != null
+                    && !trip.gatewayBluetooth.isEmpty()
+                    ? trip.gatewayBluetooth : JawnPhoneBridge.ivrBluetoothName(context);
         }
         out.bluetoothOffered = (out.mask & CallAudioState.ROUTE_BLUETOOTH) != 0
                 && JawnIvrAudio.scoAvailable(context);
@@ -657,7 +699,6 @@ public class JawnInCallService extends InCallService {
         // reception flow answered this call (trip.ivr) and its gateway is still
         // carrying it (trip.gateway). "Connect phone" is the same test from the
         // other side: it has nothing to do once the call is home.
-        Trip trip = svc == null ? null : svc.trips.get(current);
         out.screened = trip != null && trip.ivr;
         out.gatewayCarried = out.screened && trip.gateway;
         out.hold = holdOn;
@@ -736,6 +777,14 @@ public class JawnInCallService extends InCallService {
         if (svc == null) return false;
         Trip trip = svc.trips.get(current);
         return trip != null && trip.ivr && trip.gateway;
+    }
+
+    /** The machine the current call chose, for the face and the house routes. */
+    public static String gatewayMachine() {
+        JawnInCallService svc = instance;
+        if (svc == null) return "";
+        Trip trip = svc.trips.get(current);
+        return trip == null ? "" : trip.gatewayMachine;
     }
 
     /**
@@ -854,7 +903,7 @@ public class JawnInCallService extends InCallService {
                 setGatewayCarried(false);
                 if (wasGateway) {
                     holdOn = false;
-                    JawnPhoneBridge.cancelGateway(app);
+                    JawnPhoneBridge.cancelGateway(app, gatewayMachine());
                 }
             }
             return;
@@ -863,7 +912,10 @@ public class JawnInCallService extends InCallService {
             say("no Bluetooth device is connected to carry the call");
             return;
         }
-        String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        Trip toggleTrip = svc == null ? null : svc.trips.get(current);
+        String gateway = toggleTrip != null && toggleTrip.gatewayBluetooth != null
+                && !toggleTrip.gatewayBluetooth.isEmpty()
+                ? toggleTrip.gatewayBluetooth : JawnPhoneBridge.ivrBluetoothName(app);
         final boolean sco;
         if (svc == null) {
             sco = JawnIvrAudio.routeToSco(app, gateway);
@@ -959,7 +1011,7 @@ public class JawnInCallService extends InCallService {
         }
         try { JawnIvrAudio.restore(app); } catch (Throwable ignored) { }
         restoreAudio();
-        JawnPhoneBridge.cancelGateway(app);
+        JawnPhoneBridge.cancelGateway(app, gatewayMachine());
         // the music came through the gateway's link; it is gone with it
         holdOn = false;
         // the face belongs to the gateway: once the call is home it has
@@ -990,25 +1042,43 @@ public class JawnInCallService extends InCallService {
         if (svc == null || current == null) { say("no call is up"); return; }
         Audio now = audioState(app);
         if (now.gatewayCarried) { say("the call is already on the house gateway"); return; }
-        final String gateway = JawnPhoneBridge.ivrBluetoothName(app);
+        Trip trip = svc.trips.get(current);
+        String machine = trip == null ? "" : trip.gatewayMachine;
+        String gateway = trip == null ? "" : trip.gatewayBluetooth;
+        if (machine.isEmpty()) {
+            // a call that came home keeps the machine it was screened on; one
+            // that never left the phone takes the first candidate on the list
+            for (JawnPhoneBridge.Gateway candidate : JawnPhoneBridge.ivrCandidates(app)) {
+                if (!candidate.enabled) continue;
+                machine = candidate.key;
+                gateway = candidate.bluetooth;
+                break;
+            }
+        }
+        if (gateway.isEmpty()) gateway = JawnPhoneBridge.ivrBluetoothName(app);
         if (gateway.isEmpty()) { say("the house has not named a gateway for this call"); return; }
         if (!now.bluetoothOffered) {
             say("no Bluetooth device is connected to carry the call");
             return;
         }
+        if (trip != null) {
+            if (trip.gatewayMachine.isEmpty()) trip.gatewayMachine = machine;
+            if (trip.gatewayBluetooth.isEmpty()) trip.gatewayBluetooth = gateway;
+        }
         // music would play into a link that is not carrying the call
         holdOn = false;
         say("handing the call back to " + gateway + "...");
         svc.routeCallToGateway();
-        awaitGatewayRoute(app, svc, gateway, System.currentTimeMillis());
+        awaitGatewayRoute(app, svc, gateway, machine, System.currentTimeMillis());
     }
 
     /** Wait for the named adapter, then let the gateway confirm the call. */
     private static void awaitGatewayRoute(final Context app, final JawnInCallService svc,
-                                          final String gateway, final long started) {
+                                          final String gateway, final String machine,
+                                          final long started) {
         if (instance != svc || current == null || state == Call.STATE_DISCONNECTED) return;
         if (routeIsGateway(app, gateway)) {
-            probeGateway(app, svc, gateway);
+            probeGateway(app, svc, gateway, machine);
             return;
         }
         if (System.currentTimeMillis() - started >= GATEWAY_WAIT_MS) {
@@ -1016,7 +1086,9 @@ public class JawnInCallService extends InCallService {
             return;
         }
         svc.handler.postDelayed(new Runnable() {
-            @Override public void run() { awaitGatewayRoute(app, svc, gateway, started); }
+            @Override public void run() {
+                awaitGatewayRoute(app, svc, gateway, machine, started);
+            }
         }, GATEWAY_POLL_MS);
     }
 
@@ -1058,10 +1130,10 @@ public class JawnInCallService extends InCallService {
 
     /** Ask the gateway itself; the answer, not the route, turns the flag on. */
     private static void probeGateway(final Context app, final JawnInCallService svc,
-                                     final String gateway) {
+                                     final String gateway, final String machine) {
         new Thread(new Runnable() {
             @Override public void run() {
-                JawnPhoneBridge.ScoState probe = JawnPhoneBridge.scoState(app);
+                JawnPhoneBridge.ScoState probe = JawnPhoneBridge.scoState(app, machine);
                 final boolean carrying = probe != null && probe.carrying;
                 final String why = probe == null
                         ? "the gateway did not answer"
@@ -1107,7 +1179,7 @@ public class JawnInCallService extends InCallService {
         say(stop ? "stopping the WebRTC bridge..." : "asking the gateway for the WebRTC bridge...");
         new Thread(new Runnable() {
             @Override public void run() {
-                String reply = JawnPhoneBridge.scoRtc(app, stop ? "stop" : "start");
+                String reply = JawnPhoneBridge.scoRtc(app, stop ? "stop" : "start", gatewayMachine());
                 if (reply == null) {
                     rtcOn = false;
                     say("the house did not answer the WebRTC request");
@@ -1153,7 +1225,7 @@ public class JawnInCallService extends InCallService {
         say(stop ? "stopping the hold music..." : "putting the caller on hold music...");
         new Thread(new Runnable() {
             @Override public void run() {
-                String reply = JawnPhoneBridge.scoHold(app, stop ? "stop" : "start");
+                String reply = JawnPhoneBridge.scoHold(app, stop ? "stop" : "start", gatewayMachine());
                 if (reply == null) {
                     say("the house did not answer the hold request");
                     return;
@@ -1209,7 +1281,8 @@ public class JawnInCallService extends InCallService {
         say("sending the caller to the house voicemail...");
         new Thread(new Runnable() {
             @Override public void run() {
-                VoicemailResult result = voicemailResult(JawnPhoneBridge.scoVoicemail(app, null));
+                VoicemailResult result = voicemailResult(
+                        JawnPhoneBridge.scoVoicemail(app, null, gatewayMachine()));
                 // sending the caller to voicemail stops the hold music before
                 // the greeting plays, so the screen must not keep painting
                 // "Hold: on"

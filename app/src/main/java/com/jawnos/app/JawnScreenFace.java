@@ -284,7 +284,7 @@ public final class JawnScreenFace {
             @Override public void run() {
                 boolean reported = false;
                 while (alive[0]) {
-                    String raw = JawnPhoneBridge.scoStatus(app);
+                    String raw = JawnPhoneBridge.scoStatus(app, JawnInCallService.gatewayMachine());
                     if (!alive[0]) return;
                     if (raw != null) {
                         try {
@@ -346,7 +346,7 @@ public final class JawnScreenFace {
         new Thread(new Runnable() {
             @Override public void run() {
                 JawnInCallService.VoicemailResult result = JawnInCallService.voicemailResult(
-                        JawnPhoneBridge.scoVoicemail(app, null));
+                        JawnPhoneBridge.scoVoicemail(app, null, JawnInCallService.gatewayMachine()));
                 // the gateway stops its music before the greeting, so the call
                 // screen must not keep painting "Hold: on"
                 if (result.accepted) JawnInCallService.holdOn = false;

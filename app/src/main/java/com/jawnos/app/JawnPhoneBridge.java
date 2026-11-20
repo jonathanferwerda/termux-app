@@ -18,6 +18,7 @@ import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -268,7 +269,19 @@ public class JawnPhoneBridge {
      */
     public static boolean ivrShouldScreen(Context context, String number) {
         if (!ivrEnabled(context)) return false;
-        if (!ivrMachineAvailable(context) && !JawnIvrAudio.scoAvailable(context)) return false;
+        boolean hasList = ivrHasMachines(context);
+        boolean any = false;
+        for (Gateway gateway : ivrGateways(context)) {
+            if (gateway.enabled) { any = true; break; }
+        }
+        // An explicit empty list means no gateway, not "fall back to the old
+        // single machine"; an absent list keeps the older single-gateway test.
+        if (hasList) {
+            if (!any) return false;
+        }
+        else if (!ivrMachineAvailable(context) && !JawnIvrAudio.scoAvailable(context)) {
+            return false;
+        }
         return ivrScreened(ivrFlowFor(context, number));
     }
 
@@ -307,6 +320,90 @@ public class JawnPhoneBridge {
             return ivr == null ? new JSONObject() : ivr;
         } catch (Throwable t) { return new JSONObject(); }
     }
+
+    /** One ranked gateway the house handed the phone. */
+    public static final class Gateway {
+        public final String key, signatorial, bluetooth, hostname, audio;
+        public final boolean enabled, available, able, local;
+        public final int rank;
+        Gateway(String key, String signatorial, String bluetooth, String hostname, String audio,
+                boolean enabled, boolean available, boolean able, boolean local, int rank) {
+            this.key = key == null ? "" : key;
+            this.signatorial = signatorial == null ? "" : signatorial;
+            this.bluetooth = bluetooth == null ? "" : bluetooth;
+            this.hostname = hostname == null ? "" : hostname;
+            this.audio = audio == null ? "" : audio;
+            this.enabled = enabled;
+            this.available = available;
+            this.able = able;
+            this.local = local;
+            this.rank = rank;
+        }
+    }
+
+    /** Did the house hand over the ranked list, even an empty one? */
+    public static boolean ivrHasMachines(Context context) {
+        try { return ivrFacts(context).optJSONArray("machines") != null; }
+        catch (Throwable t) { return false; }
+    }
+
+    /** The ranked gateways, in the order the house saved them. */
+    public static List<Gateway> ivrGateways(Context context) {
+        List<Gateway> out = new ArrayList<>();
+        try {
+            JSONArray arr = ivrFacts(context).optJSONArray("machines");
+            if (arr == null) return out;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject row = arr.optJSONObject(i);
+                if (row == null) continue;
+                String key = row.optString("key", "");
+                if (key == null || key.trim().isEmpty()) continue;
+                String sig = row.optString("signatorial", key);
+                out.add(new Gateway(
+                        key.trim(),
+                        sig == null || sig.trim().isEmpty() ? key.trim() : sig.trim(),
+                        text(row.optString("bluetooth", "")),
+                        row.optString("hostname", key),
+                        row.optString("audio", ""),
+                        row.optBoolean("enabled", true),
+                        row.optBoolean("available", false),
+                        row.optBoolean("able", false),
+                        row.optBoolean("local", false),
+                        row.optInt("rank", i + 1)));
+            }
+        } catch (Throwable ignored) { }
+        return out;
+    }
+
+    /**
+     * The gateways a call may be screened on, in the house's order.
+     *
+     * An absent list is the older single machine (the scalar ivr_machine /
+     * ivr_bluetooth rows). That one is kept trust-first: it is not required to
+     * advertise the ability, because it predates the advert. An explicit list
+     * is used as saved, including an empty one.
+     */
+    public static List<Gateway> ivrCandidates(Context context) {
+        if (ivrHasMachines(context)) return ivrGateways(context);
+        List<Gateway> out = new ArrayList<>();
+        String machine = ivrMachine(context);
+        String bluetooth = ivrBluetoothName(context);
+        if (bluetooth.isEmpty() && machine.isEmpty()) return out;
+        out.add(new Gateway(
+                machine.isEmpty() ? "local" : machine,
+                machine.isEmpty() ? "this machine" : machine,
+                bluetooth,
+                machine,
+                "",
+                true,
+                true,
+                true,
+                false,
+                1));
+        return out;
+    }
+
+    private static String text(String value) { return value == null ? "" : value.trim(); }
 
     /** The caller's picture as a data URI, or "" when the house has none. */
     public static String avatarFor(Context context, String number) {
@@ -354,6 +451,12 @@ public class JawnPhoneBridge {
     /** The same record, saying whether the reception flow answered it. */
     public static void recordCall(Context context, String number, String direction,
                                   long started, long ended, boolean answered, boolean screened) {
+        recordCall(context, number, direction, started, ended, answered, screened, "");
+    }
+
+    public static void recordCall(Context context, String number, String direction,
+                                  long started, long ended, boolean answered, boolean screened,
+                                  String gateway) {
         String want = lastTen(number);
         if (want.isEmpty()) return;
         try {
@@ -367,6 +470,7 @@ public class JawnPhoneBridge {
             call.put("ended", ended);
             call.put("answered", answered);
             if (screened) call.put("screened", true);
+            if (gateway != null && !gateway.trim().isEmpty()) call.put("gateway", gateway.trim());
             list.put(call);
             p.edit().putString(CALLS_LOG, list.toString()).apply();
         } catch (Throwable ignored) { }
@@ -410,6 +514,10 @@ public class JawnPhoneBridge {
      * starts - and a failure changes nothing.
      */
     public static void cancelGateway(final Context context) {
+        cancelGateway(context, "");
+    }
+
+    public static void cancelGateway(final Context context, final String machine) {
         final Context app = context.getApplicationContext();
         new Thread(new Runnable() {
             @Override public void run() {
@@ -423,12 +531,20 @@ public class JawnPhoneBridge {
                     conn.setReadTimeout(4000);
                     conn.setRequestMethod("POST");
                     conn.setDoOutput(true);
+                    String gateway = text(machine);
+                    byte[] bytes = gateway.isEmpty()
+                            ? new byte[0]
+                            : ("machine=" + Uri.encode(gateway)).getBytes("UTF-8");
+                    if (bytes.length > 0) {
+                        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                        conn.setFixedLengthStreamingMode(bytes.length);
+                    }
                     String cookie = presidentCookie(app, origin, port);
                     if (cookie != null && !cookie.isEmpty()) {
                         conn.setRequestProperty("Cookie", cookie);
                     }
                     OutputStream out = conn.getOutputStream();
-                    try { out.write(new byte[0]); } finally { out.close(); }
+                    try { out.write(bytes); } finally { out.close(); }
                     JawnLog.append("ivr: gateway cancel " + conn.getResponseCode());
                 } catch (Throwable t) {
                     JawnLog.append("ivr: gateway cancel failed: " + t);
@@ -454,12 +570,18 @@ public class JawnPhoneBridge {
      * up to the read timeout, so it belongs on a worker thread.
      */
     public static String scoRtc(Context context, String action) {
+        return scoRtc(context, action, "");
+    }
+
+    public static String scoRtc(Context context, String action, String machine) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
+            String gateway = text(machine);
             String body = "action=" + Uri.encode(action == null ? "" : action);
+            if (!gateway.isEmpty()) body += "&machine=" + Uri.encode(gateway);
             byte[] bytes = body.getBytes("UTF-8");
             conn = (HttpURLConnection) new URL(origin + "/manager/sco/rtc").openConnection();
             trustHouse(conn);
@@ -513,12 +635,18 @@ public class JawnPhoneBridge {
      * Blocks for up to the read timeout, so it belongs on a worker thread.
      */
     public static String scoHold(Context context, String action) {
+        return scoHold(context, action, "");
+    }
+
+    public static String scoHold(Context context, String action, String machine) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
+            String gateway = text(machine);
             String body = "action=" + Uri.encode(action == null ? "" : action);
+            if (!gateway.isEmpty()) body += "&machine=" + Uri.encode(gateway);
             byte[] bytes = body.getBytes("UTF-8");
             conn = (HttpURLConnection) new URL(origin + "/manager/sco/hold").openConnection();
             trustHouse(conn);
@@ -572,12 +700,18 @@ public class JawnPhoneBridge {
      * Blocks for up to the read timeout, so it belongs on a worker thread.
      */
     public static ScoReply scoVoicemail(Context context, String text) {
+        return scoVoicemail(context, text, "");
+    }
+
+    public static ScoReply scoVoicemail(Context context, String text, String machine) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
+            String gateway = text(machine);
             String body = "text=" + Uri.encode(text == null ? "" : text);
+            if (!gateway.isEmpty()) body += "&machine=" + Uri.encode(gateway);
             byte[] bytes = body.getBytes("UTF-8");
             conn = (HttpURLConnection) new URL(origin + "/manager/sco/voicemail").openConnection();
             trustHouse(conn);
@@ -661,12 +795,18 @@ public class JawnPhoneBridge {
      * the answer - so it belongs on a worker thread.
      */
     public static String scoFlow(Context context, String flow) {
+        return scoFlow(context, flow, "");
+    }
+
+    public static String scoFlow(Context context, String flow, String machine) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
+            String gateway = text(machine);
             String body = "flow=" + Uri.encode(flow == null ? "" : flow);
+            if (!gateway.isEmpty()) body += "&machine=" + Uri.encode(gateway);
             byte[] bytes = body.getBytes("UTF-8");
             conn = (HttpURLConnection) new URL(origin + "/manager/sco/flow").openConnection();
             trustHouse(conn);
@@ -715,14 +855,25 @@ public class JawnPhoneBridge {
      * shows the caller and its two buttons, and the call service is untouched.
      */
     public static String scoStatus(Context context) {
+        return scoStatus(context, "");
+    }
+
+    public static String scoStatus(Context context, String machine) {
         Context app = context.getApplicationContext();
         int port = JawnLauncher.getJawnPort(app);
         String origin = "https://" + JawnLauncher.managerHost(app) + ":" + port;
         HttpURLConnection conn = null;
         try {
             String number = JawnPhoneState.freshNumber(120_000);
-            String query = (number == null || number.isEmpty()) ? "" : "?number=" + Uri.encode(number);
-            conn = (HttpURLConnection) new URL(origin + "/manager/sco/status" + query).openConnection();
+            String gateway = text(machine);
+            StringBuilder query = new StringBuilder();
+            if (number != null && !number.isEmpty()) query.append("number=").append(Uri.encode(number));
+            if (!gateway.isEmpty()) {
+                if (query.length() > 0) query.append('&');
+                query.append("machine=").append(Uri.encode(gateway));
+            }
+            String suffix = query.length() == 0 ? "" : "?" + query;
+            conn = (HttpURLConnection) new URL(origin + "/manager/sco/status" + suffix).openConnection();
             trustHouse(conn);
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(4000);
@@ -776,7 +927,11 @@ public class JawnPhoneBridge {
     }
 
     public static ScoState scoState(Context context) {
-        String body = scoStatus(context);
+        return scoState(context, "");
+    }
+
+    public static ScoState scoState(Context context, String machine) {
+        String body = scoStatus(context, machine);
         if (body == null) {
             return new ScoState(false, false, "", "", "the gateway did not answer");
         }

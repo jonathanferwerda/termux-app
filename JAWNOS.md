@@ -336,3 +336,23 @@
   app as `large_icon_b64`; `DeviceService.notificationPost` decodes it for the
   notification's large icon. The `.enc` stays sealed on disk: no `.thumbs`
   entry and no temporary output are written. Build 1349.
+
+## Deltas round X+12 (the ranked IVR list)
+
+- **A screened call is answered on the first gateway that is ready.**
+  `JawnPhoneBridge.Gateway`, `ivrGateways()` and `ivrCandidates()` read the
+  house's `phone.ivr_machines` list in its saved order; an absent list keeps the
+  older single `ivr_machine`/`ivr_bluetooth` pair. `JawnInCallService.screenWhenGatewayReady`
+  tries each enabled candidate in turn: it must be online and advertising the
+  crew's `ivr` ability, be paired with this phone with its Hands-Free link open,
+  and answer the status probe. The first that does is recorded on the trip
+  (`gatewayMachine`/`gatewayBluetooth`), named the caller's flow, answered and
+  routed. If none is ready the call rings through and the normal screen shows -
+  it is never answered into silence. Build 1350.
+- **Every gateway request names the machine.** `scoFlow`, `scoStatus`,
+  `scoState`, `scoHold`, `scoVoicemail`, `scoRtc` and `cancelGateway` carry the
+  chosen signatorial, so the screening face, hold, the WebRTC bridge, voicemail
+  and the hand-back ask the machine that answered rather than the house's older
+  default. The call record carries `gateway`, and the page posts it to
+  `/manager/phone/call`, so the transcript is filed from that machine's live
+  status; a local `.jsonl` is read only when the gateway is this machine.
