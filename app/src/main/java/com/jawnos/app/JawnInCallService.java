@@ -321,13 +321,15 @@ public class JawnInCallService extends InCallService {
                         problem = gateway.signatorial + ": " + link;
                         continue;
                     }
-                    JawnPhoneBridge.ScoState probe =
-                            JawnPhoneBridge.scoState(JawnInCallService.this, gateway.key);
-                    if (probe == null || !probe.answered) {
-                        problem = gateway.signatorial + ": "
-                                + (probe == null || probe.error.isEmpty()
-                                    ? "the gateway did not answer" : probe.error);
-                        continue;
+                    if (ranked) {
+                        JawnPhoneBridge.ScoState probe =
+                                JawnPhoneBridge.scoState(JawnInCallService.this, gateway.key);
+                        if (probe == null || !probe.answered) {
+                            problem = gateway.signatorial + ": "
+                                    + (probe == null || probe.error.isEmpty()
+                                        ? "the gateway did not answer" : probe.error);
+                            continue;
+                        }
                     }
                     chosen = gateway;
                     break;

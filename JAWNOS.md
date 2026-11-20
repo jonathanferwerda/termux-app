@@ -348,7 +348,10 @@
   and answer the status probe. The first that does is recorded on the trip
   (`gatewayMachine`/`gatewayBluetooth`), named the caller's flow, answered and
   routed. If none is ready the call rings through and the normal screen shows -
-  it is never answered into silence. Build 1350.
+  it is never answered into silence. An older house that names no machine keeps
+  its old behaviour: it is answered on its Bluetooth adapter alone, with no live
+  probe, so a gateway the old code never armed cannot start ringing calls
+  through. Build 1351.
 - **Every gateway request names the machine.** `scoFlow`, `scoStatus`,
   `scoState`, `scoHold`, `scoVoicemail`, `scoRtc` and `cancelGateway` carry the
   chosen signatorial, so the screening face, hold, the WebRTC bridge, voicemail

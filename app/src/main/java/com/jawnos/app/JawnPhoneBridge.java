@@ -380,8 +380,10 @@ public class JawnPhoneBridge {
      *
      * An absent list is the older single machine (the scalar ivr_machine /
      * ivr_bluetooth rows). That one is kept trust-first: it is not required to
-     * advertise the ability, because it predates the advert. An explicit list
-     * is used as saved, including an empty one.
+     * advertise the ability, because it predates the advert, and it may name no
+     * machine at all - "" then asks the house's own default gateway, which is
+     * exactly what the old single-machine code did. An explicit list is used as
+     * saved, including an empty one.
      */
     public static List<Gateway> ivrCandidates(Context context) {
         if (ivrHasMachines(context)) return ivrGateways(context);
@@ -390,8 +392,8 @@ public class JawnPhoneBridge {
         String bluetooth = ivrBluetoothName(context);
         if (bluetooth.isEmpty() && machine.isEmpty()) return out;
         out.add(new Gateway(
-                machine.isEmpty() ? "local" : machine,
-                machine.isEmpty() ? "this machine" : machine,
+                machine,
+                machine.isEmpty() ? "this house's gateway" : machine,
                 bluetooth,
                 machine,
                 "",
