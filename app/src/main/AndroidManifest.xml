@@ -574,6 +574,18 @@
                 android:value="jawnos-device-bridge" />
         </service>
 
+        <!-- The Studio take's process anchor: a microphone (plus USB
+             connectedDevice) foreground service that owns the Rust Oboe engine.
+             Not exported; it starts from the app's own activity or dashboard.
+             stopWithTask=false keeps the take alive when the activity task is
+             swiped away. The microphone permission is checked before the
+             foreground type is claimed. -->
+        <service
+            android:name=".app.JawnAudioService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|connectedDevice"
+            android:stopWithTask="false" />
+
         <!-- Reads the shade for termux-notification-list; connects only after
              the person grants Notification access. -->
         <service

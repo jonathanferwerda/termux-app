@@ -61,8 +61,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1352
-        versionName "0.118.354"
+        versionCode 1353
+        versionName "0.118.355"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -112,6 +112,12 @@ android {
     // Optional extra native libraries staged by the release scripts. When the
     // -PjawnNativeBins property is absent this is a no-op, so the default
     // jniLibs packaging is unchanged.
+    // The Studio engine's libjawn_audio.so is staged into src/main/jniLibs by
+    // `perl scripts/build_engine.pl --android --out-dir .../src/main/jniLibs`.
+    // Gradle's default jniLibs source set packages that folder; the CMake build
+    // never links it and this build never runs cargo. useLegacyPackaging (below)
+    // keeps both native libraries extracted, which is what the Java side's
+    // System.loadLibrary/dlopen expects.
     def jawnNativeBins = project.findProperty('jawnNativeBins')
     if (jawnNativeBins) {
         sourceSets {

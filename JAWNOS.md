@@ -374,3 +374,32 @@
   branch, before `showScreen()`, and logs
   `ivr: no gateway can answer; ringing through silently` only when it acted:
   with silence off the ring path is unchanged. Build 1352.
+
+## Deltas round X+14 (the Studio take's Rust Oboe engine)
+
+- **The Rust engine reaches Java through a shim, not JNI symbols.**
+  `engine/src/oboe_device.rs` exports a plain C ABI
+  (`jawn_audio_start/stop/status/free`), so `app/src/main/java/com/jawnos/app/JawnAudioEngine.java`
+  cannot bind to it with `native` methods. The new
+  `app/src/main/cpp/JawnAudioEngineJni.cpp` is compiled into the existing
+  `libjawnaudio.so` (the library `JawnAudioOboe` already loads), `dlopen()`s
+  `libjawn_audio.so`, resolves the four functions with `dlsym`, and exports
+  `Java_com_jawnos_app_JawnAudioEngine_*`. `JawnAudioEngine` therefore loads
+  `jawnaudio` (the shim), never `jawn_audio`, and a build missing either
+  library answers `{"ok":0,"error":...}` instead of throwing. The engine ABI
+  and its default (no-C++) feature set are untouched.
+- **A take survives the page.** `app/src/main/java/com/jawnos/app/JawnAudioService.java`
+  is the process anchor: a foreground service typed
+  `microphone|connectedDevice` that starts the Rust take, holds a
+  `PARTIAL_WAKE_LOCK` (released in `onDestroy`) and closes the WAV by stopping
+  the engine, which joins its worker. `RECORD_AUDIO` is checked before the
+  microphone type is claimed; without it the service refuses with a sentence
+  and never goes foreground. Capture alone needs no audio focus, so there is
+  no `AudioFocusRequest`; the monitoring half will add one. The manifest entry
+  is `.app.JawnAudioService`, `exported=false`, `stopWithTask=false`.
+- **The Rust library is staged, never built by Gradle.**
+  `perl scripts/build_engine.pl --android --out-dir .../app/src/main/jniLibs`
+  writes `app/src/main/jniLibs/arm64-v8a/libjawn_audio.so` (gitignored);
+  Gradle's default `jniLibs` source set packages it beside `libjawnaudio.so`.
+  `app/build.gradle` keeps `useLegacyPackaging true` and gains only a comment:
+  no cargo task, no linked dependency on the Rust library. Build 1353.
