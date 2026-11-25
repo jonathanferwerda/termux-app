@@ -58,6 +58,8 @@ public class JawnAudioService extends Service {
     public static final String EXTRA_DEVICE_ID = "device_id";
     public static final String EXTRA_SECONDS = "seconds";
     public static final String EXTRA_OUT = "out";
+    /** One Channel plan's JSON, empty on the raw path. */
+    public static final String EXTRA_PLAN = "plan";
 
     /** Negative asks the HAL to pick the input, the same rule the engine uses. */
     public static final int DEFAULT_DEVICE = -1;
@@ -94,6 +96,15 @@ public class JawnAudioService extends Service {
      * type anyway.
      */
     public static String start(Context context, int deviceId, double seconds, String out) {
+        return start(context, deviceId, seconds, out, "");
+    }
+
+    /**
+     * Start a take through one Channel plan. An empty {@code plan} is the raw
+     * path and is exactly the four-argument start above.
+     */
+    public static String start(Context context, int deviceId, double seconds, String out,
+            String plan) {
         if (!hasPermission(context)) {
             lastStatus = errorJson("the microphone permission is not granted; "
                     + "allow RECORD_AUDIO to record a take");
@@ -103,7 +114,8 @@ public class JawnAudioService extends Service {
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_DEVICE_ID, deviceId)
                 .putExtra(EXTRA_SECONDS, seconds)
-                .putExtra(EXTRA_OUT, out == null ? "" : out);
+                .putExtra(EXTRA_OUT, out == null ? "" : out)
+                .putExtra(EXTRA_PLAN, plan == null ? "" : plan);
         try {
             ContextCompat.startForegroundService(context, intent);
         } catch (Throwable t) {
@@ -161,6 +173,8 @@ public class JawnAudioService extends Service {
         double seconds = intent.getDoubleExtra(EXTRA_SECONDS, 0d);
         String out = intent.getStringExtra(EXTRA_OUT);
         if (out == null || out.trim().isEmpty()) out = defaultTakePath();
+        String plan = intent.getStringExtra(EXTRA_PLAN);
+        if (plan == null) plan = "";
 
         if (!startForegroundCompat("Recording")) {
             lastStatus = errorJson("the microphone foreground service was refused");
@@ -170,7 +184,9 @@ public class JawnAudioService extends Service {
         running = true;
         acquireWakeLock();
 
-        String answer = JawnAudioEngine.start(deviceId, seconds, out);
+        String answer = plan.trim().isEmpty()
+                ? JawnAudioEngine.start(deviceId, seconds, out)
+                : JawnAudioEngine.startPlan(deviceId, seconds, out, plan);
         lastStatus = answer;
         if (!JawnAudioEngine.running(answer)) {
             Log.w(TAG, "the take did not start: " + answer);
@@ -217,6 +233,10 @@ public class JawnAudioService extends Service {
 
         public String start(int deviceId, double seconds, String out) {
             return JawnAudioService.start(JawnAudioService.this, deviceId, seconds, out);
+        }
+
+        public String start(int deviceId, double seconds, String out, String plan) {
+            return JawnAudioService.start(JawnAudioService.this, deviceId, seconds, out, plan);
         }
 
         public String stop() {

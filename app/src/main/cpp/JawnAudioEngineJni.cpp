@@ -23,6 +23,8 @@ constexpr const char *kTag = "JawnAudioEngineJni";
 constexpr const char *kLibrary = "libjawn_audio.so";
 
 using StartFn = char *(*)(int, double, const char *);
+using StartPlanFn = char *(*)(int, double, const char *, const char *);
+using FixturePlanFn = char *(*)();
 using StopFn = char *(*)();
 using StatusFn = char *(*)();
 using BackendsFn = char *(*)();
@@ -30,6 +32,10 @@ using FreeFn = void (*)(char *);
 
 struct Engine {
     StartFn start = nullptr;
+    // Optional: a plan-carrying start and the fixture bytes (2026-11 slice).
+    // A take without a plan still works on an engine that predates them.
+    StartPlanFn start_plan = nullptr;
+    FixturePlanFn fixture_plan = nullptr;
     StopFn stop = nullptr;
     StatusFn status = nullptr;
     // Optional: an engine built before the backends report still works.
@@ -96,6 +102,8 @@ Engine &engine() {
         return cached;
     }
     cached.start = reinterpret_cast<StartFn>(dlsym(handle, "jawn_audio_start"));
+    cached.start_plan = reinterpret_cast<StartPlanFn>(dlsym(handle, "jawn_audio_start_plan"));
+    cached.fixture_plan = reinterpret_cast<FixturePlanFn>(dlsym(handle, "jawn_audio_fixture_plan"));
     cached.stop = reinterpret_cast<StopFn>(dlsym(handle, "jawn_audio_stop"));
     cached.status = reinterpret_cast<StatusFn>(dlsym(handle, "jawn_audio_status"));
     cached.backends = reinterpret_cast<BackendsFn>(dlsym(handle, "jawn_audio_backends"));
@@ -136,6 +144,49 @@ Java_com_jawnos_app_JawnAudioEngine_nativeStart(
                               static_cast<double>(seconds), path);
     if (path != nullptr) env->ReleaseStringUTFChars(out, path);
     return answer(env, engine, text);
+}
+
+// The plan-carrying start. An engine without the symbol still starts a raw
+// take when the plan is empty; a plan it cannot run is a sentence, never a
+// silently raw recording.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeStartPlan(
+        JNIEnv *env, jclass, jint deviceId, jdouble seconds, jstring out, jstring plan) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+
+    const char *path = nullptr;
+    if (out != nullptr) path = env->GetStringUTFChars(out, nullptr);
+    const char *planText = nullptr;
+    if (plan != nullptr) planText = env->GetStringUTFChars(plan, nullptr);
+
+    char *text = nullptr;
+    if (engine.start_plan != nullptr) {
+        text = engine.start_plan(static_cast<int>(deviceId),
+                                 static_cast<double>(seconds), path, planText);
+    } else if (planText == nullptr || planText[0] == '\0') {
+        text = engine.start(static_cast<int>(deviceId),
+                            static_cast<double>(seconds), path);
+    }
+
+    if (planText != nullptr) env->ReleaseStringUTFChars(plan, planText);
+    if (path != nullptr) env->ReleaseStringUTFChars(out, path);
+    if (text == nullptr && engine.start_plan == nullptr) {
+        return errorString(env, "this engine build has no plan-carrying start");
+    }
+    return answer(env, engine, text);
+}
+
+// The one fixture plan, asked of the engine so Linux and the phone run exactly
+// the same bytes.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeFixturePlan(JNIEnv *env, jclass) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.fixture_plan == nullptr) {
+        return errorString(env, "this engine build has no fixture plan");
+    }
+    return answer(env, engine, engine.fixture_plan());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

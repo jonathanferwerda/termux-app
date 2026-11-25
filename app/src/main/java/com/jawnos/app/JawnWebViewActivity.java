@@ -524,6 +524,22 @@ public class JawnWebViewActivity extends Activity {
               seconds.value='600';
               seconds.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666;padding:2px 4px;box-sizing:border-box';
               panel.appendChild(seconds);
+              var planLabel=document.createElement('div');
+              planLabel.textContent=T('Take through');
+              planLabel.style.cssText='margin:4px 0 2px';
+              panel.appendChild(planLabel);
+              var planSelect=document.createElement('select');
+              planSelect.id='jawn_native_plan';
+              planSelect.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666';
+              var rawOption=document.createElement('option');
+              rawOption.value='';
+              rawOption.textContent=T('Raw (no strip)');
+              planSelect.appendChild(rawOption);
+              var fixtureOption=document.createElement('option');
+              fixtureOption.value='fixture';
+              fixtureOption.textContent=T('Tone + delay fixture');
+              planSelect.appendChild(fixtureOption);
+              panel.appendChild(planSelect);
               var row=document.createElement('div');
               row.style.cssText='display:flex;gap:6px;margin-bottom:6px';
               var startButton=document.createElement('button');
@@ -558,6 +574,7 @@ public class JawnWebViewActivity extends Activity {
               }catch(e){}
 
               var timer=null, stopping=false, sawStarted=false, ticks=0, backends='';
+              var fixturePlanText='';
               var show=function(text){line.textContent=String(text);};
               var loadedText='';
               try{loadedText=JawnAudioEngine.load();}catch(e){loadedText='load failed: '+e;}
@@ -566,7 +583,15 @@ public class JawnWebViewActivity extends Activity {
                 backends=(loaded&&loaded.backends!==undefined)
                   ?JSON.stringify(loaded.backends):String(loadedText);
               }catch(e){backends=String(loadedText);}
-              show('backends: '+backends);
+              try{
+                var candidate=String(JawnAudioEngine.fixturePlan()||'');
+                if(candidate.charAt(0)==='{')fixturePlanText=candidate;
+              }catch(e){}
+              if(!fixturePlanText){
+                fixtureOption.disabled=true;
+                fixtureOption.textContent=T('Tone + delay fixture (not in this build)');
+              }
+              show('backends: '+backends+NL+'plan fixture: '+(fixturePlanText||'unavailable'));
 
               var describe=function(report){
                 var lines=['backends: '+backends];
@@ -574,7 +599,7 @@ public class JawnWebViewActivity extends Activity {
                 try{parsed=JSON.parse(report);}catch(e){}
                 if(parsed){
                   var keep=['ok','error','state','backend','device','sharing','performance',
-                    'rate','frames','buffer','channels','xruns','frames_captured','peak','take'];
+                    'rate','frames','buffer','channels','xruns','frames_captured','peak','plan','take'];
                   for(var i=0;i<keep.length;i++){
                     if(parsed[keep[i]]!==undefined)lines.push(keep[i]+': '+parsed[keep[i]]);
                   }
@@ -628,10 +653,19 @@ public class JawnWebViewActivity extends Activity {
                 ticks=0;
                 var id=select.value||'-1';
                 var secs=seconds.value||'600';
+                var plan='';
+                if(planSelect.value==='fixture'){
+                  plan=fixturePlanText;
+                  if(!plan){show('the tone+delay fixture is not in this build');return;}
+                }
                 var stamp=(new Date()).toISOString().replace(/[:.]/g,'-');
                 var out='/sdcard/Download/jawnos-native-take-'+stamp+'.wav';
                 var reply;
-                try{reply=JawnAudioEngine.start(id,secs,out);}
+                try{
+                  reply=(typeof JawnAudioEngine.startPlan==='function')
+                    ?JawnAudioEngine.startPlan(id,secs,out,plan)
+                    :JawnAudioEngine.start(id,secs,out);
+                }
                 catch(e){reply='{"ok":0,"error":"start failed"}';}
                 var parsed=null;
                 try{parsed=JSON.parse(reply);}catch(e){}
@@ -641,7 +675,7 @@ public class JawnWebViewActivity extends Activity {
                 }
                 startButton.disabled=true;
                 stopButton.disabled=false;
-                show('started'+NL+'file: '+out+NL+'answer: '+String(reply));
+                show('started'+NL+'file: '+out+NL+'plan: '+(plan||'raw')+NL+'answer: '+String(reply));
                 timer=setInterval(tick,1000);
               };
 

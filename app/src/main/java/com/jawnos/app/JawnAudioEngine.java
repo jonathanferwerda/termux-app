@@ -45,6 +45,10 @@ public final class JawnAudioEngine {
 
     private static native String nativeStart(int deviceId, double seconds, String out);
 
+    private static native String nativeStartPlan(int deviceId, double seconds, String out, String plan);
+
+    private static native String nativeFixturePlan();
+
     private static native String nativeStop();
 
     private static native String nativeStatus();
@@ -74,6 +78,35 @@ public final class JawnAudioEngine {
             return nativeStart(deviceId, seconds, out);
         } catch (Throwable t) {
             return failure("the audio engine could not start: " + t);
+        }
+    }
+
+    /**
+     * Start a take through one Channel plan (docs/studio-oboe-slice.md §9 item
+     * 3). A null or empty {@code plan} is exactly {@link #start}: the raw path.
+     * Any other value is the engine's one-object plan JSON, such as the bytes
+     * {@link #fixturePlan()} returns.
+     */
+    public static String startPlan(int deviceId, double seconds, String out, String plan) {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeStartPlan(deviceId, seconds, out, plan == null ? "" : plan);
+        } catch (Throwable t) {
+            return failure("the audio engine could not start: " + t);
+        }
+    }
+
+    /**
+     * The engine's own tone+delay fixture plan, as the JSON string a take
+     * carries. Asking the engine for these bytes is what keeps the Linux test
+     * and the phone on one plan instead of two copies.
+     */
+    public static String fixturePlan() {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeFixturePlan();
+        } catch (Throwable t) {
+            return failure("the audio engine could not report its fixture: " + t);
         }
     }
 

@@ -81,6 +81,38 @@ public class JawnAudioEngineBridge {
     }
 
     /**
+     * Start a take through one Channel plan. The arguments arrive as strings;
+     * an empty {@code plan} is the raw path. The engine validates the plan
+     * before any stream opens, so a refused plan answers a sentence.
+     */
+    @JavascriptInterface
+    public String startPlan(String deviceId, String seconds, String out, String plan) {
+        int id = parseInt(deviceId, -1);
+        double secs = parseDouble(seconds, 600d);
+        String path = out == null || out.trim().isEmpty() ? null : out;
+        String chosen = plan == null ? "" : plan.trim();
+        try {
+            return JawnAudioService.start(context, id, secs, path, chosen);
+        } catch (Throwable t) {
+            return error("the audio service could not start: " + t);
+        }
+    }
+
+    /**
+     * The engine's own tone+delay fixture plan. The panel sends these bytes
+     * back through {@link #startPlan}, so the plan the Linux test measures and
+     * the plan the phone runs are the same string.
+     */
+    @JavascriptInterface
+    public String fixturePlan() {
+        try {
+            return JawnAudioEngine.fixturePlan();
+        } catch (Throwable t) {
+            return error("the audio engine could not report its fixture: " + t);
+        }
+    }
+
+    /**
      * End the take: the engine joins its worker and answers the final report,
      * then the service is torn down (its notification goes with it). The
      * engine's report is returned, not the teardown's silence.

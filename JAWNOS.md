@@ -475,3 +475,18 @@
   symbols from its own dependency graph. `t/428-oboe-backend.t` pins both
   flags. The staged arm64 library keeps `jawn_audio_backends`, and the shim's
   global preload stays as a harmless best-effort guard. Build 1356.
+
+## Deltas round X+18 (the take's Channel plan and the fixture)
+
+- **A take can run one Channel.** `JawnAudioEngine.startPlan(deviceId,
+  seconds, out, plan)` calls the engine's additive `jawn_audio_start_plan`;
+  `fixturePlan()` returns the engine's own `jawn_audio_fixture_plan` bytes.
+  A null/empty plan is the unchanged raw path, and the JNI shim resolves both
+  symbols as optional so an older engine still starts a raw take.
+  `JawnAudioService` carries `EXTRA_PLAN`; the four-argument `start` delegates
+  with an empty plan.
+- **The native panel can choose the strip.** *Take through* offers *Raw (no
+  strip)* and *Tone + delay fixture*; the fixture option is disabled with a
+  sentence when the engine does not carry the plan. The status block lists the
+  report's `plan`, so the sidecar says `tone+delay` when the fixture ran.
+  Build 1358.
