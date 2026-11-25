@@ -463,3 +463,15 @@
 - **The gate always gets a backends file.** `JawnAudioEngineBridge.load()`
   writes the error JSON to `/sdcard/Download/jawnos-native-backends.json` when
   even the shim is missing, not only when the engine loads. Build 1355.
+
+## Deltas round X+17 (the engine carries its own C++ runtime)
+
+- **The Android engine links libc++_shared.** The 1355 global preload was not
+  enough: Android does not promote an already-loaded STL into the global
+  lookup scope, so `dlopen("libjawn_audio.so")` still failed on
+  `__cxa_pure_virtual`. `scripts/build_engine.pl --android` in the jawnos tree
+  now sets `CARGO_ENCODED_RUSTFLAGS` with `-Wl,--no-as-needed -lc++_shared`, so
+  the rebuilt cdylib lists `libc++_shared.so` in `NEEDED` and resolves its C++
+  symbols from its own dependency graph. `t/428-oboe-backend.t` pins both
+  flags. The staged arm64 library keeps `jawn_audio_backends`, and the shim's
+  global preload stays as a harmless best-effort guard. Build 1356.
