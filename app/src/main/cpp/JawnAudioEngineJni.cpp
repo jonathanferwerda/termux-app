@@ -25,12 +25,15 @@ constexpr const char *kLibrary = "libjawn_audio.so";
 using StartFn = char *(*)(int, double, const char *);
 using StopFn = char *(*)();
 using StatusFn = char *(*)();
+using BackendsFn = char *(*)();
 using FreeFn = void (*)(char *);
 
 struct Engine {
     StartFn start = nullptr;
     StopFn stop = nullptr;
     StatusFn status = nullptr;
+    // Optional: an engine built before the backends report still works.
+    BackendsFn backends = nullptr;
     FreeFn free = nullptr;
     std::string error;
 };
@@ -82,6 +85,7 @@ Engine &engine() {
     cached.start = reinterpret_cast<StartFn>(dlsym(handle, "jawn_audio_start"));
     cached.stop = reinterpret_cast<StopFn>(dlsym(handle, "jawn_audio_stop"));
     cached.status = reinterpret_cast<StatusFn>(dlsym(handle, "jawn_audio_status"));
+    cached.backends = reinterpret_cast<BackendsFn>(dlsym(handle, "jawn_audio_backends"));
     cached.free = reinterpret_cast<FreeFn>(dlsym(handle, "jawn_audio_free"));
     if (cached.start == nullptr || cached.stop == nullptr || cached.status == nullptr
             || cached.free == nullptr) {
@@ -133,4 +137,15 @@ Java_com_jawnos_app_JawnAudioEngine_nativeStatus(JNIEnv *env, jclass) {
     Engine &engine = ::engine();
     if (!engine.error.empty()) return errorString(env, engine.error);
     return answer(env, engine, engine.status());
+}
+
+// The optional symbol, so an older engine still answers everything else.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeBackends(JNIEnv *env, jclass) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.backends == nullptr) {
+        return errorString(env, "this engine build has no backends report");
+    }
+    return answer(env, engine, engine.backends());
 }

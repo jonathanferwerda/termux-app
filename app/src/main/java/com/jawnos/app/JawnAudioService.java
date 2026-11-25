@@ -25,6 +25,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -246,12 +247,31 @@ public class JawnAudioService extends Service {
 
     private String endTake() {
         String answer = running ? JawnAudioEngine.stop() : JawnAudioEngine.status();
-        if (answer != null && !answer.isEmpty()) lastStatus = answer;
+        if (answer != null && !answer.isEmpty()) {
+            lastStatus = answer;
+            writeSidecar(takePath, answer);
+        }
         running = false;
         takePath = "";
         releaseWakeLock();
         stopForegroundCompat();
         return lastStatus;
+    }
+
+    /**
+     * The final report beside the take ({@code <take>.wav.json}) so the build
+     * gate can pull it over adb. Best effort: a take without its sidecar is
+     * still a take.
+     */
+    private void writeSidecar(String take, String report) {
+        if (take == null || take.trim().isEmpty() || report == null) return;
+        File sidecar = new File(take + ".json");
+        try (FileWriter writer = new FileWriter(sidecar, false)) {
+            writer.write(report);
+            writer.write("\n");
+        } catch (Throwable t) {
+            Log.w(TAG, "could not write " + sidecar, t);
+        }
     }
 
     /** A take lives in app-private storage; the manager imports the WAV later. */

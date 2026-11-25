@@ -403,3 +403,41 @@
   Gradle's default `jniLibs` source set packages it beside `libjawnaudio.so`.
   `app/build.gradle` keeps `useLegacyPackaging true` and gains only a comment:
   no cargo task, no linked dependency on the Rust library. Build 1353.
+
+## Deltas round X+15 (the native take's page bridge)
+
+- **The page can start, watch and stop a native take.**
+  `app/src/main/java/com/jawnos/app/JawnAudioEngineBridge.java` is
+  `window.JawnAudioEngine`: `load()` reports whether the engine is in the
+  build plus its backends JSON and best-effort writes that JSON to
+  `/sdcard/Download/jawnos-native-backends.json`; `start(deviceId, seconds,
+  out)` parses the page's strings defensively (falling back to the HAL's input
+  and 600 s) and hands them to `JawnAudioService`; `stop()` joins the engine,
+  returns its final report, then tears the service down; `status()`,
+  `devices()` (every input, USB flagged) and `backends()` answer the engine's
+  own JSON. A missing library or a bad argument is `{"ok":0,"error":...}`,
+  never an exception in the page.
+- **The backends report is an optional JNI symbol.**
+  `JawnAudioEngineJni.cpp` adds `jawn_audio_backends` to its `dlopen`ed
+  engine, outside the required-symbol check: an older `libjawn_audio.so`
+  still answers `start`/`stop`/`status`, and `nativeBackends` says
+  `this engine build has no backends report` instead of failing to load.
+  `JawnAudioEngine.backends()` follows the same fail-closed rule as the rest.
+- **A take leaves its report beside the WAV.**
+  `JawnAudioService.endTake()` writes the final JSON to `<take>.json` with a
+  `FileWriter` before it clears the path, so the build gate can pull the
+  report over adb without the page. The manifest entry and `exported=false`
+  are unchanged.
+- **The control is injected, not baked into Studio.**
+  `JawnWebViewActivity` registers the bridge beside `JawnAudioOboe` and, from
+  the existing `onPageFinished`/`evaluateJavascript` path (no second
+  `WebViewClient`), puts a small bottom-right panel on `/manager/studio`: an
+  input picker (USB marked), a seconds field, Start/Stop and a status line.
+  It is idempotent, guarded by pathname and bridge presence, labels itself
+  through `window.jawnosT` when available, and prints the backends JSON and
+  the final report (`sharing`, `performance`, `rate`, `frames`, `buffer`,
+  `xruns`, `frames_captured`, `peak`, `take`). It polls `status()` every
+  second and calls `stop()` exactly once when the take ends or fails.
+- **Only null means "no WAV".** `JawnAudioEngine.start` now passes `out`
+  through unchanged; the engine treats a null pointer as "no WAV", so the
+  previous empty-string substitution was a path, not silence. Build 1354.

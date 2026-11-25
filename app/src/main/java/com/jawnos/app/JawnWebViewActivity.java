@@ -152,6 +152,9 @@ public class JawnWebViewActivity extends Activity {
         // reads those facts from this bridge instead.
         audio = new JawnAudioOboe(this, this::ensureAudioPermission);
         web.addJavascriptInterface(audio, "JawnAudioOboe");
+        // The Rust take's page control: the engine's own start/stop and the
+        // service that keeps the process alive (see JawnAudioEngineBridge).
+        web.addJavascriptInterface(new JawnAudioEngineBridge(this), "JawnAudioEngine");
         // the Network app: Wi-Fi/SSID/signal, interfaces, VPN and the connect
         // path. Only the local manager page may use it (see onPageStarted).
         network = new JawnNetwork(this);
@@ -452,6 +455,189 @@ public class JawnWebViewActivity extends Activity {
             });
         }
     }
+
+    /**
+     * Put the native-take control on the Studio page, once.
+     *
+     * The release build has WebView debugging off, so the page itself is the
+     * only console: this panel starts and stops a take, polls the engine's own
+     * status and prints the final report (and the backends JSON) where a person
+     * - and the build gate's screenshot - can read it. It rides the existing
+     * onPageFinished/evaluateJavascript path, never a second WebViewClient, and
+     * returns on any page that is not Studio.
+     */
+    private void injectStudioAudioPanel(WebView view) {
+        view.evaluateJavascript(STUDIO_PANEL_JS, null);
+    }
+
+    private static final String STUDIO_PANEL_JS = """
+            (function(){
+            try{
+              if(location.pathname.indexOf('/manager/studio')<0)return;
+              if(!window.JawnAudioEngine)return;
+              if(document.getElementById('jawn_native_panel'))return;
+              var NL=String.fromCharCode(10);
+              var T=function(text){
+                try{return (window.jawnosT&&window.jawnosT(text))||text;}catch(e){return text;}
+              };
+              var panel=document.createElement('div');
+              panel.id='jawn_native_panel';
+              panel.style.cssText='position:fixed;right:10px;bottom:10px;z-index:2147483647;width:300px;max-height:62vh;overflow:auto;background:rgba(20,20,20,0.95);color:#f2f2f2;border:1px solid #666;border-radius:8px;padding:8px 10px;font:12px/1.35 monospace;box-shadow:0 4px 18px rgba(0,0,0,0.55)';
+              var heading=document.createElement('div');
+              heading.textContent=T('Native take');
+              heading.style.cssText='font-weight:bold;font-size:13px;margin-bottom:6px';
+              panel.appendChild(heading);
+              var inputLabel=document.createElement('div');
+              inputLabel.textContent=T('Input');
+              inputLabel.style.cssText='margin:4px 0 2px';
+              panel.appendChild(inputLabel);
+              var select=document.createElement('select');
+              select.id='jawn_native_device';
+              select.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666';
+              var own=document.createElement('option');
+              own.value='-1';
+              own.textContent=T('This phone microphone (default)');
+              select.appendChild(own);
+              try{
+                var found=JSON.parse(JawnAudioEngine.devices());
+                if(found&&found.devices){
+                  for(var i=0;i<found.devices.length;i++){
+                    var device=found.devices[i];
+                    var option=document.createElement('option');
+                    option.value=String(device.id);
+                    option.textContent=String(device.name||('input '+device.id))
+                      +(device.usb?' [USB]':'')+' #'+device.id
+                      +' ('+(device.typeName||device.type)+')';
+                    select.appendChild(option);
+                  }
+                }
+              }catch(e){}
+              panel.appendChild(select);
+              var secondsLabel=document.createElement('div');
+              secondsLabel.textContent=T('Seconds');
+              secondsLabel.style.cssText='margin:4px 0 2px';
+              panel.appendChild(secondsLabel);
+              var seconds=document.createElement('input');
+              seconds.id='jawn_native_seconds';
+              seconds.type='number';
+              seconds.min='1';
+              seconds.value='600';
+              seconds.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666;padding:2px 4px;box-sizing:border-box';
+              panel.appendChild(seconds);
+              var row=document.createElement('div');
+              row.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+              var startButton=document.createElement('button');
+              startButton.textContent=T('Start');
+              startButton.style.cssText='flex:1;padding:4px 6px';
+              var stopButton=document.createElement('button');
+              stopButton.textContent=T('Stop');
+              stopButton.disabled=true;
+              stopButton.style.cssText='flex:1;padding:4px 6px';
+              row.appendChild(startButton);
+              row.appendChild(stopButton);
+              panel.appendChild(row);
+              var line=document.createElement('pre');
+              line.id='jawn_native_status';
+              line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
+              panel.appendChild(line);
+              document.body.appendChild(panel);
+
+              var timer=null, stopping=false, sawStarted=false, ticks=0, backends='';
+              var show=function(text){line.textContent=String(text);};
+              var loadedText='';
+              try{loadedText=JawnAudioEngine.load();}catch(e){loadedText='load failed: '+e;}
+              try{
+                var loaded=JSON.parse(loadedText);
+                backends=(loaded&&loaded.backends!==undefined)
+                  ?JSON.stringify(loaded.backends):String(loadedText);
+              }catch(e){backends=String(loadedText);}
+              show('backends: '+backends);
+
+              var describe=function(report){
+                var lines=['backends: '+backends];
+                var parsed=null;
+                try{parsed=JSON.parse(report);}catch(e){}
+                if(parsed){
+                  var keep=['ok','error','state','backend','device','sharing','performance',
+                    'rate','frames','buffer','channels','xruns','frames_captured','peak','take'];
+                  for(var i=0;i<keep.length;i++){
+                    if(parsed[keep[i]]!==undefined)lines.push(keep[i]+': '+parsed[keep[i]]);
+                  }
+                  lines.push('report: '+String(report));
+                }else{
+                  lines.push('report: '+String(report));
+                }
+                return lines.join(NL);
+              };
+
+              var stopOnce=function(reason){
+                if(stopping)return;
+                stopping=true;
+                if(timer){clearInterval(timer);timer=null;}
+                stopButton.disabled=true;
+                startButton.disabled=false;
+                var report;
+                try{report=JawnAudioEngine.stop();}
+                catch(e){report='{"ok":0,"error":"stop failed"}';}
+                show((reason?reason+NL:'')+describe(report));
+              };
+
+              var tick=function(){
+                if(stopping)return;
+                ticks++;
+                var raw;
+                try{raw=JawnAudioEngine.status();}
+                catch(e){stopOnce('status failed: '+e);return;}
+                var parsed=null;
+                try{parsed=JSON.parse(raw);}catch(e){}
+                var state=(parsed&&parsed.state)?String(parsed.state):'';
+                if(parsed&&parsed.ok&&state==='started'){
+                  sawStarted=true;
+                  show('recording'+NL+'status: '+String(raw));
+                  return;
+                }
+                if(sawStarted){stopOnce(null);return;}
+                if(parsed&&(parsed.ok===false||parsed.ok===0)
+                    &&String(parsed.error||'').indexOf('no take has started')<0){
+                  stopOnce('the engine refused: '+String(raw));
+                  return;
+                }
+                if(ticks<6){show('waiting for the engine'+NL+'status: '+String(raw));return;}
+                stopOnce('the take never reported started');
+              };
+
+              startButton.onclick=function(){
+                if(timer)return;
+                stopping=false;
+                sawStarted=false;
+                ticks=0;
+                var id=select.value||'-1';
+                var secs=seconds.value||'600';
+                var stamp=(new Date()).toISOString().replace(/[:.]/g,'-');
+                var out='/sdcard/Download/jawnos-native-take-'+stamp+'.wav';
+                var reply;
+                try{reply=JawnAudioEngine.start(id,secs,out);}
+                catch(e){reply='{"ok":0,"error":"start failed"}';}
+                var parsed=null;
+                try{parsed=JSON.parse(reply);}catch(e){}
+                if(parsed&&(parsed.ok===false||parsed.ok===0)){
+                  show(describe(reply));
+                  return;
+                }
+                startButton.disabled=true;
+                stopButton.disabled=false;
+                show('started'+NL+'file: '+out+NL+'answer: '+String(reply));
+                timer=setInterval(tick,1000);
+              };
+
+              stopButton.onclick=function(){stopOnce(null);};
+
+              window.addEventListener('pagehide',function(){
+                if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
+              });
+            }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}
+            })();
+            """;
 
     /** Run a script in the page (the NFC bridge posts events through here). */
     private void runJs(String script) {
@@ -789,6 +975,7 @@ public class JawnWebViewActivity extends Activity {
                     // go straight to the splash (the cookieless first request a
                     // woken WebView sends), with Try again as the only way out.
                     gateFallback = false;
+                    injectStudioAudioPanel(view);
                     return;
                 }
                 if (!gateFallback) {

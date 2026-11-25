@@ -7,9 +7,10 @@ import org.json.JSONObject;
  * The Studio take's entry into the Rust audio engine.
  *
  * The engine (engine/src/oboe_device.rs) is a cdylib with a PLAIN C ABI:
- * {@code jawn_audio_start}, {@code jawn_audio_stop}, {@code jawn_audio_status}
- * and {@code jawn_audio_free}. Those are not JNI symbols, so a Java
- * {@code native} method cannot bind to them directly. The small C++ shim in
+ * {@code jawn_audio_start}, {@code jawn_audio_stop}, {@code jawn_audio_status},
+ * {@code jawn_audio_backends} and {@code jawn_audio_free}. Those are not JNI
+ * symbols, so a Java {@code native} method cannot bind to them directly. The
+ * small C++ shim in
  * app/src/main/cpp/JawnAudioEngineJni.cpp is compiled into libjawnaudio.so -
  * the same library {@link JawnAudioOboe} already loads - and it dlopen()s
  * libjawn_audio.so and exports the Java_com_jawnos_app_JawnAudioEngine_*
@@ -48,6 +49,8 @@ public final class JawnAudioEngine {
 
     private static native String nativeStatus();
 
+    private static native String nativeBackends();
+
     /** Whether the shim library loaded, so a caller can explain a refusal. */
     public static boolean isLoaded() {
         return LOADED;
@@ -59,14 +62,16 @@ public final class JawnAudioEngine {
 
     /**
      * Start a capture take. {@code deviceId < 0} lets the HAL pick the input;
-     * an empty or null {@code out} runs without a WAV. The engine returns
-     * immediately with {@code {"ok":true,"state":"started",...}} and reports
-     * the take's real shape later through {@link #status()}.
+     * a null {@code out} runs without a WAV, and any other value is the WAV
+     * path (the engine treats only null as "no WAV", so a path is passed
+     * through unchanged). The engine returns immediately with
+     * {@code {"ok":true,"state":"started",...}} and reports the take's real
+     * shape later through {@link #status()}.
      */
     public static String start(int deviceId, double seconds, String out) {
         if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
         try {
-            return nativeStart(deviceId, seconds, out == null ? "" : out);
+            return nativeStart(deviceId, seconds, out);
         } catch (Throwable t) {
             return failure("the audio engine could not start: " + t);
         }
@@ -90,6 +95,18 @@ public final class JawnAudioEngine {
             return nativeStatus();
         } catch (Throwable t) {
             return failure("the audio engine could not report: " + t);
+        }
+    }
+
+    /** The engine's backends report: the same one-line JSON
+     *  {@code --backends --json} prints, such as
+     *  {@code {"alsa":false,...,"oboe":true,"null":true}}. */
+    public static String backends() {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeBackends();
+        } catch (Throwable t) {
+            return failure("the audio engine could not report its backends: " + t);
         }
     }
 
