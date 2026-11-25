@@ -473,7 +473,7 @@ public class JawnWebViewActivity extends Activity {
     private static final String STUDIO_PANEL_JS = """
             (function(){
             try{
-              if(location.pathname.indexOf('/manager/studio')<0)return;
+              if(location.pathname==='/manager/studio'||location.pathname.indexOf('/manager/studio/')===0)return;
               if(!window.JawnAudioEngine)return;
               if(document.getElementById('jawn_native_panel'))return;
               var NL=String.fromCharCode(10);
@@ -541,6 +541,21 @@ public class JawnWebViewActivity extends Activity {
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(line);
               document.body.appendChild(panel);
+
+              panel.style.display='none';
+              var studioWindow=function(){
+                var node=document.getElementById('studio');
+                if(!node)node=document.querySelector('.window[data-app="studio"]');
+                if(!node)return false;
+                return !!(node.offsetWidth||node.offsetHeight||node.getClientRects().length);
+              };
+              var syncPanel=function(){panel.style.display=studioWindow()?'block':'none';};
+              syncPanel();
+              var observer=null;
+              try{
+                observer=new MutationObserver(syncPanel);
+                observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
+              }catch(e){}
 
               var timer=null, stopping=false, sawStarted=false, ticks=0, backends='';
               var show=function(text){line.textContent=String(text);};
@@ -633,6 +648,7 @@ public class JawnWebViewActivity extends Activity {
               stopButton.onclick=function(){stopOnce(null);};
 
               window.addEventListener('pagehide',function(){
+                if(observer){try{observer.disconnect();}catch(e){}}
                 if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
               });
             }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}

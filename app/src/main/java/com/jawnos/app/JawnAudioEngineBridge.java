@@ -45,8 +45,10 @@ public class JawnAudioEngineBridge {
     @JavascriptInterface
     public String load() {
         if (!JawnAudioEngine.isLoaded()) {
-            return error("the audio engine is not in this build: "
+            String failure = error("the audio engine is not in this build: "
                     + JawnAudioEngine.loadError());
+            writeBackends(failure);
+            return failure;
         }
         String backends = JawnAudioEngine.backends();
         writeBackends(backends);

@@ -74,6 +74,19 @@ Engine &engine() {
     if (tried) return cached;
     tried = true;
 
+    // The Rust engine statically links Oboe's C++ and leaves the C++ runtime
+    // symbols undefined. This shim already depends on libc++_shared.so, but
+    // System.loadLibrary loads it outside the global scope; promote it so the
+    // engine's dlopen can resolve those symbols. Best effort: an engine that
+    // does not need it still loads without it.
+    void *stl = dlopen("libc++_shared.so", RTLD_NOW | RTLD_GLOBAL);
+    if (stl == nullptr) {
+        const char *why = dlerror();
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "libc++_shared.so was not promoted to the global scope: %s",
+                            why == nullptr ? "unknown error" : why);
+    }
+
     void *handle = dlopen(kLibrary, RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
         const char *why = dlerror();

@@ -441,3 +441,25 @@
 - **Only null means "no WAV".** `JawnAudioEngine.start` now passes `out`
   through unchanged; the engine treats a null pointer as "no WAV", so the
   previous empty-string substitution was a path, not silence. Build 1354.
+
+## Deltas round X+16 (the native take reaches the real Studio window)
+
+- **The engine's C++ runtime is promoted before it is opened.**
+  `JawnAudioEngineJni.cpp` `engine()` preloads `libc++_shared.so` with
+  `RTLD_NOW | RTLD_GLOBAL` (logging, not failing, if it is absent) before
+  `dlopen("libjawn_audio.so")`. The Rust cdylib statically links Oboe's C++
+  and leaves `__cxa_pure_virtual`, `_Znwm`, `__cxa_throw` and the rest
+  undefined; `System.loadLibrary` had loaded the STL outside the global lookup
+  scope, so the engine's `dlopen` failed with
+  `cannot locate symbol "__cxa_pure_virtual"`. The optional
+  `jawn_audio_backends` handling is unchanged.
+- **The panel follows the Studio window, not a URL.** The manager serves
+  `/manager/studio` as the window JSON (`{"html":...}`), so the panel now
+  returns on that route and on `/manager/studio/…`, and instead runs on the
+  manager shell. A `MutationObserver` watches for `#studio` (or
+  `.window[data-app="studio"]`) and shows the fixed panel only while that
+  window is visible, hiding it when it goes away. The idempotent guard and the
+  take timer are unchanged; a take keeps running while the panel is hidden.
+- **The gate always gets a backends file.** `JawnAudioEngineBridge.load()`
+  writes the error JSON to `/sdcard/Download/jawnos-native-backends.json` when
+  even the shim is missing, not only when the engine loads. Build 1355.
