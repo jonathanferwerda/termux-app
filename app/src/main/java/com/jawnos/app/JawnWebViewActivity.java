@@ -498,9 +498,11 @@ public class JawnWebViewActivity extends Activity {
               own.value='-1';
               own.textContent=T('This phone microphone (default)');
               select.appendChild(own);
+              var inputList=[];
               try{
                 var found=JSON.parse(JawnAudioEngine.devices());
                 if(found&&found.devices){
+                  inputList=found.devices;
                   for(var i=0;i<found.devices.length;i++){
                     var device=found.devices[i];
                     var option=document.createElement('option');
@@ -552,11 +554,67 @@ public class JawnWebViewActivity extends Activity {
               row.appendChild(startButton);
               row.appendChild(stopButton);
               panel.appendChild(row);
+              var rtHeading=document.createElement('div');
+              rtHeading.textContent=T('Round trip');
+              rtHeading.style.cssText='font-weight:bold;margin:8px 0 4px;border-top:1px solid #555;padding-top:6px';
+              panel.appendChild(rtHeading);
+              var rtInputLabel=document.createElement('div');
+              rtInputLabel.textContent=T('Round trip input');
+              rtInputLabel.style.cssText='margin:4px 0 2px';
+              panel.appendChild(rtInputLabel);
+              var rtInput=document.createElement('select');
+              rtInput.id='jawn_roundtrip_input';
+              rtInput.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666';
+              panel.appendChild(rtInput);
+              var rtOutputLabel=document.createElement('div');
+              rtOutputLabel.textContent=T('Round trip output');
+              rtOutputLabel.style.cssText='margin:4px 0 2px';
+              panel.appendChild(rtOutputLabel);
+              var rtOutput=document.createElement('select');
+              rtOutput.id='jawn_roundtrip_output';
+              rtOutput.style.cssText='width:100%;margin-bottom:6px;background:#111;color:#f2f2f2;border:1px solid #666';
+              panel.appendChild(rtOutput);
+              var rtRow=document.createElement('div');
+              rtRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+              var rtButton=document.createElement('button');
+              rtButton.textContent=T('Measure round trip');
+              rtButton.style.cssText='flex:1;padding:4px 6px';
+              rtRow.appendChild(rtButton);
+              panel.appendChild(rtRow);
+              var rtLine=document.createElement('pre');
+              rtLine.id='jawn_roundtrip_result';
+              rtLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:24vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
+              panel.appendChild(rtLine);
               var line=document.createElement('pre');
               line.id='jawn_native_status';
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(line);
               document.body.appendChild(panel);
+              var defaultOption=function(value,label){
+                var option=document.createElement('option');
+                option.value=value;
+                option.textContent=label;
+                return option;
+              };
+              var fillDevices=function(node,list,defaultText){
+                try{node.appendChild(defaultOption('-1',T(defaultText)));}catch(e){}
+                for(var i=0;i<list.length;i++){
+                  var entry=list[i];
+                  node.appendChild(defaultOption(String(entry.id),
+                    String(entry.name||('device '+entry.id))
+                    +(entry.usb?' [USB]':'')+' #'+entry.id
+                    +' ('+(entry.typeName||entry.type)+')'));
+                }
+              };
+              fillDevices(rtInput,inputList,'This phone microphone (default)');
+              var outputList=[];
+              try{
+                if(typeof JawnAudioEngine.outputs==='function'){
+                  var foundOut=JSON.parse(JawnAudioEngine.outputs());
+                  if(foundOut&&foundOut.outputs)outputList=foundOut.outputs;
+                }
+              }catch(e){}
+              fillDevices(rtOutput,outputList,'This phone speaker (default)');
 
               panel.style.display='none';
               var studioWindow=function(){
@@ -573,7 +631,7 @@ public class JawnWebViewActivity extends Activity {
                 observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
               }catch(e){}
 
-              var timer=null, stopping=false, sawStarted=false, ticks=0, backends='';
+              var timer=null, stopping=false, sawStarted=false, ticks=0, backends='', roundTripTimer=null;
               var fixturePlanText='';
               var show=function(text){line.textContent=String(text);};
               var loadedText='';
@@ -681,9 +739,71 @@ public class JawnWebViewActivity extends Activity {
 
               stopButton.onclick=function(){stopOnce(null);};
 
+              var describeRoundTrip=function(raw,inId,outId){
+                var out=['round trip: input '+inId+' -> output '+outId];
+                var parsed=null;
+                try{parsed=JSON.parse(raw);}catch(e){}
+                if(parsed){
+                  if(parsed.ok===true||parsed.ok===1){
+                    if(parsed.round_trip_ms!==undefined){
+                      out.push('round_trip_ms: '+parsed.round_trip_ms+' ms ('
+                        +parsed.round_trip_frames+' frames)');
+                    }
+                    out.push('device_in: '+(parsed.device_in||'?')+' #'+parsed.device_in_id
+                      +' / device_out: '+(parsed.device_out||'?')+' #'+parsed.device_out_id);
+                    out.push('sharing: '+(parsed.sharing_in||'?')+' -> '+(parsed.sharing_out||'?')
+                      +' | performance: '+(parsed.performance_in||'?')+' -> '+(parsed.performance_out||'?'));
+                    out.push('buffer: '+(parsed.buffer_in||'?')+' -> '+(parsed.buffer_out||'?')
+                      +' frames | xruns: '+(parsed.xruns_in||0)+' -> '+(parsed.xruns_out||0)
+                      +' | rate: '+(parsed.rate||'?'));
+                    if(parsed.file)out.push('file: '+parsed.file);
+                  }else if(parsed.error){
+                    out.push('error: '+String(parsed.error));
+                  }
+                }
+                out.push('report: '+String(raw));
+                return out.join(NL);
+              };
+              rtButton.onclick=function(){
+                if(roundTripTimer)return;
+                var inId=rtInput.value||'-1';
+                var outId=rtOutput.value||'-1';
+                var reply;
+                try{
+                  reply=(typeof JawnAudioEngine.roundtrip==='function')
+                    ?JawnAudioEngine.roundtrip(inId,outId)
+                    :'{"ok":0,"error":"this app build has no round-trip probe"}';
+                }catch(e){reply='{"ok":0,"error":"round trip failed: '+e+'"}';}
+                var parsed=null;
+                try{parsed=JSON.parse(reply);}catch(e){}
+                if(parsed&&(parsed.ok===false||parsed.ok===0)){
+                  rtLine.textContent=describeRoundTrip(reply,inId,outId);
+                  return;
+                }
+                rtButton.disabled=true;
+                rtLine.textContent='measuring input '+inId+' -> output '+outId+NL+String(reply);
+                var waits=0;
+                roundTripTimer=setInterval(function(){
+                  waits++;
+                  var raw;
+                  try{raw=JawnAudioEngine.roundtripStatus();}
+                  catch(e){raw='{"ok":0,"error":"round trip status failed"}';}
+                  var state=null;
+                  try{state=JSON.parse(raw);}catch(e){}
+                  if(state&&state.ok&&state.state==='started'){
+                    if(waits<24)return;
+                    raw='{"ok":0,"error":"the round trip never reported a result"}';
+                  }
+                  if(roundTripTimer){clearInterval(roundTripTimer);roundTripTimer=null;}
+                  rtButton.disabled=false;
+                  rtLine.textContent=describeRoundTrip(raw,inId,outId);
+                },250);
+              };
+
               window.addEventListener('pagehide',function(){
                 if(observer){try{observer.disconnect();}catch(e){}}
                 if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
+                if(roundTripTimer){clearInterval(roundTripTimer);roundTripTimer=null;}
               });
             }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}
             })();

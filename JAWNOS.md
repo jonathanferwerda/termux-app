@@ -490,3 +490,23 @@
   sentence when the engine does not carry the plan. The status block lists the
   report's `plan`, so the sidecar says `tone+delay` when the fixture ran.
   Build 1358.
+
+## Deltas round X+19 (the round-trip probe reaches the panel)
+
+- **The duplex probe is exported and reaches the page.**
+  `JawnAudioEngine.roundTrip(deviceIn, deviceOut)` calls the engine's additive
+  `jawn_audio_roundtrip`; the JNI shim resolves it as optional like
+  `jawn_audio_backends`, so an older engine answers a sentence instead of
+  failing to load. Device ids below zero mean the HAL's default.
+- **The probe runs off the WebView's thread.**
+  `JawnAudioEngineBridge.roundtrip()` starts a daemon worker thread and returns
+  the started sentence; `roundtripStatus()` is polled until the engine's report
+  replaces it. The bridge also writes the result to
+  `/sdcard/Download/jawnos-native-roundtrip-<stamp>.json` (best effort) and
+  adds its `file` key to the returned JSON.
+- **The panel has a Round trip section.** `outputs()` lists
+  `AudioManager.GET_DEVICES_OUTPUTS` with USB outputs flagged, beside the
+  existing `devices()` inputs. *Round trip input*, *Round trip output*,
+  *Measure round trip* and a result line show `round_trip_ms` /
+  `round_trip_frames`, both granted sharing/performance modes, buffers, xruns
+  and both device ids, so the result names what produced it. Build 1359.

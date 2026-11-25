@@ -55,6 +55,8 @@ public final class JawnAudioEngine {
 
     private static native String nativeBackends();
 
+    private static native String nativeRoundTrip(int deviceIn, int deviceOut);
+
     /** Whether the shim library loaded, so a caller can explain a refusal. */
     public static boolean isLoaded() {
         return LOADED;
@@ -140,6 +142,25 @@ public final class JawnAudioEngine {
             return nativeBackends();
         } catch (Throwable t) {
             return failure("the audio engine could not report its backends: " + t);
+        }
+    }
+
+    /**
+     * The duplex round-trip probe (docs/studio-mobile-audio.md §6). Device ids
+     * below zero mean "let the HAL choose"; the engine answers the report JSON
+     * ({@code round_trip_ms}/{@code round_trip_frames}, both streams' sharing,
+     * performance, buffer and xruns, and both requested ids) or an error JSON.
+     *
+     * <p>This call blocks for the probe's capture window (about 1.5-3 s). Call
+     * it from a worker thread, never from the WebView's JavaScript thread;
+     * {@link JawnAudioEngineBridge} is the caller that does.
+     */
+    public static String roundTrip(int deviceIn, int deviceOut) {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeRoundTrip(deviceIn, deviceOut);
+        } catch (Throwable t) {
+            return failure("the audio engine could not measure the round trip: " + t);
         }
     }
 

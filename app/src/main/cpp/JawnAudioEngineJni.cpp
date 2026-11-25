@@ -28,6 +28,8 @@ using FixturePlanFn = char *(*)();
 using StopFn = char *(*)();
 using StatusFn = char *(*)();
 using BackendsFn = char *(*)();
+// The duplex round-trip probe (2026-11 slice). Optional like backends.
+using RoundTripFn = char *(*)(int, int);
 using FreeFn = void (*)(char *);
 
 struct Engine {
@@ -40,6 +42,9 @@ struct Engine {
     StatusFn status = nullptr;
     // Optional: an engine built before the backends report still works.
     BackendsFn backends = nullptr;
+    // Optional: the duplex probe arrived in the round-trip slice, so an
+    // engine built before it still answers every other call.
+    RoundTripFn roundtrip = nullptr;
     FreeFn free = nullptr;
     std::string error;
 };
@@ -107,6 +112,7 @@ Engine &engine() {
     cached.stop = reinterpret_cast<StopFn>(dlsym(handle, "jawn_audio_stop"));
     cached.status = reinterpret_cast<StatusFn>(dlsym(handle, "jawn_audio_status"));
     cached.backends = reinterpret_cast<BackendsFn>(dlsym(handle, "jawn_audio_backends"));
+    cached.roundtrip = reinterpret_cast<RoundTripFn>(dlsym(handle, "jawn_audio_roundtrip"));
     cached.free = reinterpret_cast<FreeFn>(dlsym(handle, "jawn_audio_free"));
     if (cached.start == nullptr || cached.stop == nullptr || cached.status == nullptr
             || cached.free == nullptr) {
@@ -212,4 +218,19 @@ Java_com_jawnos_app_JawnAudioEngine_nativeBackends(JNIEnv *env, jclass) {
         return errorString(env, "this engine build has no backends report");
     }
     return answer(env, engine, engine.backends());
+}
+
+// The duplex round-trip probe. Unlike the take, this call blocks for the
+// probe's own capture window (~1.5-3 s), so the Java bridge runs it on a
+// worker thread and polls roundtripStatus(); the WebView never waits.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeRoundTrip(
+        JNIEnv *env, jclass, jint deviceIn, jint deviceOut) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.roundtrip == nullptr) {
+        return errorString(env, "this engine build has no round-trip probe");
+    }
+    return answer(env, engine, engine.roundtrip(static_cast<int>(deviceIn),
+                                               static_cast<int>(deviceOut)));
 }

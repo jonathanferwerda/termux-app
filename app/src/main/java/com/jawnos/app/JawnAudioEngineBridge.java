@@ -34,8 +34,15 @@ public class JawnAudioEngineBridge {
     private static final String TAG = "JawnAudioEngineBridge";
     private static final String BACKENDS_FILE =
             "/sdcard/Download/jawnos-native-backends.json";
+    private static final String ROUNDTRIP_FILE_PREFIX =
+            "/sdcard/Download/jawnos-native-roundtrip-";
 
     private final Context context;
+    /** Guards the one probe this process may run at a time. */
+    private final Object roundTripLock = new Object();
+    private boolean roundTripRunning = false;
+    private volatile String roundTripStatus =
+            "{\"ok\":false,\"error\":\"no round trip has started\"}";
 
     public JawnAudioEngineBridge(Context context) {
         this.context = context.getApplicationContext();
@@ -190,6 +197,92 @@ public class JawnAudioEngineBridge {
         }
     }
 
+    /** Every output the phone can see, with USB outputs marked. */
+    @JavascriptInterface
+    public String outputs() {
+        JSONArray list = new JSONArray();
+        try {
+            AudioManager manager =
+                    (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (manager != null) {
+                for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                    JSONObject item = new JSONObject();
+                    item.put("id", device.getId());
+                    item.put("name", String.valueOf(device.getProductName()));
+                    item.put("type", device.getType());
+                    item.put("typeName", typeName(device.getType()));
+                    JSONArray rates = new JSONArray();
+                    for (int rate : device.getSampleRates()) rates.put(rate);
+                    item.put("sampleRates", rates);
+                    JSONArray channels = new JSONArray();
+                    for (int count : device.getChannelCounts()) channels.put(count);
+                    item.put("channelCounts", channels);
+                    item.put("usb", isUsb(device.getType()));
+                    list.put(item);
+                }
+            }
+        } catch (Throwable t) {
+            return error("the audio outputs could not be listed: " + t);
+        }
+        try {
+            JSONObject out = new JSONObject();
+            out.put("ok", 1);
+            out.put("outputs", list);
+            return out.toString();
+        } catch (JSONException e) {
+            return error("the audio outputs could not be listed: " + e);
+        }
+    }
+
+    /**
+     * Start the duplex round-trip probe on a worker thread and return the
+     * started sentence at once. Device ids below zero mean the HAL's default.
+     * The panel then polls {@link #roundtripStatus()} until the engine's report
+     * replaces it. The probe blocks for its capture window; running it here is
+     * what keeps the WebView responsive.
+     */
+    @JavascriptInterface
+    public String roundtrip(String deviceIn, String deviceOut) {
+        int inId = parseInt(deviceIn, -1);
+        int outId = parseInt(deviceOut, -1);
+        if (!JawnAudioEngine.isLoaded()) {
+            return error("the audio engine is not in this build: " + JawnAudioEngine.loadError());
+        }
+        synchronized (roundTripLock) {
+            if (roundTripRunning) return error("a round trip is already measuring");
+            roundTripRunning = true;
+            roundTripStatus = "{\"ok\":true,\"state\":\"started\",\"probe\":\"roundtrip\","
+                    + "\"device_in_id\":" + inId + ",\"device_out_id\":" + outId + "}";
+        }
+        Thread worker = new Thread(() -> {
+            String report;
+            try {
+                report = JawnAudioEngine.roundTrip(inId, outId);
+            } catch (Throwable t) {
+                report = error("the round trip failed: " + t);
+            }
+            String path = writeRoundTrip(report);
+            if (path != null) report = attachFile(report, path);
+            synchronized (roundTripLock) {
+                roundTripStatus = report;
+                roundTripRunning = false;
+            }
+        }, "jawn-audio-roundtrip");
+        worker.setDaemon(true);
+        worker.start();
+        synchronized (roundTripLock) {
+            return roundTripStatus;
+        }
+    }
+
+    /** The probe's last answer: the started sentence, then the report or error. */
+    @JavascriptInterface
+    public String roundtripStatus() {
+        synchronized (roundTripLock) {
+            return roundTripStatus;
+        }
+    }
+
     // ------------------------------------------------------------------ internals
 
     /** Embed a JSON string as an object when it is one, or as text when not. */
@@ -230,6 +323,10 @@ public class JawnAudioEngineBridge {
     private static String typeName(int type) {
         switch (type) {
             case AudioDeviceInfo.TYPE_BUILTIN_MIC: return "builtin_mic";
+            case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: return "builtin_speaker";
+            case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "builtin_earpiece";
+            case AudioDeviceInfo.TYPE_LINE_ANALOG: return "line_analog";
+            case AudioDeviceInfo.TYPE_LINE_DIGITAL: return "line_digital";
             case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "bluetooth_sco";
             case AudioDeviceInfo.TYPE_WIRED_HEADSET: return "wired_headset";
             case AudioDeviceInfo.TYPE_USB_DEVICE: return "usb_device";
@@ -249,6 +346,32 @@ public class JawnAudioEngineBridge {
             writer.write("\n");
         } catch (Throwable t) {
             Log.w(TAG, "could not write " + BACKENDS_FILE, t);
+        }
+    }
+
+    /** Best effort only, like the backends file: the panel names the path. */
+    private String writeRoundTrip(String report) {
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                .format(new java.util.Date());
+        String path = ROUNDTRIP_FILE_PREFIX + stamp + ".json";
+        try (FileWriter writer = new FileWriter(new File(path), false)) {
+            writer.write(report == null ? "" : report);
+            writer.write("\n");
+        } catch (Throwable t) {
+            Log.w(TAG, "could not write " + path, t);
+            return null;
+        }
+        return path;
+    }
+
+    /** Add the sidecar path to the engine's JSON, keeping every engine key. */
+    private static String attachFile(String report, String path) {
+        try {
+            JSONObject found = new JSONObject(report);
+            found.put("file", path);
+            return found.toString();
+        } catch (Throwable ignored) {
+            return report;
         }
     }
 
