@@ -834,11 +834,25 @@ public class JawnWebViewActivity extends Activity {
                 for(var j=0;j<alts.length;j++){
                   lines.push('alt '+alts[j].id+'/'+alts[j].alt+': '+(alts[j].ok?'ok':'FAILED'));
                 }
-                var gets=parsed.get_cur||[];
-                for(var k=0;k<gets.length;k++){
-                  var where=(gets[k].endpoint!==undefined)
-                    ?('endpoint '+gets[k].endpoint):('interface '+gets[k].interface);
-                  lines.push('get_cur '+where+': return '+gets[k].return+' hz '+gets[k].hz);
+                var sel=parsed.selected||[];
+                for(var s=0;s<sel.length;s++){
+                  var eps=sel[s].endpoints||[];
+                  var shown=[];
+                  for(var t=0;t<eps.length;t++){
+                    shown.push('0x'+Number(eps[t].address).toString(16)
+                      +'/'+String(eps[t].direction)+'/'+eps[t].maxPacketSize);
+                  }
+                  lines.push('selected iface '+sel[s].interface+' alt '+sel[s].alt
+                    +' ep '+shown.join(','));
+                }
+                var atts=parsed.rate_attempts||[];
+                for(var u=0;u<atts.length;u++){
+                  var at=atts[u];
+                  var target=(at.recipient==='interface')
+                    ?('iface '+at.interface):('ep 0x'+Number(at.endpoint).toString(16));
+                  lines.push('rate alt '+at.alt+' '+at.recipient+' '+target
+                    +': SET '+at.set_return+' GET '+at.get_return
+                    +' raw '+at.raw+' -> '+((at.hz&&at.hz>0)?(at.hz+' Hz'):'no value'));
                 }
                 if(parsed.message)lines.push(String(parsed.message));
                 if(parsed.error)lines.push('error: '+String(parsed.error));

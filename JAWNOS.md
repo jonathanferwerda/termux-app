@@ -538,3 +538,23 @@
   and its result line polls while the permission dialog is up. `androidx.core`
   moves to 1.13.1 for
   `ContextCompat.registerReceiver(..., RECEIVER_NOT_EXPORTED)`. Build 1361.
+
+## Deltas round X+21 (the rate control at the 48 kHz alt)
+
+- **The probe selects one alternate, not the last one enumerated.** The P0 run
+  walked every AudioStreaming alt and left OUT alt 6 / IN alt 18 active; the
+  UAC1 rate request was refused there (`SET_CUR -1`; OUT read 32000 Hz, IN read
+  a shifted 12,288,000). `JawnUsbProbe` now picks the alt whose isochronous
+  endpoint carries the 48 kHz / 16-bit / 2-channel packet - 192 bytes out, 196
+  in on the UM2's full-speed 1 ms frame, i.e. alt 1 on both interfaces - calls
+  `setInterface` once, and leaves it active. `selected` records each streaming
+  interface's chosen alt and endpoint addresses.
+- **Three ordered attempts, raw bytes kept.** At that alt the probe runs, per
+  isochronous endpoint: the endpoint recipient (`0x22` SET_CUR / `0xA2`
+  GET_CUR, `wIndex` = endpoint), then the interface recipient (`0x21`/`0xA1`,
+  `wIndex` = interface id), then the alt-0 endpoint fallback (switching the
+  interface back to alt 0 and restoring the chosen alt afterwards). Every
+  attempt lands in `rate_attempts` with its alt, recipient, SET_CUR return,
+  GET_CUR return and the raw 3 bytes as hex - `hz` alone was ambiguous.
+  `ok` is true when a claim held and any GET_CUR decodes to 48000; the old
+  `set_cur` / `get_cur` arrays carry the same rows. Build 1362.

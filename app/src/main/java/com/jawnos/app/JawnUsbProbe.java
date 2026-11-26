@@ -64,6 +64,9 @@ public class JawnUsbProbe {
     private static final int UM2_PRODUCT = 0x2902;
 
     private static final int RATE_48000 = 48000;
+    /** The 48 kHz / 16-bit / 2-channel isochronous packet in a 1 ms frame. */
+    private static final int RATE_OUT_PACKET = 192;
+    private static final int RATE_IN_PACKET = 196;
     /** wValue: CS_SAMPLING_FREQ_CONTROL (0x01) in the high byte, 0x01 selector. */
     private static final int RATE_CONTROL = 0x0100;
     private static final int SET_CUR = 0x01;
@@ -282,6 +285,8 @@ public class JawnUsbProbe {
         JSONArray altSets = new JSONArray();
         JSONArray setCur = new JSONArray();
         JSONArray getCur = new JSONArray();
+        JSONArray selected = new JSONArray();
+        JSONArray attempts = new JSONArray();
         JSONArray released = new JSONArray();
         JSONArray errors = new JSONArray();
         boolean claimOk = false;
@@ -311,41 +316,65 @@ public class JawnUsbProbe {
                 for (UsbInterface iface : streamById.values()) {
                     claimOk |= claim(conn, iface, claims);
                 }
-                // Select each streaming alt >= 1 that carries an isochronous
-                // endpoint; that is what a real stream would use.
+                // Group each streaming interface's alternates, then select
+                // the 48 kHz / 16-bit / 2-channel one ONCE and keep it active.
+                // The P0 probe walked every alt in order, leaving OUT alt 6 /
+                // IN alt 18 selected; the rate request is only valid on the
+                // operational alt, so it was refused there.
+                Map<Integer, List<UsbInterface>> altsById = new LinkedHashMap<>();
                 for (UsbInterface alt : streamAlts) {
-                    if (alt.getAlternateSetting() < 1 || !hasIsoEndpoint(alt)) continue;
+                    List<UsbInterface> list = altsById.get(alt.getId());
+                    if (list == null) {
+                        list = new ArrayList<>();
+                        altsById.put(alt.getId(), list);
+                    }
+                    list.add(alt);
+                }
+                Map<Integer, UsbInterface> chosenById = new LinkedHashMap<>();
+                Map<Integer, UsbInterface> zeroById = new LinkedHashMap<>();
+                for (Map.Entry<Integer, UsbInterface> entry : streamById.entrySet()) {
+                    int id = entry.getKey();
+                    List<UsbInterface> alts = altsById.get(id);
+                    if (alts == null) continue;
+                    UsbInterface chosen = chooseRateAlt(alts);
+                    if (chosen == null) {
+                        errors.put("interface " + id + ": no isochronous alternate setting");
+                        continue;
+                    }
                     boolean ok = false;
                     String error = null;
                     try {
-                        ok = conn.setInterface(alt);
+                        ok = conn.setInterface(chosen);
                     } catch (Throwable t) {
                         error = String.valueOf(t);
                     }
                     JSONObject row = new JSONObject();
-                    put(row, "id", alt.getId());
-                    put(row, "alt", alt.getAlternateSetting());
+                    put(row, "id", id);
+                    put(row, "alt", chosen.getAlternateSetting());
                     put(row, "ok", ok);
                     if (error != null) put(row, "error", error);
                     altSets.put(row);
-                    if (!ok) errors.put("setInterface " + alt.getId() + "/"
-                            + alt.getAlternateSetting() + ": refused");
+                    if (!ok) errors.put("setInterface " + id + "/"
+                            + chosen.getAlternateSetting() + ": refused");
+                    chosenById.put(id, chosen);
+                    zeroById.put(id, altZero(alts));
+                    selected.put(selectedJson(id, chosen));
                 }
-                // UAC1 sample rate, once per distinct isochronous endpoint.
-                Map<Integer, Object[]> byAddress = new LinkedHashMap<>();
-                for (UsbInterface alt : streamAlts) {
-                    if (alt.getAlternateSetting() < 1) continue;
-                    for (int e = 0; e < alt.getEndpointCount(); e++) {
-                        UsbEndpoint ep = alt.getEndpoint(e);
+                // The UAC1 rate control runs at that alt for each isochronous
+                // endpoint: endpoint recipient, interface recipient, alt-0
+                // endpoint fallback. Every attempt keeps its raw bytes.
+                for (Map.Entry<Integer, UsbInterface> entry : chosenById.entrySet()) {
+                    int id = entry.getKey();
+                    UsbInterface chosen = entry.getValue();
+                    UsbInterface zero = zeroById.get(id);
+                    for (int e = 0; e < chosen.getEndpointCount(); e++) {
+                        UsbEndpoint ep = chosen.getEndpoint(e);
                         if (ep.getType() != UsbConstants.USB_ENDPOINT_XFER_ISOC) continue;
-                        if (!byAddress.containsKey(ep.getAddress())) {
-                            byAddress.put(ep.getAddress(), new Object[] { alt, ep });
+                        if (attemptRate(conn, id, chosen, zero, ep,
+                                attempts, setCur, getCur, altSets, errors)) {
+                            rate48000 = true;
                         }
                     }
-                }
-                for (Object[] pair : byAddress.values()) {
-                    rate48000 |= sendRate(conn, (UsbInterface) pair[0],
-                            (UsbEndpoint) pair[1], setCur, getCur, errors);
                 }
             }
         } catch (Throwable t) {
@@ -353,7 +382,9 @@ public class JawnUsbProbe {
         } finally {
             if (conn != null) releaseAll(conn, released, errors);
             put(out, "claims", claims);
+            put(out, "selected", selected);
             put(out, "alt_sets", altSets);
+            put(out, "rate_attempts", attempts);
             put(out, "set_cur", setCur);
             put(out, "get_cur", getCur);
             put(out, "released", released);
@@ -373,15 +404,6 @@ public class JawnUsbProbe {
             if (iface.getAlternateSetting() == 0) return iface;
         }
         return alts.get(0);
-    }
-
-    private static boolean hasIsoEndpoint(UsbInterface iface) {
-        for (int e = 0; e < iface.getEndpointCount(); e++) {
-            if (iface.getEndpoint(e).getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -415,84 +437,165 @@ public class JawnUsbProbe {
     }
 
     /**
-     * SET_CUR then GET_CUR for 48000 Hz on one isochronous endpoint. The
-     * endpoint recipient is tried first; if the read does not come back, the
-     * interface recipient (wIndex = interface id) is tried as the fallback some
-     * UAC1 devices want.
+     * The alt whose isochronous endpoint carries the 48 kHz / 16-bit /
+     * 2-channel packet: 192 bytes out, 196 in on a full-speed 1 ms frame. The
+     * UM2's is alt 1. A device with neither size falls back to its first alt
+     * that has an isochronous endpoint.
      */
-    private boolean sendRate(UsbDeviceConnection conn, UsbInterface iface, UsbEndpoint ep,
-                             JSONArray setCur, JSONArray getCur, JSONArray errors) {
-        int epAddress = ep.getAddress();
+    private static UsbInterface chooseRateAlt(List<UsbInterface> alts) {
+        UsbInterface fallback = null;
+        for (UsbInterface alt : alts) {
+            if (alt.getAlternateSetting() < 1) continue;
+            for (int e = 0; e < alt.getEndpointCount(); e++) {
+                UsbEndpoint ep = alt.getEndpoint(e);
+                if (ep.getType() != UsbConstants.USB_ENDPOINT_XFER_ISOC) continue;
+                int wanted = ep.getDirection() == UsbConstants.USB_DIR_OUT
+                        ? RATE_OUT_PACKET : RATE_IN_PACKET;
+                if (ep.getMaxPacketSize() == wanted) return alt;
+                if (fallback == null) fallback = alt;
+            }
+        }
+        return fallback;
+    }
+
+    private static UsbInterface altZero(List<UsbInterface> alts) {
+        for (UsbInterface alt : alts) {
+            if (alt.getAlternateSetting() == 0) return alt;
+        }
+        return null;
+    }
+
+    private static JSONObject selectedJson(int id, UsbInterface chosen) {
+        JSONObject row = new JSONObject();
+        put(row, "interface", id);
+        put(row, "alt", chosen.getAlternateSetting());
+        JSONArray endpoints = new JSONArray();
+        for (int e = 0; e < chosen.getEndpointCount(); e++) {
+            UsbEndpoint ep = chosen.getEndpoint(e);
+            if (ep.getType() != UsbConstants.USB_ENDPOINT_XFER_ISOC) continue;
+            JSONObject item = new JSONObject();
+            put(item, "address", ep.getAddress());
+            put(item, "direction",
+                    ep.getDirection() == UsbConstants.USB_DIR_IN ? "in" : "out");
+            put(item, "maxPacketSize", ep.getMaxPacketSize());
+            endpoints.put(item);
+        }
+        put(row, "endpoints", endpoints);
+        return row;
+    }
+
+    /**
+     * The rate control for one endpoint at the selected alt: endpoint
+     * recipient, then interface recipient, then the alt-0 endpoint fallback.
+     * Each attempt records its alt, its wIndex and the raw GET_CUR bytes, so a
+     * shifted or rejected answer is readable rather than guessed at.
+     */
+    private boolean attemptRate(UsbDeviceConnection conn, int ifaceId, UsbInterface chosen,
+                                UsbInterface zero, UsbEndpoint ep, JSONArray attempts,
+                                JSONArray setCur, JSONArray getCur, JSONArray altSets,
+                                JSONArray errors) {
+        int address = ep.getAddress();
+        int alt = chosen.getAlternateSetting();
+        if (attempt(conn, alt, address, ifaceId, "endpoint", attempts, setCur, getCur)) {
+            return true;
+        }
+        if (attempt(conn, alt, address, ifaceId, "interface", attempts, setCur, getCur)) {
+            return true;
+        }
+        if (zero == null) return false;
+        boolean set = false;
+        String error = null;
+        try {
+            set = conn.setInterface(zero);
+        } catch (Throwable t) {
+            error = String.valueOf(t);
+        }
+        JSONObject row = new JSONObject();
+        put(row, "id", ifaceId);
+        put(row, "alt", 0);
+        put(row, "fallback", true);
+        put(row, "ok", set);
+        if (error != null) put(row, "error", error);
+        altSets.put(row);
+        boolean ok = attempt(conn, 0, address, ifaceId, "endpoint", attempts, setCur, getCur);
+        try {
+            conn.setInterface(chosen);
+        } catch (Throwable t) {
+            errors.put("setInterface " + ifaceId + "/" + alt + " (restore): " + t);
+        }
+        return ok;
+    }
+
+    /** One SET_CUR + GET_CUR pair at 48000 Hz; true when GET decodes 48000. */
+    private boolean attempt(UsbDeviceConnection conn, int alt, int address, int ifaceId,
+                            String recipient, JSONArray attempts, JSONArray setCur,
+                            JSONArray getCur) {
+        boolean interfaceRecipient = "interface".equals(recipient);
+        int index = interfaceRecipient ? ifaceId : address;
         byte[] wanted = { (byte) 0x80, (byte) 0xBB, 0x00 }; // 48000, little endian
         byte[] got = new byte[3];
-        String setError = null;
-        String getError = null;
         int setRet = -1;
         int getRet = -1;
+        String setError = null;
+        String getError = null;
         try {
-            setRet = conn.controlTransfer(SET_ENDPOINT, SET_CUR, RATE_CONTROL,
-                    epAddress, wanted, wanted.length, TIMEOUT_MS);
+            setRet = conn.controlTransfer(interfaceRecipient ? SET_INTERFACE : SET_ENDPOINT,
+                    SET_CUR, RATE_CONTROL, index, wanted, wanted.length, TIMEOUT_MS);
         } catch (Throwable t) {
             setError = String.valueOf(t);
         }
         try {
-            getRet = conn.controlTransfer(GET_ENDPOINT, GET_CUR, RATE_CONTROL,
-                    epAddress, got, got.length, TIMEOUT_MS);
+            getRet = conn.controlTransfer(interfaceRecipient ? GET_INTERFACE : GET_ENDPOINT,
+                    GET_CUR, RATE_CONTROL, index, got, got.length, TIMEOUT_MS);
         } catch (Throwable t) {
             getError = String.valueOf(t);
         }
-        boolean interfaceRecipient = false;
-        String endpointError = null;
-        if (getRet < 3) {
-            byte[] again = new byte[3];
-            int setRet2 = -1;
-            int getRet2 = -1;
-            String setError2 = null;
-            String getError2 = null;
-            try {
-                setRet2 = conn.controlTransfer(SET_INTERFACE, SET_CUR, RATE_CONTROL,
-                        iface.getId(), wanted, wanted.length, TIMEOUT_MS);
-            } catch (Throwable t) {
-                setError2 = String.valueOf(t);
-            }
-            try {
-                getRet2 = conn.controlTransfer(GET_INTERFACE, GET_CUR, RATE_CONTROL,
-                        iface.getId(), again, again.length, TIMEOUT_MS);
-            } catch (Throwable t) {
-                getError2 = String.valueOf(t);
-            }
-            if (getRet2 >= 3) {
-                setRet = setRet2;
-                getRet = getRet2;
-                got = again;
-                setError = setError2;
-                getError = getError2;
-                interfaceRecipient = true;
-            } else {
-                endpointError = join(endpointError, "endpoint: " + getRet
-                        + (getError == null ? "" : " " + getError));
-                endpointError = join(endpointError, "interface: " + getRet2
-                        + (getError2 == null ? "" : " " + getError2));
-            }
-        }
+        int hz = getRet >= 3 ? decodeHz(got) : -1;
+        String raw = hex(got);
+
+        JSONObject entry = new JSONObject();
+        put(entry, "recipient", recipient);
+        put(entry, "alt", alt);
+        put(entry, "interface", ifaceId);
+        put(entry, "endpoint", address);
+        put(entry, "index", index);
+        put(entry, "set_return", setRet);
+        put(entry, "get_return", getRet);
+        put(entry, "raw", raw);
+        put(entry, "hz", hz);
+        put(entry, "requested", RATE_48000);
+        if (setError != null) put(entry, "set_error", setError);
+        if (getError != null) put(entry, "get_error", getError);
+        attempts.put(entry);
+
         JSONObject setRow = new JSONObject();
-        put(setRow, interfaceRecipient ? "interface" : "endpoint",
-                interfaceRecipient ? iface.getId() : epAddress);
+        put(setRow, "alt", alt);
+        put(setRow, "recipient", recipient);
+        put(setRow, "interface", ifaceId);
+        put(setRow, "endpoint", address);
         put(setRow, "return", setRet);
-        put(setRow, "requested", RATE_48000);
         if (setError != null) put(setRow, "error", setError);
         setCur.put(setRow);
 
-        int hz = getRet >= 3 ? decodeHz(got) : -1;
         JSONObject getRow = new JSONObject();
-        put(getRow, interfaceRecipient ? "interface" : "endpoint",
-                interfaceRecipient ? iface.getId() : epAddress);
+        put(getRow, "alt", alt);
+        put(getRow, "recipient", recipient);
+        put(getRow, "interface", ifaceId);
+        put(getRow, "endpoint", address);
         put(getRow, "return", getRet);
+        put(getRow, "raw", raw);
         put(getRow, "hz", hz);
         if (getError != null) put(getRow, "error", getError);
         getCur.put(getRow);
-        if (endpointError != null) errors.put(endpointError);
-        return getRet >= 3 && hz == RATE_48000;
+
+        return hz == RATE_48000;
+    }
+
+    private static String hex(byte[] data) {
+        if (data == null) return "";
+        StringBuilder out = new StringBuilder(data.length * 2);
+        for (byte b : data) out.append(String.format(Locale.US, "%02x", b));
+        return out.toString();
     }
 
     /** Release each claim, then close; the phone's own audio comes back. */
@@ -608,12 +711,6 @@ public class JawnUsbProbe {
         } catch (Throwable ignored) {
             return null;
         }
-    }
-
-    /** Join two failure notes without dropping either. */
-    private static String join(String left, String right) {
-        if (left == null) return right;
-        return left + " | " + right;
     }
 
     private static void put(JSONObject out, String key, Object value) {
