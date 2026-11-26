@@ -631,3 +631,11 @@
   `inUrbs = clamp(round(32/ms), 1, 8)` — so 8→4×8, 4→8×4, 2→8×2, 1→8×1. A
   refusal is printed in the result line and the take does not start. The take
   summary also shows `in_delivery_ms` beside `monitor_ms`.
+
+## Deltas round X+25 (the monitor pacing fields)
+
+- **The take summary shows the monitor's headroom.** `describeUsbTake` adds
+  `fill_max` (`monitor_fill_max_ms`) and `fifo` (`high_water_ms`) beside
+  `monitor_ms`/`in_delivery_ms`/`underruns_out_start`/`out_rate`; the raw JSON
+  is unchanged. Engine v0.1.3846 carries the pacing fix; the APK stages that
+  `.so`.

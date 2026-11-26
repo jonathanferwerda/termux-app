@@ -1042,6 +1042,8 @@ public class JawnWebViewActivity extends Activity {
                 }
                 if(parsed.monitor_ms!==undefined)lines.push('monitor_ms: '+parsed.monitor_ms);
                 if(parsed.in_delivery_ms!==undefined)lines.push('in_delivery_ms: '+parsed.in_delivery_ms);
+                if(parsed.monitor_fill_max_ms!==undefined)lines.push('fill_max: '+parsed.monitor_fill_max_ms);
+                if(parsed.high_water_ms!==undefined)lines.push('fifo: '+parsed.high_water_ms);
                 if(parsed.out_rate&&parsed.out_rate.hz!==undefined){
                   lines.push('out_rate: '+parsed.out_rate.hz+' Hz');
                 }
