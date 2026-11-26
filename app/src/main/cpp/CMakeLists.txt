@@ -17,5 +17,5 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(oboe REQUIRED CONFIG)
 
-add_library(jawnaudio SHARED JawnAudioOboe.cpp JawnAudioEngineJni.cpp)
+add_library(jawnaudio SHARED JawnAudioOboe.cpp JawnAudioEngineJni.cpp JawnUsbIso.cpp)
 target_link_libraries(jawnaudio PRIVATE oboe::oboe android log dl)

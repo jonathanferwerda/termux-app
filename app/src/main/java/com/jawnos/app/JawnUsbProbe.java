@@ -81,6 +81,32 @@ public class JawnUsbProbe {
 
     private static final String OUT_PREFIX = "/sdcard/Download/jawnos-usb-probe-";
 
+    /**
+     * True when libjawnaudio.so loaded, so {@link #nativeIsoProbe} exists. A
+     * failure here must not stop the Java-only P0 probe; it only means the P1
+     * isochronous question is reported as unanswered.
+     */
+    private static final boolean ISO_NATIVE;
+    static {
+        boolean loaded = false;
+        try {
+            System.loadLibrary("jawnaudio");
+            loaded = true;
+        } catch (Throwable t) {
+            Log.w(TAG, "libjawnaudio.so is not available: " + t);
+        }
+        ISO_NATIVE = loaded;
+    }
+
+    /**
+     * The P1 gate: submit isochronous URBs on the connection's own usbfs fd.
+     * Java's {@link android.hardware.usb.UsbRequest} cannot queue isochronous
+     * transfers, so this is the only way to learn whether a direct USB audio
+     * path is possible on this device. Returns JSON; never closes the fd.
+     */
+    private static native String nativeIsoProbe(int fd, int iface, int alt, int endpoint,
+            int packetSize, int packetsPerUrb, int urbCount, int millis);
+
     private final Context context;
     /** Guards {@link #running}, {@link #last}, the receiver and the claim list. */
     private final Object lock = new Object();
@@ -376,6 +402,10 @@ public class JawnUsbProbe {
                         }
                     }
                 }
+                // P1 gate: Java's UsbRequest cannot do isochronous transfers,
+                // so hand the connection's fd to the native probe. It submits
+                // iso URBs on the chosen AudioStreaming alt's IN endpoint.
+                put(out, "usb_iso", isoProbe(conn, chosenById));
             }
         } catch (Throwable t) {
             errors.put("probe: " + t);
@@ -596,6 +626,57 @@ public class JawnUsbProbe {
         StringBuilder out = new StringBuilder(data.length * 2);
         for (byte b : data) out.append(String.format(Locale.US, "%02x", b));
         return out.toString();
+    }
+
+    /**
+     * Run the native isochronous probe on the chosen streaming interface. The
+     * interface id and the IN endpoint's address and packet size come from the
+     * chosen {@link UsbInterface}, never from a hardcoded UM2 number.
+     */
+    private Object isoProbe(UsbDeviceConnection conn,
+                            Map<Integer, UsbInterface> chosenById) {
+        try {
+            if (!ISO_NATIVE) {
+                return isoFailure("libjawnaudio.so did not load");
+            }
+            int fd = conn.getFileDescriptor();
+            if (fd < 0) {
+                return isoFailure("the connection has no file descriptor");
+            }
+            UsbInterface chosen = null;
+            UsbEndpoint in = null;
+            for (UsbInterface iface : chosenById.values()) {
+                for (int e = 0; e < iface.getEndpointCount(); e++) {
+                    UsbEndpoint ep = iface.getEndpoint(e);
+                    if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC
+                            && ep.getDirection() == UsbConstants.USB_DIR_IN) {
+                        chosen = iface;
+                        in = ep;
+                        break;
+                    }
+                }
+                if (in != null) break;
+            }
+            if (chosen == null || in == null) {
+                return isoFailure("no isochronous IN endpoint on the chosen alt");
+            }
+            String raw = nativeIsoProbe(fd, chosen.getId(), chosen.getAlternateSetting(),
+                    in.getAddress(), in.getMaxPacketSize(), 8, 4, 300);
+            try {
+                return new JSONObject(raw);
+            } catch (JSONException e) {
+                return raw;
+            }
+        } catch (Throwable t) {
+            return isoFailure(String.valueOf(t));
+        }
+    }
+
+    private static JSONObject isoFailure(String message) {
+        JSONObject out = new JSONObject();
+        put(out, "ok", false);
+        put(out, "error", message);
+        return out;
     }
 
     /** Release each claim, then close; the phone's own audio comes back. */
