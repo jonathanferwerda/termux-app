@@ -1065,18 +1065,21 @@ public class JawnWebViewActivity extends Activity {
                   plan=fixturePlanText;
                   if(!plan){usbTakeLine.textContent='the tone+delay fixture is not in this build';return;}
                 }
-                // Monitor depth: the label is the true runway (out URBs x
-                // packets). 8 ms -> in 4x8 / out 2x4, 4 -> 8x4 / 2x2,
-                // 2 -> 8x2 / 2x1. Two OUT URBs is the engine's floor, so a
-                // 1 ms request is the same 2 ms 2x1 (monitor_ms is authoritative).
+                // Monitor depth: the label is the true OUT runway (out URBs x
+                // packets). Every preset keeps the capture side at 8x2 (16 ms
+                // of runway, 2 ms bursts) so a capture burst is smaller than
+                // the high-water headroom; the OUT side becomes more, smaller
+                // URBs at the same runway: 8 ms -> 4x2, 4 -> 4x1, 2 -> 2x1.
+                // Two OUT URBs is the engine's floor, so a 1 ms request is the
+                // same 2 ms 2x1 (monitor_ms is authoritative).
                 var ms=parseInt(usbTakeBuffer.value,10);
                 if(!(ms>0))ms=8;
-                var inUrbs=Math.max(1,Math.min(8,Math.round(32/ms)));
-                var outPackets=Math.max(1,Math.round(ms/2));
+                if(ms<2)ms=2;
+                var shape=ms>=8?[8,2,4,2]:(ms>=4?[8,2,4,1]:[8,2,2,1]);
                 var depth;
                 try{
                   depth=(typeof JawnAudioEngine.usbDepth==='function')
-                    ?JawnAudioEngine.usbDepth(String(inUrbs),String(ms),'2',String(outPackets))
+                    ?JawnAudioEngine.usbDepth(String(shape[0]),String(shape[1]),String(shape[2]),String(shape[3]))
                     :'{"ok":0,"error":"this app build has no USB depth control"}';
                 }catch(e){depth='{"ok":0,"error":"USB depth failed: "+e}';}
                 var depthParsed=null;
