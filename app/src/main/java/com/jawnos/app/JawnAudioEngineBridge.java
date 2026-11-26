@@ -386,6 +386,22 @@ public class JawnAudioEngineBridge {
         }
     }
 
+    /**
+     * Set the direct-USB take's buffer depth for the next take: URBs and
+     * packets per direction. The page sends numbers as strings; the engine
+     * clamps each to 1..=8 and answers the depth it will use.
+     */
+    @JavascriptInterface
+    public String usbDepth(String inUrbs, String inPackets, String outUrbs, String outPackets) {
+        try {
+            return JawnAudioEngine.usbDepth(
+                    parseInt(inUrbs, 0), parseInt(inPackets, 0),
+                    parseInt(outUrbs, 0), parseInt(outPackets, 0));
+        } catch (Throwable t) {
+            return error("the USB depth could not be set: " + t);
+        }
+    }
+
     // ------------------------------------------------------------------ internals
 
     /** Embed a JSON string as an object when it is one, or as text when not. */

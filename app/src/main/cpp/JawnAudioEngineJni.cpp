@@ -34,6 +34,10 @@ using RoundTripFn = char *(*)(int, int);
 // still answers every other call, and nativeStartUsb says so.
 using StartUsbFn = char *(*)(int, int, int, int, int, int, int, int, int, double,
                              const char *, const char *);
+// Monitor depth for the next USB take, and the USB round-trip probe. Both
+// arrived after the take; optional so an older engine still loads.
+using SetUsbDepthFn = char *(*)(int, int, int, int);
+using RoundTripUsbFn = char *(*)(int, int, int, int, int, int, int, int, int, int);
 using FreeFn = void (*)(char *);
 
 struct Engine {
@@ -51,6 +55,9 @@ struct Engine {
     RoundTripFn roundtrip = nullptr;
     // Optional: the direct-USB start (USB take slice).
     StartUsbFn start_usb = nullptr;
+    // Optional: the monitor depth and the USB round trip (depth/probe slice).
+    SetUsbDepthFn set_usb_depth = nullptr;
+    RoundTripUsbFn roundtrip_usb = nullptr;
     FreeFn free = nullptr;
     std::string error;
 };
@@ -120,6 +127,10 @@ Engine &engine() {
     cached.backends = reinterpret_cast<BackendsFn>(dlsym(handle, "jawn_audio_backends"));
     cached.roundtrip = reinterpret_cast<RoundTripFn>(dlsym(handle, "jawn_audio_roundtrip"));
     cached.start_usb = reinterpret_cast<StartUsbFn>(dlsym(handle, "jawn_audio_start_usb"));
+    cached.set_usb_depth = reinterpret_cast<SetUsbDepthFn>(
+            dlsym(handle, "jawn_audio_set_usb_depth"));
+    cached.roundtrip_usb = reinterpret_cast<RoundTripUsbFn>(
+            dlsym(handle, "jawn_audio_roundtrip_usb"));
     cached.free = reinterpret_cast<FreeFn>(dlsym(handle, "jawn_audio_free"));
     if (cached.start == nullptr || cached.stop == nullptr || cached.status == nullptr
             || cached.free == nullptr) {
@@ -273,4 +284,42 @@ Java_com_jawnos_app_JawnAudioEngine_nativeStartUsb(
     if (planText != nullptr) env->ReleaseStringUTFChars(plan, planText);
     if (path != nullptr) env->ReleaseStringUTFChars(out, path);
     return answer(env, engine, text);
+}
+
+// The next USB take's monitor depth. Optional, like backends and roundtrip:
+// an engine built before it answers a sentence instead of failing to link.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeSetUsbDepth(
+        JNIEnv *env, jclass, jint inUrbs, jint inPackets,
+        jint outUrbs, jint outPackets) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.set_usb_depth == nullptr) {
+        return errorString(env, "this engine build has no USB depth control");
+    }
+    return answer(env, engine, engine.set_usb_depth(
+            static_cast<int>(inUrbs), static_cast<int>(inPackets),
+            static_cast<int>(outUrbs), static_cast<int>(outPackets)));
+}
+
+// The direct-USB round trip. It blocks for its own window (~1.5 s) because the
+// probe runs on a worker thread, and it never closes the fd: the probe still
+// owns the connection and releases its claims afterwards.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeRoundTripUsb(
+        JNIEnv *env, jclass, jint fd,
+        jint ifaceIn, jint altIn, jint epIn, jint packetIn,
+        jint ifaceOut, jint altOut, jint epOut, jint packetOut, jint millis) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.roundtrip_usb == nullptr) {
+        return errorString(env, "this engine build has no USB round-trip probe");
+    }
+    return answer(env, engine, engine.roundtrip_usb(
+            static_cast<int>(fd),
+            static_cast<int>(ifaceIn), static_cast<int>(altIn),
+            static_cast<int>(epIn), static_cast<int>(packetIn),
+            static_cast<int>(ifaceOut), static_cast<int>(altOut),
+            static_cast<int>(epOut), static_cast<int>(packetOut),
+            static_cast<int>(millis)));
 }

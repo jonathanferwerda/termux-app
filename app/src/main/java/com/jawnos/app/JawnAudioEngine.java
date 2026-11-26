@@ -62,6 +62,13 @@ public final class JawnAudioEngine {
             int ifaceOut, int altOut, int epOut, int packetOut,
             double seconds, String out, String plan);
 
+    private static native String nativeSetUsbDepth(int inUrbs, int inPackets,
+            int outUrbs, int outPackets);
+
+    private static native String nativeRoundTripUsb(int fd,
+            int ifaceIn, int altIn, int epIn, int packetIn,
+            int ifaceOut, int altOut, int epOut, int packetOut, int millis);
+
     /** Whether the shim library loaded, so a caller can explain a refusal. */
     public static boolean isLoaded() {
         return LOADED;
@@ -192,6 +199,41 @@ public final class JawnAudioEngine {
                     plan == null ? "" : plan);
         } catch (Throwable t) {
             return failure("the USB audio engine could not start: " + t);
+        }
+    }
+
+    /**
+     * Set the USB take's buffer depth: URBs and packets per direction. The
+     * engine clamps each value to 1..=8 and reads it at the next take start,
+     * answering {@code in_depth}/{@code out_depth}/{@code monitor_ms}/
+     * {@code in_delivery_ms}. Optional entry point: an engine built before it
+     * answers a sentence, never a crash.
+     */
+    public static String usbDepth(int inUrbs, int inPackets, int outUrbs, int outPackets) {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeSetUsbDepth(inUrbs, inPackets, outUrbs, outPackets);
+        } catch (Throwable t) {
+            return failure("the USB depth could not be set: " + t);
+        }
+    }
+
+    /**
+     * The direct-USB round-trip probe: it sets both chosen alts, sends a 6 ms
+     * chirp out and captures it back with the engine's URB start_frame (a
+     * patch cable OUT to IN is required). It blocks for up to about 1.5 s, so
+     * call it from a worker thread, and it never closes the fd. Optional
+     * entry point, like the HAL round trip.
+     */
+    public static String roundTripUsb(int fd,
+            int ifaceIn, int altIn, int epIn, int packetIn,
+            int ifaceOut, int altOut, int epOut, int packetOut, int millis) {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeRoundTripUsb(fd, ifaceIn, altIn, epIn, packetIn,
+                    ifaceOut, altOut, epOut, packetOut, millis);
+        } catch (Throwable t) {
+            return failure("the USB round trip could not measure: " + t);
         }
     }
 

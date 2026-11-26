@@ -610,3 +610,24 @@
   flag claimed under the existing locks makes a Stop tap at the same instant
   return the first finalizer's report instead of finalizing twice. The
   engine-first order on a user stop is unchanged.
+
+## Deltas round X+24 (USB monitor depth and the direct round trip)
+
+- **The engine's two new entry points reach Java and the panel.**
+  `JawnAudioEngine.usbDepth(...)` / `roundTripUsb(...)` wrap
+  `jawn_audio_set_usb_depth` and `jawn_audio_roundtrip_usb`; the JNI shim
+  resolves both with `dlsym` as optional, so an older engine still loads and
+  answers a sentence. The JS bridge exposes `usbDepth(...)` for the panel.
+- **The USB probe now measures the direct round trip.** After the existing
+  `usb_iso` gate, `JawnUsbProbe` picks the first chosen isochronous OUT and IN
+  endpoints (from the chosen alts, never a hardcoded number), calls
+  `roundTripUsb(..., 1500)` on the open connection's fd, and stores the parsed
+  JSON under `usb_roundtrip`. No OUT endpoint is
+  `{"ok":false,"error":"no isochronous audio output on the chosen alt"}`. It
+  needs a patch cable OUT→IN; failures stay in the report and never abort it.
+- **"USB take (direct)" gets a monitor buffer.** A `Monitor buffer (ms)` select
+  (`jawn_usb_take_buffer`, 8/4/2/1, default 8) sets the depth immediately before
+  `usbTake`: `inPackets = outPackets = ms`, `outUrbs = 1`,
+  `inUrbs = clamp(round(32/ms), 1, 8)` — so 8→4×8, 4→8×4, 2→8×2, 1→8×1. A
+  refusal is printed in the result line and the take does not start. The take
+  summary also shows `in_delivery_ms` beside `monitor_ms`.

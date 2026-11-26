@@ -503,6 +503,25 @@ public class JawnWebViewActivity extends Activity {
               usbDeviceRefresh.style.cssText='padding:2px 6px';
               usbDeviceRow.appendChild(usbDeviceRefresh);
               panel.appendChild(usbDeviceRow);
+              var usbBufferRow=document.createElement('div');
+              usbBufferRow.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
+              var usbBufferLabel=document.createElement('div');
+              usbBufferLabel.textContent=T('Monitor buffer (ms)');
+              usbBufferLabel.style.cssText='flex:1';
+              usbBufferRow.appendChild(usbBufferLabel);
+              var usbTakeBuffer=document.createElement('select');
+              usbTakeBuffer.id='jawn_usb_take_buffer';
+              usbTakeBuffer.style.cssText='background:#111;color:#f2f2f2;border:1px solid #666';
+              var bufferValues=[8,4,2,1];
+              for(var b=0;b<bufferValues.length;b++){
+                var bufferOption=document.createElement('option');
+                bufferOption.value=String(bufferValues[b]);
+                bufferOption.textContent=String(bufferValues[b])+' ms';
+                if(bufferValues[b]===8)bufferOption.selected=true;
+                usbTakeBuffer.appendChild(bufferOption);
+              }
+              usbBufferRow.appendChild(usbTakeBuffer);
+              panel.appendChild(usbBufferRow);
               var usbTakeRow=document.createElement('div');
               usbTakeRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
               var usbTakeStart=document.createElement('button');
@@ -1022,6 +1041,7 @@ public class JawnWebViewActivity extends Activity {
                   lines.push('underruns_out_start: '+parsed.underruns_out_start);
                 }
                 if(parsed.monitor_ms!==undefined)lines.push('monitor_ms: '+parsed.monitor_ms);
+                if(parsed.in_delivery_ms!==undefined)lines.push('in_delivery_ms: '+parsed.in_delivery_ms);
                 if(parsed.out_rate&&parsed.out_rate.hz!==undefined){
                   lines.push('out_rate: '+parsed.out_rate.hz+' Hz');
                 }
@@ -1040,6 +1060,23 @@ public class JawnWebViewActivity extends Activity {
                 if(planSelect.value==='fixture'){
                   plan=fixturePlanText;
                   if(!plan){usbTakeLine.textContent='the tone+delay fixture is not in this build';return;}
+                }
+                // Monitor depth: 8 ms -> 4x8, 4 -> 8x4, 2 -> 8x2, 1 -> 8x1
+                // (in URBs x packets); out is one URB of the chosen packets.
+                var ms=parseInt(usbTakeBuffer.value,10);
+                if(!(ms>0))ms=8;
+                var inUrbs=Math.max(1,Math.min(8,Math.round(32/ms)));
+                var depth;
+                try{
+                  depth=(typeof JawnAudioEngine.usbDepth==='function')
+                    ?JawnAudioEngine.usbDepth(String(inUrbs),String(ms),'1',String(ms))
+                    :'{"ok":0,"error":"this app build has no USB depth control"}';
+                }catch(e){depth='{"ok":0,"error":"USB depth failed: "+e}';}
+                var depthParsed=null;
+                try{depthParsed=JSON.parse(depth);}catch(e){}
+                if(depthParsed&&(depthParsed.ok===false||depthParsed.ok===0)){
+                  usbTakeLine.textContent=describeUsbTake(depth);
+                  return;
                 }
                 var reply;
                 try{

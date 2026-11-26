@@ -406,6 +406,11 @@ public class JawnUsbProbe {
                 // so hand the connection's fd to the native probe. It submits
                 // iso URBs on the chosen AudioStreaming alt's IN endpoint.
                 put(out, "usb_iso", isoProbe(conn, chosenById));
+                // P2: the direct-USB round trip (a 6 ms chirp out and back)
+                // on the chosen OUT/IN endpoints. It needs a patch cable
+                // OUT->IN; a missing endpoint or a refused probe is a report
+                // field and never aborts the rest of the probe.
+                put(out, "usb_roundtrip", usbRoundTrip(conn, chosenById));
             }
         } catch (Throwable t) {
             errors.put("probe: " + t);
@@ -677,6 +682,63 @@ public class JawnUsbProbe {
         put(out, "ok", false);
         put(out, "error", message);
         return out;
+    }
+
+    /**
+     * The direct-USB round trip on the chosen streaming interfaces: a 6 ms
+     * chirp on the first chosen isochronous OUT endpoint, captured on the
+     * first chosen isochronous IN endpoint. Both come from the chosen alts,
+     * never from a hardcoded UM2 interface or endpoint number. The engine
+     * blocks for about 1.5 s and never closes the fd; the caller's finally
+     * still releases the claims. A missing endpoint is a sentence in the
+     * report, never an exception.
+     */
+    private Object usbRoundTrip(UsbDeviceConnection conn,
+                                Map<Integer, UsbInterface> chosenById) {
+        try {
+            UsbInterface inIface = null;
+            UsbEndpoint in = null;
+            UsbInterface outIface = null;
+            UsbEndpoint out = null;
+            for (UsbInterface iface : chosenById.values()) {
+                for (int e = 0; e < iface.getEndpointCount(); e++) {
+                    UsbEndpoint ep = iface.getEndpoint(e);
+                    if (ep.getType() != UsbConstants.USB_ENDPOINT_XFER_ISOC) continue;
+                    if (ep.getDirection() == UsbConstants.USB_DIR_IN) {
+                        if (in == null) {
+                            inIface = iface;
+                            in = ep;
+                        }
+                    } else if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
+                        if (out == null) {
+                            outIface = iface;
+                            out = ep;
+                        }
+                    }
+                }
+            }
+            if (in == null || inIface == null) {
+                return isoFailure("no isochronous audio input on the chosen alt");
+            }
+            if (out == null || outIface == null) {
+                return isoFailure("no isochronous audio output on the chosen alt");
+            }
+            int fd = conn.getFileDescriptor();
+            if (fd < 0) return isoFailure("the connection has no file descriptor");
+            String raw = JawnAudioEngine.roundTripUsb(fd,
+                    inIface.getId(), inIface.getAlternateSetting(),
+                    in.getAddress(), in.getMaxPacketSize(),
+                    outIface.getId(), outIface.getAlternateSetting(),
+                    out.getAddress(), out.getMaxPacketSize(),
+                    1500);
+            try {
+                return new JSONObject(raw);
+            } catch (JSONException e) {
+                return raw;
+            }
+        } catch (Throwable t) {
+            return isoFailure("the USB round trip failed: " + t);
+        }
     }
 
     /** Release each claim, then close; the phone's own audio comes back. */
