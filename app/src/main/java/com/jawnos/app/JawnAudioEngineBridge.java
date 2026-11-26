@@ -47,9 +47,13 @@ public class JawnAudioEngineBridge {
     /** The P0 USB gate, sharing this bridge's application context. */
     private final JawnUsbProbe usbGate;
 
+    /** The native USB take: one holder for the whole connection's life. */
+    private final JawnUsbAudio usbAudio;
+
     public JawnAudioEngineBridge(Context context) {
         this.context = context.getApplicationContext();
         this.usbGate = new JawnUsbProbe(this.context);
+        this.usbAudio = new JawnUsbAudio(this.context);
     }
 
     /** Whether the engine is in this build, plus its backends report. */
@@ -309,6 +313,46 @@ public class JawnAudioEngineBridge {
             return usbGate.status();
         } catch (Throwable t) {
             return error("the USB probe could not report: " + t);
+        }
+    }
+
+    /**
+     * Start the native USB take: hold the device's {@code UsbDeviceConnection}
+     * and hand its fd to the engine. It returns at once (the detecting or
+     * requesting sentence); the holder asks for USB permission, opens and
+     * claims on its own worker thread, and the panel polls
+     * {@link #usbTakeStatus()}.
+     */
+    @JavascriptInterface
+    public String usbTake(String seconds, String plan) {
+        try {
+            return usbAudio.start(seconds, plan);
+        } catch (Throwable t) {
+            return error("the USB take could not start: " + t);
+        }
+    }
+
+    /**
+     * End the USB take: the engine stops first (joining its USB worker), then
+     * the claims are released and the connection closed. The final report
+     * names the WAV, so the take can be pulled without the app.
+     */
+    @JavascriptInterface
+    public String usbTakeStop() {
+        try {
+            return usbAudio.stop();
+        } catch (Throwable t) {
+            return error("the USB take could not stop: " + t);
+        }
+    }
+
+    /** The USB take's live status while held, else its last report. */
+    @JavascriptInterface
+    public String usbTakeStatus() {
+        try {
+            return usbAudio.status();
+        } catch (Throwable t) {
+            return error("the USB take could not report: " + t);
         }
     }
 

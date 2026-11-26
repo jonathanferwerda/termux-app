@@ -30,6 +30,10 @@ using StatusFn = char *(*)();
 using BackendsFn = char *(*)();
 // The duplex round-trip probe (2026-11 slice). Optional like backends.
 using RoundTripFn = char *(*)(int, int);
+// The direct-USB capture+monitor backend. Optional: an engine built before it
+// still answers every other call, and nativeStartUsb says so.
+using StartUsbFn = char *(*)(int, int, int, int, int, int, int, int, int, double,
+                             const char *, const char *);
 using FreeFn = void (*)(char *);
 
 struct Engine {
@@ -45,6 +49,8 @@ struct Engine {
     // Optional: the duplex probe arrived in the round-trip slice, so an
     // engine built before it still answers every other call.
     RoundTripFn roundtrip = nullptr;
+    // Optional: the direct-USB start (USB take slice).
+    StartUsbFn start_usb = nullptr;
     FreeFn free = nullptr;
     std::string error;
 };
@@ -113,6 +119,7 @@ Engine &engine() {
     cached.status = reinterpret_cast<StatusFn>(dlsym(handle, "jawn_audio_status"));
     cached.backends = reinterpret_cast<BackendsFn>(dlsym(handle, "jawn_audio_backends"));
     cached.roundtrip = reinterpret_cast<RoundTripFn>(dlsym(handle, "jawn_audio_roundtrip"));
+    cached.start_usb = reinterpret_cast<StartUsbFn>(dlsym(handle, "jawn_audio_start_usb"));
     cached.free = reinterpret_cast<FreeFn>(dlsym(handle, "jawn_audio_free"));
     if (cached.start == nullptr || cached.stop == nullptr || cached.status == nullptr
             || cached.free == nullptr) {
@@ -233,4 +240,37 @@ Java_com_jawnos_app_JawnAudioEngine_nativeRoundTrip(
     }
     return answer(env, engine, engine.roundtrip(static_cast<int>(deviceIn),
                                                static_cast<int>(deviceOut)));
+}
+
+
+// The direct-USB take. Optional, like backends and roundtrip: an engine built
+// before the USB backend still answers everything else, and this entry point
+// says the backend is absent instead of failing to link.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jawnos_app_JawnAudioEngine_nativeStartUsb(
+        JNIEnv *env, jclass, jint fd,
+        jint ifaceIn, jint altIn, jint epIn, jint packetIn,
+        jint ifaceOut, jint altOut, jint epOut, jint packetOut,
+        jdouble seconds, jstring out, jstring plan) {
+    Engine &engine = ::engine();
+    if (!engine.error.empty()) return errorString(env, engine.error);
+    if (engine.start_usb == nullptr) {
+        return errorString(env, "this engine build has no USB backend");
+    }
+
+    const char *path = nullptr;
+    if (out != nullptr) path = env->GetStringUTFChars(out, nullptr);
+    const char *planText = nullptr;
+    if (plan != nullptr) planText = env->GetStringUTFChars(plan, nullptr);
+
+    char *text = engine.start_usb(
+            static_cast<int>(fd), static_cast<int>(ifaceIn), static_cast<int>(altIn),
+            static_cast<int>(epIn), static_cast<int>(packetIn),
+            static_cast<int>(ifaceOut), static_cast<int>(altOut),
+            static_cast<int>(epOut), static_cast<int>(packetOut),
+            static_cast<double>(seconds), path, planText);
+
+    if (planText != nullptr) env->ReleaseStringUTFChars(plan, planText);
+    if (path != nullptr) env->ReleaseStringUTFChars(out, path);
+    return answer(env, engine, text);
 }

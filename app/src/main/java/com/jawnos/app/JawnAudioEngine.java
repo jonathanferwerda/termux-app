@@ -57,6 +57,11 @@ public final class JawnAudioEngine {
 
     private static native String nativeRoundTrip(int deviceIn, int deviceOut);
 
+    private static native String nativeStartUsb(int fd,
+            int ifaceIn, int altIn, int epIn, int packetIn,
+            int ifaceOut, int altOut, int epOut, int packetOut,
+            double seconds, String out, String plan);
+
     /** Whether the shim library loaded, so a caller can explain a refusal. */
     public static boolean isLoaded() {
         return LOADED;
@@ -161,6 +166,32 @@ public final class JawnAudioEngine {
             return nativeRoundTrip(deviceIn, deviceOut);
         } catch (Throwable t) {
             return failure("the audio engine could not measure the round trip: " + t);
+        }
+    }
+
+    /**
+     * Start a direct-USB take (the capture+monitor backend). The caller owns a
+     * {@link android.hardware.usb.UsbDeviceConnection} and passes its file
+     * descriptor plus the chosen interfaces, alts and endpoint addresses; the
+     * connection must stay open until {@link #stop()}. {@code epOut < 0} is
+     * capture only, {@code seconds <= 0} runs until stopped, and a null or
+     * empty {@code plan} is the raw path. The engine returns at once with
+     * {@code {"ok":true,"state":"started","backend":"usb",...}}.
+     *
+     * <p>Permission, open and the claims can block, so a caller resolves them
+     * on a worker thread before reaching this method.
+     */
+    public static String usbStart(int fd,
+            int ifaceIn, int altIn, int epIn, int packetIn,
+            int ifaceOut, int altOut, int epOut, int packetOut,
+            double seconds, String out, String plan) {
+        if (!LOADED) return failure("the audio engine is not in this build: " + LOAD_ERROR);
+        try {
+            return nativeStartUsb(fd, ifaceIn, altIn, epIn, packetIn,
+                    ifaceOut, altOut, epOut, packetOut, seconds, out,
+                    plan == null ? "" : plan);
+        } catch (Throwable t) {
+            return failure("the USB audio engine could not start: " + t);
         }
     }
 

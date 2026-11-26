@@ -600,6 +600,26 @@ public class JawnWebViewActivity extends Activity {
               usbLine.id='jawn_usb_probe_result';
               usbLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:28vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(usbLine);
+              var usbTakeHeading=document.createElement('div');
+              usbTakeHeading.textContent=T('Native USB take');
+              usbTakeHeading.style.cssText='font-weight:bold;margin:8px 0 4px;border-top:1px solid #555;padding-top:6px';
+              panel.appendChild(usbTakeHeading);
+              var usbTakeRow=document.createElement('div');
+              usbTakeRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+              var usbTakeStart=document.createElement('button');
+              usbTakeStart.textContent=T('Start USB take');
+              usbTakeStart.style.cssText='flex:1;padding:4px 6px';
+              var usbTakeStop=document.createElement('button');
+              usbTakeStop.textContent=T('Stop USB take');
+              usbTakeStop.disabled=true;
+              usbTakeStop.style.cssText='flex:1;padding:4px 6px';
+              usbTakeRow.appendChild(usbTakeStart);
+              usbTakeRow.appendChild(usbTakeStop);
+              panel.appendChild(usbTakeRow);
+              var usbTakeLine=document.createElement('pre');
+              usbTakeLine.id='jawn_usb_take_result';
+              usbTakeLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:24vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
+              panel.appendChild(usbTakeLine);
               var line=document.createElement('pre');
               line.id='jawn_native_status';
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
@@ -898,11 +918,95 @@ public class JawnWebViewActivity extends Activity {
                 },500);
               };
 
+              var usbTakeTimer=null;
+              var describeUsbTake=function(raw){
+                var parsed=null;
+                try{parsed=JSON.parse(raw);}catch(e){}
+                if(!parsed)return String(raw);
+                var lines=['state: '+(parsed.state||'?')+'  ok: '+(parsed.ok===true||parsed.ok===1)];
+                if(parsed.error)lines.push('error: '+String(parsed.error));
+                if(parsed.frames_captured!==undefined){
+                  lines.push('frames: '+parsed.frames_captured
+                    +(parsed.frames_written!==undefined?(' written: '+parsed.frames_written):''));
+                }
+                if(parsed.packets_in!==undefined){
+                  lines.push('packets_in: '+parsed.packets_in
+                    +(parsed.missed_in!==undefined?(' missed_in: '+parsed.missed_in):''));
+                }
+                if(parsed.underruns_out!==undefined||parsed.dropped_out!==undefined){
+                  lines.push('underruns_out: '+(parsed.underruns_out||0)
+                    +'  dropped_out: '+(parsed.dropped_out||0));
+                }
+                if(parsed.peak!==undefined)lines.push('peak: '+parsed.peak);
+                if(parsed.take)lines.push('take: '+String(parsed.take));
+                if(parsed.file)lines.push('file: '+String(parsed.file));
+                if(parsed.message)lines.push(String(parsed.message));
+                lines.push('');
+                lines.push(String(raw));
+                return lines.join(NL);
+              };
+              usbTakeStart.onclick=function(){
+                if(usbTakeTimer)return;
+                var secs=seconds.value||'600';
+                var plan='';
+                if(planSelect.value==='fixture'){
+                  plan=fixturePlanText;
+                  if(!plan){usbTakeLine.textContent='the tone+delay fixture is not in this build';return;}
+                }
+                var reply;
+                try{
+                  reply=(typeof JawnAudioEngine.usbTake==='function')
+                    ?JawnAudioEngine.usbTake(secs,plan)
+                    :'{"ok":false,"state":"unsupported","error":"this app build has no USB take"}';
+                }catch(e){reply='{"ok":false,"state":"error","error":"USB take failed: '+e+'"}';}
+                usbTakeLine.textContent=describeUsbTake(reply);
+                var parsed=null;
+                try{parsed=JSON.parse(reply);}catch(e){}
+                if(parsed&&(parsed.ok===false||parsed.ok===0))return;
+                usbTakeStart.disabled=true;
+                usbTakeStop.disabled=false;
+                var waits=0;
+                usbTakeTimer=setInterval(function(){
+                  waits++;
+                  var raw;
+                  try{raw=JawnAudioEngine.usbTakeStatus();}
+                  catch(e){raw='{"ok":0,"error":"USB take status failed"}';}
+                  usbTakeLine.textContent=describeUsbTake(raw);
+                  var now=null;
+                  try{now=JSON.parse(raw);}catch(e){}
+                  var state=now?String(now.state||''):'';
+                  if(state==='started')return;
+                  if(state==='detecting'||state==='opening'||state==='requesting'){
+                    if(waits<240)return;
+                    if(usbTakeTimer){clearInterval(usbTakeTimer);usbTakeTimer=null;}
+                    usbTakeLine.textContent=usbTakeLine.textContent+NL
+                      +'still waiting - answer the USB permission dialog, then tap Start USB take again';
+                    return;
+                  }
+                  if(usbTakeTimer){clearInterval(usbTakeTimer);usbTakeTimer=null;}
+                  usbTakeStart.disabled=false;
+                  usbTakeStop.disabled=true;
+                },500);
+              };
+              usbTakeStop.onclick=function(){
+                if(usbTakeTimer){clearInterval(usbTakeTimer);usbTakeTimer=null;}
+                var reply;
+                try{reply=JawnAudioEngine.usbTakeStop();}
+                catch(e){reply='{"ok":0,"error":"USB take stop failed"}';}
+                usbTakeLine.textContent=describeUsbTake(reply);
+                usbTakeStart.disabled=false;
+                usbTakeStop.disabled=true;
+              };
+
               window.addEventListener('pagehide',function(){
                 if(observer){try{observer.disconnect();}catch(e){}}
                 if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
                 if(roundTripTimer){clearInterval(roundTripTimer);roundTripTimer=null;}
                 if(usbTimer){clearInterval(usbTimer);usbTimer=null;}
+                if(usbTakeTimer){
+                  clearInterval(usbTakeTimer);usbTakeTimer=null;
+                  try{JawnAudioEngine.usbTakeStop();}catch(e){}
+                }
               });
             }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}
             })();
