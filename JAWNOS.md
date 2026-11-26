@@ -583,3 +583,30 @@
   it cannot race a take that starts in the same instant).
 - **The panel summary** now also shows `underruns_out_start`, `monitor_ms` and
   `out_rate` from the engine's new report keys; the raw JSON is unchanged.
+
+## Deltas round X+23 (the USB take is first, and its deadline finalizes)
+
+- **The direct-USB take is the first thing in the panel.** The section order is
+  now: *Studio audio* (main) → *USB take (direct)* → *Native take (Android
+  audio)* → Round trip → USB probe → HAL status. The HAL block gains the hint
+  "Uses Android's audio path, not the UM2 direct path." This is the fix for a
+  session that started the HAL take three times because the USB Start sat below
+  the fold.
+- **The USB section names the device.** A line `id="jawn_usb_take_device"` and a
+  small Refresh button show the attached USB audio device (vendor/product and
+  whether USB permission is granted) or "no USB audio input is attached". It is
+  fed by `JawnUsbAudio.describe()` / `JawnAudioEngineBridge.usbAudioDevice()`,
+  which enumerate exactly as `findDevice()` does (an AudioStreaming interface
+  with an isochronous IN endpoint) and open/claim nothing.
+- **The HAL input list re-enumerates on appearance.** `syncPanel` detects the
+  hidden→visible transition of the Studio window and refills the HAL input
+  select (preserving the chosen id), so a device plugged after page load
+  appears. The USB device line is refreshed at the same moment.
+- **A take that reaches its `seconds` deadline now finalizes.** While a take is
+  held, a worker (`jawn-usb-expiry`) polls the engine status every 500 ms. When
+  the status is a final report (no `state`, or any state other than
+  started/detecting/opening/requesting), it runs the same release/close/report
+  path as a user stop, then drops the foreground anchor. A one-shot `finalized`
+  flag claimed under the existing locks makes a Stop tap at the same instant
+  return the first finalizer's report instead of finalizing twice. The
+  engine-first order on a user stop is unchanged.

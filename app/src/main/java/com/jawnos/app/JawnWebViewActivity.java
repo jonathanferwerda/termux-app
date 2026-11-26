@@ -484,9 +484,49 @@ public class JawnWebViewActivity extends Activity {
               panel.id='jawn_native_panel';
               panel.style.cssText='position:fixed;right:10px;bottom:10px;z-index:2147483647;width:300px;max-height:62vh;overflow:auto;background:rgba(20,20,20,0.95);color:#f2f2f2;border:1px solid #666;border-radius:8px;padding:8px 10px;font:12px/1.35 monospace;box-shadow:0 4px 18px rgba(0,0,0,0.55)';
               var heading=document.createElement('div');
-              heading.textContent=T('Native take');
+              heading.textContent=T('Studio audio');
               heading.style.cssText='font-weight:bold;font-size:13px;margin-bottom:6px';
               panel.appendChild(heading);
+              var usbTakeHeading=document.createElement('div');
+              usbTakeHeading.textContent=T('USB take (direct)');
+              usbTakeHeading.style.cssText='font-weight:bold;margin:0 0 4px';
+              panel.appendChild(usbTakeHeading);
+              var usbDeviceRow=document.createElement('div');
+              usbDeviceRow.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
+              var usbTakeDevice=document.createElement('div');
+              usbTakeDevice.id='jawn_usb_take_device';
+              usbTakeDevice.textContent=T('checking for a USB audio input...');
+              usbTakeDevice.style.cssText='flex:1;white-space:pre-wrap;word-break:break-word;color:#cfcfcf';
+              usbDeviceRow.appendChild(usbTakeDevice);
+              var usbDeviceRefresh=document.createElement('button');
+              usbDeviceRefresh.textContent=T('Refresh');
+              usbDeviceRefresh.style.cssText='padding:2px 6px';
+              usbDeviceRow.appendChild(usbDeviceRefresh);
+              panel.appendChild(usbDeviceRow);
+              var usbTakeRow=document.createElement('div');
+              usbTakeRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+              var usbTakeStart=document.createElement('button');
+              usbTakeStart.textContent=T('Start USB take');
+              usbTakeStart.style.cssText='flex:1;padding:4px 6px';
+              var usbTakeStop=document.createElement('button');
+              usbTakeStop.textContent=T('Stop USB take');
+              usbTakeStop.disabled=true;
+              usbTakeStop.style.cssText='flex:1;padding:4px 6px';
+              usbTakeRow.appendChild(usbTakeStart);
+              usbTakeRow.appendChild(usbTakeStop);
+              panel.appendChild(usbTakeRow);
+              var usbTakeLine=document.createElement('pre');
+              usbTakeLine.id='jawn_usb_take_result';
+              usbTakeLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:24vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
+              panel.appendChild(usbTakeLine);
+              var nativeHeading=document.createElement('div');
+              nativeHeading.textContent=T('Native take (Android audio)');
+              nativeHeading.style.cssText='font-weight:bold;margin:8px 0 2px;border-top:1px solid #555;padding-top:6px';
+              panel.appendChild(nativeHeading);
+              var nativeHint=document.createElement('div');
+              nativeHint.textContent=T("Uses Android's audio path, not the UM2 direct path.");
+              nativeHint.style.cssText='margin:0 0 4px;color:#b9b9b9';
+              panel.appendChild(nativeHint);
               var inputLabel=document.createElement('div');
               inputLabel.textContent=T('Input');
               inputLabel.style.cssText='margin:4px 0 2px';
@@ -600,26 +640,6 @@ public class JawnWebViewActivity extends Activity {
               usbLine.id='jawn_usb_probe_result';
               usbLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:28vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(usbLine);
-              var usbTakeHeading=document.createElement('div');
-              usbTakeHeading.textContent=T('Native USB take');
-              usbTakeHeading.style.cssText='font-weight:bold;margin:8px 0 4px;border-top:1px solid #555;padding-top:6px';
-              panel.appendChild(usbTakeHeading);
-              var usbTakeRow=document.createElement('div');
-              usbTakeRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
-              var usbTakeStart=document.createElement('button');
-              usbTakeStart.textContent=T('Start USB take');
-              usbTakeStart.style.cssText='flex:1;padding:4px 6px';
-              var usbTakeStop=document.createElement('button');
-              usbTakeStop.textContent=T('Stop USB take');
-              usbTakeStop.disabled=true;
-              usbTakeStop.style.cssText='flex:1;padding:4px 6px';
-              usbTakeRow.appendChild(usbTakeStart);
-              usbTakeRow.appendChild(usbTakeStop);
-              panel.appendChild(usbTakeRow);
-              var usbTakeLine=document.createElement('pre');
-              usbTakeLine.id='jawn_usb_take_result';
-              usbTakeLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:24vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
-              panel.appendChild(usbTakeLine);
               var line=document.createElement('pre');
               line.id='jawn_native_status';
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
@@ -650,6 +670,57 @@ public class JawnWebViewActivity extends Activity {
                 }
               }catch(e){}
               fillDevices(rtOutput,outputList,'This phone speaker (default)');
+              var usbDeviceText=function(raw){
+                var parsed=null;
+                try{parsed=JSON.parse(raw);}catch(e){parsed=null;}
+                if(!parsed)return String(raw);
+                if(parsed.ok&&parsed.device){
+                  var d=parsed.device;
+                  var vid=('0000'+Number(d.vendorId||0).toString(16)).slice(-4);
+                  var pid=('0000'+Number(d.productId||0).toString(16)).slice(-4);
+                  return T('USB audio')+': '+vid+'/'+pid
+                    +'  '+String(d.deviceName||'')
+                    +'  '+T('permission')+': '+(d.permission?T('granted'):T('not granted'));
+                }
+                return String(parsed.error||T('no USB audio input is attached'));
+              };
+              var refreshUsbDevice=function(){
+                var raw;
+                try{
+                  raw=(typeof JawnAudioEngine.usbAudioDevice==='function')
+                    ?JawnAudioEngine.usbAudioDevice()
+                    :'{"ok":false,"error":"this app build has no USB device report"}';
+                }catch(e){raw='{"ok":false,"error":"USB device report failed: "+e}';}
+                usbTakeDevice.textContent=usbDeviceText(raw);
+              };
+              usbDeviceRefresh.onclick=function(){refreshUsbDevice();};
+              refreshUsbDevice();
+              var reloadInputs=function(){
+                var list=null;
+                try{
+                  var again=JSON.parse(JawnAudioEngine.devices());
+                  if(again&&again.devices)list=again.devices;
+                }catch(e){}
+                if(!list)return;
+                var chosen=select.value;
+                while(select.firstChild)select.removeChild(select.firstChild);
+                var againOwn=document.createElement('option');
+                againOwn.value='-1';
+                againOwn.textContent=T('This phone microphone (default)');
+                select.appendChild(againOwn);
+                for(var i=0;i<list.length;i++){
+                  var entry=list[i];
+                  var option=document.createElement('option');
+                  option.value=String(entry.id);
+                  option.textContent=String(entry.name||('input '+entry.id))
+                    +(entry.usb?' [USB]':'')+' #'+entry.id
+                    +' ('+(entry.typeName||entry.type)+')';
+                  select.appendChild(option);
+                }
+                for(var j=0;j<select.options.length;j++){
+                  if(select.options[j].value===chosen){select.value=chosen;break;}
+                }
+              };
 
               panel.style.display='none';
               var studioWindow=function(){
@@ -658,7 +729,17 @@ public class JawnWebViewActivity extends Activity {
                 if(!node)return false;
                 return !!(node.offsetWidth||node.offsetHeight||node.getClientRects().length);
               };
-              var syncPanel=function(){panel.style.display=studioWindow()?'block':'none';};
+              var wasVisible=false;
+              var syncPanel=function(){
+                var visible=studioWindow();
+                panel.style.display=visible?'block':'none';
+                if(visible&&!wasVisible){
+                  // A device plugged after injection must appear here.
+                  reloadInputs();
+                  refreshUsbDevice();
+                }
+                wasVisible=visible;
+              };
               syncPanel();
               var observer=null;
               try{

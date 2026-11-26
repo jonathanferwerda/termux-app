@@ -83,6 +83,8 @@ public class JawnUsbAudio {
     private volatile boolean cancelled = false;
     private boolean active = false;
     private boolean holding = false;
+    /** One-shot: true once this take's teardown (a stop or its deadline) was claimed. */
+    private boolean finalized = false;
     private String last = "{\"ok\":false,\"state\":\"idle\"}";
     private String takePath = "";
     private String takeSeconds = "0";
@@ -131,6 +133,7 @@ public class JawnUsbAudio {
             }
             active = true;
             cancelled = false;
+            finalized = false;
             takeSeconds = seconds == null ? "0" : seconds.trim();
             takePlan = plan == null ? "" : plan;
             takePath = newTakePath();
@@ -166,36 +169,126 @@ public class JawnUsbAudio {
             cancelled = true;
         }
         unregisterPermission();
+        return finishTake(true, false);
+    }
 
-        String report;
+    /**
+     * The one-shot teardown shared by a user stop and the deadline watch. The
+     * first caller wins; a concurrent second call waits on {@link #sessionLock}
+     * and then returns the report the first one published, so a tap on Stop as
+     * the take expires can never finalize twice.
+     *
+     * @param engineStop true on a user stop: the engine is stopped before any
+     *                   claim is released, the order this holder always used.
+     *                   False when the engine already produced its final
+     *                   report on its own at the deadline.
+     * @param stopAnchor true on the deadline path, which has no bridge behind
+     *                   it to drop the foreground service afterwards.
+     */
+    private String finishTake(boolean engineStop, boolean stopAnchor) {
+        String answer;
         boolean held;
         synchronized (sessionLock) {
             synchronized (stateLock) {
+                if (finalized) return last;
+                finalized = true;
                 held = holding;
             }
-            if (held) {
+            if (!held) {
+                // The take never reached the engine (stopped while detecting
+                // or requesting permission); there is no report to write.
+                synchronized (stateLock) {
+                    holding = false;
+                    active = false;
+                }
+                return last;
+            }
+            String report;
+            if (engineStop) {
                 try {
                     report = JawnAudioEngine.stop();
                 } catch (Throwable t) {
                     report = errorJson("the audio engine could not stop: " + t);
                 }
             } else {
-                report = null;
+                // The deadline report is already final: the engine's worker is
+                // done with the fd once its status stops saying "started".
+                try {
+                    report = JawnAudioEngine.status();
+                } catch (Throwable t) {
+                    report = errorJson("the audio engine could not report: " + t);
+                }
             }
             releaseAll();
-        }
-
-        synchronized (stateLock) {
-            holding = false;
-            active = false;
-            if (!held) {
-                // The take never reached the engine (stopped while detecting
-                // or requesting permission); there is no report to write.
-                return last;
+            // Write the report while active is still true: a new start must be
+            // refused until this take's path and file are settled.
+            answer = finalizeReport(report, takePath);
+            synchronized (stateLock) {
+                holding = false;
+                active = false;
+                last = answer;
             }
-            report = finalizeReport(report, takePath);
-            last = report;
-            return report;
+        }
+        if (stopAnchor) stopAnchorIfIdle(0);
+        return answer;
+    }
+
+    /**
+     * Watch a held take for its own deadline. A USB take with {@code seconds}
+     * &gt; 0 stops its worker at the deadline and leaves the final report in the
+     * engine's status; this thread notices that report and runs the same
+     * release-and-close as a user stop, off the main thread because the status
+     * read and the release can block.
+     */
+    private void startExpiryWatch() {
+        Thread watch = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    synchronized (stateLock) {
+                        if (!holding || finalized) return;
+                    }
+                    String now;
+                    try {
+                        now = JawnAudioEngine.status();
+                    } catch (Throwable t) {
+                        now = null;
+                    }
+                    if (now != null && isFinalReport(now)) {
+                        finishTake(false, true);
+                        return;
+                    }
+                    try {
+                        Thread.sleep(500L);
+                    } catch (InterruptedException stop) {
+                        return;
+                    }
+                }
+            }
+        }, "jawn-usb-expiry");
+        try {
+            watch.setDaemon(true);
+            watch.start();
+        } catch (Throwable t) {
+            // The take is already holding; never let a watch failure reach the
+            // worker's catch and finalize a live take.
+            Log.w(TAG, "could not start the deadline watch", t);
+        }
+    }
+
+    /**
+     * True when the engine's JSON is a final report rather than a live take:
+     * no {@code state} at all (the USB report has none) or any state other than
+     * the four the engine uses while it is coming up or running.
+     */
+    private static boolean isFinalReport(String json) {
+        try {
+            JSONObject answer = new JSONObject(json == null ? "" : json);
+            String state = answer.optString("state", "");
+            return !("started".equals(state) || "detecting".equals(state)
+                    || "opening".equals(state) || "requesting".equals(state));
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -219,6 +312,26 @@ public class JawnUsbAudio {
             }
         }
         return fallback;
+    }
+
+    /**
+     * The attached USB audio device this holder would claim, without opening
+     * or claiming anything. Qualification is exactly {@link #findDevice}'s: an
+     * AudioStreaming interface with an isochronous IN endpoint. Answers the
+     * device and whether the app already holds its USB permission, or the same
+     * sentence a start would give when none is attached.
+     */
+    public String describe() {
+        UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        if (manager == null) return errorJson("this build cannot see a UsbManager");
+        UsbDevice device = findDevice(manager);
+        if (device == null) return errorJson("no USB audio input is attached");
+        JSONObject out = state("attached");
+        put(out, "ok", true);
+        JSONObject row = deviceJson(device);
+        put(row, "permission", manager.hasPermission(device));
+        put(out, "device", row);
+        return out.toString();
     }
 
     /**
@@ -529,6 +642,9 @@ public class JawnUsbAudio {
                 last = started.toString();
             }
         }
+        // A held take can reach its own seconds deadline; the watch finalizes
+        // it outside these locks.
+        startExpiryWatch();
     }
 
     /** Force-claim one interface; the force flag is what detaches the HAL. */
@@ -771,12 +887,20 @@ public class JawnUsbAudio {
         // to keep alive: drop it so a notification saying "USB take running"
         // and its wake lock do not outlive the attempt. Re-check liveness just
         // after, so a take that starts in the same instant keeps its anchor.
+        stopAnchorIfIdle(2000);
+    }
+
+    /**
+     * Drop the USB anchor unless a take is already live again, so an ending
+     * take can never cancel the anchor of one that starts in the same instant.
+     */
+    private void stopAnchorIfIdle(long delayMs) {
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (!isLive()) JawnUsbAudioService.stop(context);
             }
-        }, 2000);
+        }, delayMs);
     }
 
     private static String errorJson(String message) {

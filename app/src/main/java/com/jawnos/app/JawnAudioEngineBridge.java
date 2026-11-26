@@ -372,6 +372,20 @@ public class JawnAudioEngineBridge {
         }
     }
 
+    /**
+     * The attached USB audio device the direct take would claim, and whether
+     * its USB permission is already granted. It opens and claims nothing, so
+     * the panel can show "a UM2 is present but not allowed yet" before a take.
+     */
+    @JavascriptInterface
+    public String usbAudioDevice() {
+        try {
+            return usbAudio.describe();
+        } catch (Throwable t) {
+            return error("the USB audio device could not be reported: " + t);
+        }
+    }
+
     // ------------------------------------------------------------------ internals
 
     /** Embed a JSON string as an object when it is one, or as text when not. */
