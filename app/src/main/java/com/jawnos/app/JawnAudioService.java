@@ -208,7 +208,10 @@ public class JawnAudioService extends Service {
         // system-initiated stop reaches here without onStartCommand(ACTION_STOP).
         if (running) {
             endTake();
-        } else {
+        } else if (!JawnUsbAudio.shared(this).isLive()) {
+            // The engine may belong to a native USB take, which is anchored by
+            // JawnUsbAudioService and stopped by its own holder. A HAL teardown
+            // must never end that take.
             JawnAudioEngine.stop();
         }
         releaseWakeLock();

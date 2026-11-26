@@ -47,13 +47,16 @@ public class JawnAudioEngineBridge {
     /** The P0 USB gate, sharing this bridge's application context. */
     private final JawnUsbProbe usbGate;
 
-    /** The native USB take: one holder for the whole connection's life. */
+    /**
+     * The native USB take: the process-wide holder, the same instance the USB
+     * anchor service reads, so both act on one connection.
+     */
     private final JawnUsbAudio usbAudio;
 
     public JawnAudioEngineBridge(Context context) {
         this.context = context.getApplicationContext();
         this.usbGate = new JawnUsbProbe(this.context);
-        this.usbAudio = new JawnUsbAudio(this.context);
+        this.usbAudio = JawnUsbAudio.shared(this.context);
     }
 
     /** Whether the engine is in this build, plus its backends report. */
@@ -317,33 +320,46 @@ public class JawnAudioEngineBridge {
     }
 
     /**
-     * Start the native USB take: hold the device's {@code UsbDeviceConnection}
-     * and hand its fd to the engine. It returns at once (the detecting or
+     * Start the native USB take: anchor it in {@link JawnUsbAudioService},
+     * then have the holder open and claim the device and hand its fd to the
+     * engine. The anchor comes first so a sleeping screen or a backgrounded
+     * process cannot end the take. It returns at once (the detecting or
      * requesting sentence); the holder asks for USB permission, opens and
      * claims on its own worker thread, and the panel polls
      * {@link #usbTakeStatus()}.
      */
     @JavascriptInterface
     public String usbTake(String seconds, String plan) {
+        if (!JawnUsbAudioService.start(context)) {
+            return error("the USB take anchor could not start");
+        }
         try {
             return usbAudio.start(seconds, plan);
         } catch (Throwable t) {
+            // Do not leave an anchor holding the process for a take that never
+            // began.
+            JawnUsbAudioService.stop(context);
             return error("the USB take could not start: " + t);
         }
     }
 
     /**
-     * End the USB take: the engine stops first (joining its USB worker), then
-     * the claims are released and the connection closed. The final report
-     * names the WAV, so the take can be pulled without the app.
+     * End the USB take: the holder stops the engine first (joining its USB
+     * worker), then releases the claims and closes the connection. The anchor
+     * is dropped afterwards; its {@code onDestroy} then sees no live take and
+     * only releases the wake lock. The final report names the WAV, so the take
+     * can be pulled without the app.
      */
     @JavascriptInterface
     public String usbTakeStop() {
+        String report;
         try {
-            return usbAudio.stop();
+            report = usbAudio.stop();
         } catch (Throwable t) {
-            return error("the USB take could not stop: " + t);
+            report = error("the USB take could not stop: " + t);
         }
+        JawnUsbAudioService.stop(context);
+        return report;
     }
 
     /** The USB take's live status while held, else its last report. */

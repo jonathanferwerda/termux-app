@@ -588,6 +588,18 @@
             android:foregroundServiceType="microphone|connectedDevice"
             android:stopWithTask="false" />
 
+        <!-- The native USB take's anchor: the holder owns the
+             UsbDeviceConnection and the engine reads its fd, so this service
+             never touches the engine. It only keeps the process foreground,
+             holds the wake lock, and asks the holder to end a still-live take
+             when it is destroyed. Separate from the HAL service so neither
+             take can tear down the other. -->
+        <service
+            android:name=".app.JawnUsbAudioService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|connectedDevice"
+            android:stopWithTask="false" />
+
         <!-- Reads the shade for termux-notification-list; connects only after
              the person grants Notification access. -->
         <service

@@ -12,6 +12,8 @@ import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -55,6 +57,9 @@ public class JawnUsbAudio {
 
     private static final String TAG = "JawnUsbAudio";
 
+    /** The process-wide holder; every caller goes through {@link #shared}. */
+    private static volatile JawnUsbAudio shared;
+
     /** The dynamic permission action; the PendingIntent is package-scoped. */
     static final String ACTION_PERMISSION = "com.jawnos.app.USB_TAKE_PERMISSION";
 
@@ -88,7 +93,28 @@ public class JawnUsbAudio {
     private UsbDeviceConnection connection;
     private final List<UsbInterface> claimed = new ArrayList<>();
 
-    public JawnUsbAudio(Context context) {
+    /**
+     * One holder for the whole process. The Studio bridge and the foreground
+     * service that anchors a USB take must act on the same
+     * {@link UsbDeviceConnection}: a second holder could open its own
+     * connection to the same device and fail the forced claim. Construction is
+     * therefore private and every caller reaches the holder through here.
+     */
+    public static JawnUsbAudio shared(Context context) {
+        JawnUsbAudio holder = shared;
+        if (holder == null) {
+            synchronized (JawnUsbAudio.class) {
+                holder = shared;
+                if (holder == null) {
+                    holder = new JawnUsbAudio(context.getApplicationContext());
+                    shared = holder;
+                }
+            }
+        }
+        return holder;
+    }
+
+    private JawnUsbAudio(Context context) {
         this.context = context.getApplicationContext();
     }
 
@@ -193,6 +219,17 @@ public class JawnUsbAudio {
             }
         }
         return fallback;
+    }
+
+    /**
+     * True while a take is being set up or is holding the connection. The
+     * foreground service reads this in {@code onDestroy} to decide whether it
+     * still has a take to end.
+     */
+    public boolean isLive() {
+        synchronized (stateLock) {
+            return active || holding;
+        }
     }
 
     // ------------------------------------------------------------------ start
@@ -730,6 +767,16 @@ public class JawnUsbAudio {
             holding = false;
             active = false;
         }
+        // A setup that never reached the engine leaves nothing for the anchor
+        // to keep alive: drop it so a notification saying "USB take running"
+        // and its wake lock do not outlive the attempt. Re-check liveness just
+        // after, so a take that starts in the same instant keeps its anchor.
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!isLive()) JawnUsbAudioService.stop(context);
+            }
+        }, 2000);
     }
 
     private static String errorJson(String message) {

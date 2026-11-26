@@ -937,6 +937,13 @@ public class JawnWebViewActivity extends Activity {
                   lines.push('underruns_out: '+(parsed.underruns_out||0)
                     +'  dropped_out: '+(parsed.dropped_out||0));
                 }
+                if(parsed.underruns_out_start!==undefined){
+                  lines.push('underruns_out_start: '+parsed.underruns_out_start);
+                }
+                if(parsed.monitor_ms!==undefined)lines.push('monitor_ms: '+parsed.monitor_ms);
+                if(parsed.out_rate&&parsed.out_rate.hz!==undefined){
+                  lines.push('out_rate: '+parsed.out_rate.hz+' Hz');
+                }
                 if(parsed.peak!==undefined)lines.push('peak: '+parsed.peak);
                 if(parsed.take)lines.push('take: '+String(parsed.take));
                 if(parsed.file)lines.push('file: '+String(parsed.file));

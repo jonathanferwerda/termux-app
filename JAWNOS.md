@@ -558,3 +558,28 @@
   GET_CUR return and the raw 3 bytes as hex - `hz` alone was ambiguous.
   `ok` is true when a claim held and any GET_CUR decodes to 48000; the old
   `set_cur` / `get_cur` arrays carry the same rows. Build 1362.
+
+## Deltas round X+22 (the USB take is anchored)
+
+- **The take now has a foreground service and a wake lock.** A direct-USB take
+  keeps a `UsbDeviceConnection` and hands its fd to the Rust engine, but the
+  process could be backgrounded or the screen could sleep and end it.
+  `JawnUsbAudioService` starts foreground with
+  `microphone|connectedDevice` (falling back to `connectedDevice` alone when
+  RECORD_AUDIO is missing, so a USB-only take still anchors), holds a
+  `PARTIAL_WAKE_LOCK`, and offers the same Stop action as the HAL take. It
+  never touches `JawnAudioEngine` itself.
+- **A separate service, not a USB mode** in `JawnAudioService`: the HAL
+  service's `onDestroy` stops the engine and owns the HAL take's fields, so
+  merging the two would make every lifecycle branch mode-dependent. With two
+  services, each take's teardown is isolated; `JawnAudioService.onDestroy`
+  now skips its engine stop when the USB holder is live.
+- **One holder, one connection.** `JawnUsbAudio.shared(Context)` is the
+  process-wide singleton; both `JawnAudioEngineBridge` and the anchor service
+  reach it, so the service can never open a second connection. The open path
+  is unchanged: permission → open → force-claim → alt selection → `usbStart`;
+  stop is still engine-first (`JawnAudioEngine.stop()` then release/close).
+  A setup that fails before holding drops the anchor (re-checked briefly so
+  it cannot race a take that starts in the same instant).
+- **The panel summary** now also shows `underruns_out_start`, `monitor_ms` and
+  `out_rate` from the engine's new report keys; the raw JSON is unchanged.
