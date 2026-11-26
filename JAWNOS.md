@@ -639,3 +639,14 @@
   `monitor_ms`/`in_delivery_ms`/`underruns_out_start`/`out_rate`; the raw JSON
   is unchanged. Engine v0.1.3846 carries the pacing fix; the APK stages that
   `.so`.
+
+## Deltas round X+26 (OUT has a two-URB floor)
+
+- **The monitor label is the true runway.** The engine clamps OUT URBs to 2, so
+  the panel now sends `outUrbs=2`, `outPackets=max(1,round(ms/2))`: 8 ms →
+  in 4×8 / out 2×4, 4 → 8×4 / 2×2, 2 → 8×2 / 2×1. The 1 ms option is gone
+  (the floor is 2 ms); `monitor_ms` in the report is authoritative. `inPackets`
+  stays `ms`, `inUrbs` stays `clamp(round(32/ms),1,8)`.
+- **The summary shows the send side.** `sent` (`out_ms`) and `lag`
+  (`out_lag_ms`) join `monitor_ms`/`in_delivery_ms`/`fill_max`/`fifo`/
+  `underruns_out_start`/`out_rate`; raw JSON unchanged.

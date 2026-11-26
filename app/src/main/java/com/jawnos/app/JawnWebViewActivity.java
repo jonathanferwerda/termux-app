@@ -512,7 +512,7 @@ public class JawnWebViewActivity extends Activity {
               var usbTakeBuffer=document.createElement('select');
               usbTakeBuffer.id='jawn_usb_take_buffer';
               usbTakeBuffer.style.cssText='background:#111;color:#f2f2f2;border:1px solid #666';
-              var bufferValues=[8,4,2,1];
+              var bufferValues=[8,4,2];
               for(var b=0;b<bufferValues.length;b++){
                 var bufferOption=document.createElement('option');
                 bufferOption.value=String(bufferValues[b]);
@@ -1044,6 +1044,8 @@ public class JawnWebViewActivity extends Activity {
                 if(parsed.in_delivery_ms!==undefined)lines.push('in_delivery_ms: '+parsed.in_delivery_ms);
                 if(parsed.monitor_fill_max_ms!==undefined)lines.push('fill_max: '+parsed.monitor_fill_max_ms);
                 if(parsed.high_water_ms!==undefined)lines.push('fifo: '+parsed.high_water_ms);
+                if(parsed.out_ms!==undefined)lines.push('sent: '+parsed.out_ms);
+                if(parsed.out_lag_ms!==undefined)lines.push('lag: '+parsed.out_lag_ms);
                 if(parsed.out_rate&&parsed.out_rate.hz!==undefined){
                   lines.push('out_rate: '+parsed.out_rate.hz+' Hz');
                 }
@@ -1063,15 +1065,18 @@ public class JawnWebViewActivity extends Activity {
                   plan=fixturePlanText;
                   if(!plan){usbTakeLine.textContent='the tone+delay fixture is not in this build';return;}
                 }
-                // Monitor depth: 8 ms -> 4x8, 4 -> 8x4, 2 -> 8x2, 1 -> 8x1
-                // (in URBs x packets); out is one URB of the chosen packets.
+                // Monitor depth: the label is the true runway (out URBs x
+                // packets). 8 ms -> in 4x8 / out 2x4, 4 -> 8x4 / 2x2,
+                // 2 -> 8x2 / 2x1. Two OUT URBs is the engine's floor, so a
+                // 1 ms request is the same 2 ms 2x1 (monitor_ms is authoritative).
                 var ms=parseInt(usbTakeBuffer.value,10);
                 if(!(ms>0))ms=8;
                 var inUrbs=Math.max(1,Math.min(8,Math.round(32/ms)));
+                var outPackets=Math.max(1,Math.round(ms/2));
                 var depth;
                 try{
                   depth=(typeof JawnAudioEngine.usbDepth==='function')
-                    ?JawnAudioEngine.usbDepth(String(inUrbs),String(ms),'1',String(ms))
+                    ?JawnAudioEngine.usbDepth(String(inUrbs),String(ms),'2',String(outPackets))
                     :'{"ok":0,"error":"this app build has no USB depth control"}';
                 }catch(e){depth='{"ok":0,"error":"USB depth failed: "+e}';}
                 var depthParsed=null;
