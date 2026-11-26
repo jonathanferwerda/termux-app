@@ -510,3 +510,31 @@
   *Measure round trip* and a result line show `round_trip_ms` /
   `round_trip_frames`, both granted sharing/performance modes, buffers, xruns
   and both device ids, so the result names what produced it. Build 1359.
+
+## Deltas round X+20 (the direct-USB P0 gate)
+
+- **A Java-only probe asks whether the app can own the UM2.** `JawnUsbProbe`
+  (`probe()` / `status()`) finds vendor `0x08bb` / product `0x2902` (falling
+  back to any attached device with a `USB_CLASS_AUDIO` interface), asks for USB
+  permission through a dynamic, `RECEIVER_NOT_EXPORTED` receiver and a
+  package-scoped `FLAG_IMMUTABLE` `PendingIntent`, then opens the device. It
+  force-claims each AudioControl and AudioStreaming interface
+  (`claimInterface(iface, true)` - the `USBDEVFS_DISCONNECT_CLAIM` that must
+  detach `snd-usb-audio` / the Android USB audio HAL), selects every
+  isochronous alternate setting >= 1 with `setInterface`, and sends the UAC1
+  48000 Hz `SET_CUR` / `GET_CUR` SAMPLING_FREQ_CONTROL to each isochronous
+  endpoint, with the interface recipient as the fallback. Every claim is
+  released and the connection closed in `finally`, so the tablet's own audio
+  returns.
+- **The result is a file the gate can read.** The probe writes
+  `/sdcard/Download/jawnos-usb-probe-<yyyyMMdd-HHmmss>.json` with `ok`, `state`,
+  `device`, `permission`, `interfaces`, `claims`, `alt_sets`, `set_cur`,
+  `get_cur`, `released` and `errors`; `ok` is true only when a force-claim and
+  a 48000 `GET_CUR` both succeeded. It is a claim/alt/control gate, not an
+  audio path: `UsbRequest` cannot queue the UM2's isochronous transfers.
+- **The bridge and the Studio panel carry it.**
+  `JawnAudioEngineBridge.usbProbe()` / `usbProbeStatus()` back a USB probe
+  section below Round trip in the injected panel; the button starts the probe
+  and its result line polls while the permission dialog is up. `androidx.core`
+  moves to 1.13.1 for
+  `ContextCompat.registerReceiver(..., RECEIVER_NOT_EXPORTED)`. Build 1361.

@@ -44,8 +44,12 @@ public class JawnAudioEngineBridge {
     private volatile String roundTripStatus =
             "{\"ok\":false,\"error\":\"no round trip has started\"}";
 
+    /** The P0 USB gate, sharing this bridge's application context. */
+    private final JawnUsbProbe usbGate;
+
     public JawnAudioEngineBridge(Context context) {
         this.context = context.getApplicationContext();
+        this.usbGate = new JawnUsbProbe(this.context);
     }
 
     /** Whether the engine is in this build, plus its backends report. */
@@ -280,6 +284,31 @@ public class JawnAudioEngineBridge {
     public String roundtripStatus() {
         synchronized (roundTripLock) {
             return roundTripStatus;
+        }
+    }
+
+    /**
+     * The P0 USB gate: find the UM2, ask for USB permission, force-claim its
+     * audio interfaces, select the isochronous alternate setting and read back
+     * the UAC1 48000 Hz setting. It returns at once - the started sentence, or
+     * the permission request - and the panel polls {@link #usbProbeStatus()}.
+     */
+    @JavascriptInterface
+    public String usbProbe() {
+        try {
+            return usbGate.probe();
+        } catch (Throwable t) {
+            return error("the USB probe could not start: " + t);
+        }
+    }
+
+    /** The USB probe's last JSON: its state, then the recorded report. */
+    @JavascriptInterface
+    public String usbProbeStatus() {
+        try {
+            return usbGate.status();
+        } catch (Throwable t) {
+            return error("the USB probe could not report: " + t);
         }
     }
 

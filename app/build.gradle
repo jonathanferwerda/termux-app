@@ -6,6 +6,15 @@ repositories {
     flatDir { dirs 'libs' }
 }
 
+configurations.configureEach {
+    // androidx.core 1.9.0 (see the dependency below) brings
+    // com.google.guava:listenablefuture:1.0 through concurrent-futures. That
+    // stub exists for projects without guava; this app ships guava 24.1, whose
+    // ListenableFuture is the same class, and the two jars cannot both be
+    // dexed. Guava's copy wins.
+    exclude group: "com.google.guava", module: "listenablefuture"
+}
+
 // The release key is the app's identity for as long as it exists: a build
 // signed with another key cannot install over this one. The properties file is
 // gitignored and points at the keystore under the tree's .secrets/. Without it
@@ -38,7 +47,12 @@ android {
 
     dependencies {
         implementation "androidx.annotation:annotation:1.3.0"
-        implementation "androidx.core:core:1.6.0"
+        // 1.9.0 is the first core with ContextCompat.registerReceiver(...,
+        // RECEIVER_NOT_EXPORTED), which the USB permission receiver needs on
+        // API 33+. Its concurrent-futures edge drags in the standalone
+        // listenablefuture stub whose ListenableFuture duplicates guava 24.1's;
+        // the project-wide exclude above keeps guava's copy.
+        implementation "androidx.core:core:1.9.0"
         implementation "androidx.drawerlayout:drawerlayout:1.1.1"
         implementation "androidx.preference:preference:1.1.1"
         implementation "androidx.viewpager:viewpager:1.0.0"
@@ -61,8 +75,8 @@ android {
         applicationId "com.jawnos"
         minSdk project.properties.minSdkVersion.toInteger()
         targetSdk project.properties.targetSdkVersion.toInteger()
-        versionCode 1360
-        versionName "0.118.362"
+        versionCode 1361
+        versionName "0.118.363"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)

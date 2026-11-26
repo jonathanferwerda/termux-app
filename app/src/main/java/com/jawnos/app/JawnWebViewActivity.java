@@ -585,6 +585,21 @@ public class JawnWebViewActivity extends Activity {
               rtLine.id='jawn_roundtrip_result';
               rtLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:24vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(rtLine);
+              var usbHeading=document.createElement('div');
+              usbHeading.textContent=T('USB probe');
+              usbHeading.style.cssText='font-weight:bold;margin:8px 0 4px;border-top:1px solid #555;padding-top:6px';
+              panel.appendChild(usbHeading);
+              var usbRow=document.createElement('div');
+              usbRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+              var usbButton=document.createElement('button');
+              usbButton.textContent=T('USB probe');
+              usbButton.style.cssText='flex:1;padding:4px 6px';
+              usbRow.appendChild(usbButton);
+              panel.appendChild(usbRow);
+              var usbLine=document.createElement('pre');
+              usbLine.id='jawn_usb_probe_result';
+              usbLine.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0 0 6px;max-height:28vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
+              panel.appendChild(usbLine);
               var line=document.createElement('pre');
               line.id='jawn_native_status';
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
@@ -800,10 +815,80 @@ public class JawnWebViewActivity extends Activity {
                 },250);
               };
 
+              var usbTimer=null;
+              var describeUsb=function(raw){
+                var parsed=null;
+                try{parsed=JSON.parse(raw);}catch(e){}
+                if(!parsed)return String(raw);
+                var lines=['state: '+(parsed.state||'?')+'  ok: '+(parsed.ok===true||parsed.ok===1)];
+                if(parsed.device){
+                  lines.push('device: '+parsed.device.vendorId+'/'+parsed.device.productId
+                    +' '+String(parsed.device.deviceName||''));
+                }
+                var rows=parsed.claims||[];
+                for(var i=0;i<rows.length;i++){
+                  lines.push('claim '+rows[i].id+': '+(rows[i].ok?'ok':'FAILED')
+                    +(rows[i].error?(' - '+rows[i].error):''));
+                }
+                var alts=parsed.alt_sets||[];
+                for(var j=0;j<alts.length;j++){
+                  lines.push('alt '+alts[j].id+'/'+alts[j].alt+': '+(alts[j].ok?'ok':'FAILED'));
+                }
+                var gets=parsed.get_cur||[];
+                for(var k=0;k<gets.length;k++){
+                  var where=(gets[k].endpoint!==undefined)
+                    ?('endpoint '+gets[k].endpoint):('interface '+gets[k].interface);
+                  lines.push('get_cur '+where+': return '+gets[k].return+' hz '+gets[k].hz);
+                }
+                if(parsed.message)lines.push(String(parsed.message));
+                if(parsed.error)lines.push('error: '+String(parsed.error));
+                if(parsed.file)lines.push('file: '+String(parsed.file));
+                lines.push('');
+                lines.push(String(raw));
+                return lines.join(NL);
+              };
+              var usbWaiting=function(parsed){
+                return !!(parsed&&(parsed.state==='detecting'||parsed.state==='requesting'
+                  ||parsed.state==='running'));
+              };
+              usbButton.onclick=function(){
+                if(usbTimer)return;
+                var reply;
+                try{
+                  reply=(typeof JawnAudioEngine.usbProbe==='function')
+                    ?JawnAudioEngine.usbProbe()
+                    :'{"ok":false,"state":"unsupported","error":"this app build has no USB probe"}';
+                }catch(e){reply='{"ok":false,"state":"error","error":"USB probe failed: '+e+'"}';}
+                usbLine.textContent=describeUsb(reply);
+                var parsed=null;
+                try{parsed=JSON.parse(reply);}catch(e){}
+                if(!usbWaiting(parsed))return;
+                usbButton.disabled=true;
+                var waits=0;
+                usbTimer=setInterval(function(){
+                  waits++;
+                  var raw;
+                  try{raw=JawnAudioEngine.usbProbeStatus();}
+                  catch(e){raw='{"ok":false,"error":"USB probe status failed"}';}
+                  usbLine.textContent=describeUsb(raw);
+                  var now=null;
+                  try{now=JSON.parse(raw);}catch(e){}
+                  var still=usbWaiting(now);
+                  if(still&&waits<240)return;
+                  if(usbTimer){clearInterval(usbTimer);usbTimer=null;}
+                  usbButton.disabled=false;
+                  if(still){
+                    usbLine.textContent=usbLine.textContent+NL
+                      +'still waiting - answer the USB permission dialog, then tap USB probe again';
+                  }
+                },500);
+              };
+
               window.addEventListener('pagehide',function(){
                 if(observer){try{observer.disconnect();}catch(e){}}
                 if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
                 if(roundTripTimer){clearInterval(roundTripTimer);roundTripTimer=null;}
+                if(usbTimer){clearInterval(usbTimer);usbTimer=null;}
               });
             }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}
             })();
