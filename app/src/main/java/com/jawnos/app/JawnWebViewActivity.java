@@ -1010,10 +1010,8 @@ public class JawnWebViewActivity extends Activity {
                 if(timer&&!stopping){try{JawnAudioEngine.stop();}catch(e){}}
                 if(roundTripTimer){clearInterval(roundTripTimer);roundTripTimer=null;}
                 if(usbTimer){clearInterval(usbTimer);usbTimer=null;}
-                if(usbTakeTimer){
-                  clearInterval(usbTakeTimer);usbTakeTimer=null;
-                  try{JawnAudioEngine.usbTakeStop();}catch(e){}
-                }
+                // The foreground service anchors the USB take; only the poll stops here, not the take.
+                if(usbTakeTimer){clearInterval(usbTakeTimer);usbTakeTimer=null;}
               });
             }catch(e){try{console.warn('JawnAudioEngine panel: '+e);}catch(ignore){}}
             })();
