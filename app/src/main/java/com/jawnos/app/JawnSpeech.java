@@ -2,9 +2,12 @@ package com.jawnos.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -27,20 +30,24 @@ import java.util.function.Consumer;
  * 'no-speech', 'busy', 'language', 'unavailable') over
  * window.jawnSpeechState('error', reason).
  *
- * Only this app's own WebView is given the bridge.
+ * The constructor takes a Context so both an activity's WebView (the dock and
+ * the Guide) and the input method - a Service, with no activity to show a
+ * permission dialog - can be given the bridge. Only this app's own WebViews
+ * are given it.
  */
 public final class JawnSpeech implements RecognitionListener {
 
     private static final int REQ_AUDIO = 7011;
 
-    private final Activity activity;
+    private final Context context;
     private final Consumer<String> js;
+    private final Handler ui = new Handler(Looper.getMainLooper());
     private SpeechRecognizer recognizer;
     private boolean wantListen = false;
     private String lang = "en-US";
 
-    public JawnSpeech(Activity activity, Consumer<String> js) {
-        this.activity = activity;
+    public JawnSpeech(Context context, Consumer<String> js) {
+        this.context = context;
         this.js = js;
     }
 
@@ -62,23 +69,31 @@ public final class JawnSpeech implements RecognitionListener {
 
     @JavascriptInterface
     public boolean available() {
-        return SpeechRecognizer.isRecognitionAvailable(activity);
+        return SpeechRecognizer.isRecognitionAvailable(context);
     }
 
     @JavascriptInterface
     public void start(String language) {
         if (language != null && !language.isEmpty()) lang = language;
-        activity.runOnUiThread(() -> {
+        ui.post(() -> {
             try {
-                if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
+                if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                     wantListen = false;
                     state("error", "unavailable");
                     return;
                 }
-                if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                         != PackageManager.PERMISSION_GRANTED) {
+                    if (!(context instanceof Activity)) {
+                        // A Service cannot raise the system dialog, so it
+                        // reports the missing grant; the page's caller falls
+                        // back to its own recorder.
+                        wantListen = false;
+                        state("error", "permission");
+                        return;
+                    }
                     wantListen = true;
-                    activity.requestPermissions(
+                    ((Activity) context).requestPermissions(
                         new String[] { Manifest.permission.RECORD_AUDIO }, REQ_AUDIO);
                     return;
                 }
@@ -94,7 +109,7 @@ public final class JawnSpeech implements RecognitionListener {
     @JavascriptInterface
     public void stop() {
         wantListen = false;
-        activity.runOnUiThread(() -> {
+        ui.post(() -> {
             try {
                 if (recognizer != null) recognizer.stopListening();
             } catch (Throwable t) { /* the listener is going away */ }
@@ -132,7 +147,7 @@ public final class JawnSpeech implements RecognitionListener {
                 try { recognizer.destroy(); } catch (Throwable ignored) { }
                 recognizer = null;
             }
-            recognizer = SpeechRecognizer.createSpeechRecognizer(activity);
+            recognizer = SpeechRecognizer.createSpeechRecognizer(context);
             recognizer.setRecognitionListener(this);
             Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);

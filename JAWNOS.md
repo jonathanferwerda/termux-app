@@ -650,3 +650,21 @@
 - **The summary shows the send side.** `sent` (`out_ms`) and `lag`
   (`out_lag_ms`) join `monitor_ms`/`in_delivery_ms`/`fill_max`/`fifo`/
   `underruns_out_start`/`out_rate`; raw JSON unchanged.
+
+## Deltas round X+27 (the keyboard's own recogniser)
+
+- **The input method is given `window.JawnSpeech`.** `JawnImeService` adds the
+  same bridge the dock and the Guide have, at the `JawnIme` interface
+  (`onCreateInputView`, before the page parses), and releases it in `onDestroy`
+  beside the WebView. The manager already renders `data-transcribe-service` on
+  the keyboard page, so the attribute that once resolved to no bridge now
+  reaches the phone's own recogniser; the bridge's state and result callbacks
+  feed the page's existing dispatcher.
+- **`JawnSpeech` works from a Service.** It takes a `Context` instead of an
+  `Activity`: work is posted through a main-thread
+  `Handler(Looper.getMainLooper())` rather than `Activity.runOnUiThread`, and
+  the recognizer is created with that Context. The activity path's permission
+  ask is unchanged; a Service - which cannot raise the system dialog - reports
+  `window.jawnSpeechState('error','permission')` at start so the page falls back
+  to its recorder. `onPermissionResult` still answers the activity's ask.
+  Build 1372.

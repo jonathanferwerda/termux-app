@@ -56,6 +56,7 @@ public class JawnImeService extends InputMethodService {
 
     private WebView web;
     private FrameLayout frame;
+    private JawnSpeech speech;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean numeric;
     private String context = "";
@@ -125,6 +126,15 @@ public class JawnImeService extends InputMethodService {
             ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight(), Gravity.TOP));
 
         view.addJavascriptInterface(new Bridge(), "JawnIme");
+        // The phone's own recogniser, the same window.JawnSpeech the dock and
+        // the Guide get. The manager already renders data-transcribe-service on
+        // this page; with the bridge present its microphone can use the
+        // phone's recogniser instead of recording and posting. An input method
+        // is a Service: the bridge reports a missing grant rather than asking,
+        // because there is no activity to raise the dialog in. This view is
+        // created on the main thread, and runJs stays the one JS path.
+        if (speech == null) { speech = new JawnSpeech(this, this::runJs); }
+        view.addJavascriptInterface(speech, "JawnSpeech");
         // The page is the manager's own, so its microphone asks for the same
         // capture the dock uses. Only the manager's own origin may have it.
         view.setWebChromeClient(new android.webkit.WebChromeClient() {
@@ -262,6 +272,10 @@ public class JawnImeService extends InputMethodService {
     @Override
     public void onDestroy() {
         ui.removeCallbacks(loadTimeout);
+        if (speech != null) {
+            speech.destroy();
+            speech = null;
+        }
         if (web != null) {
             web.destroy();
             web = null;
@@ -376,6 +390,16 @@ public class JawnImeService extends InputMethodService {
             + JSONObject.quote(before == null ? "" : before.toString()) + ","
             + JSONObject.quote(after == null ? "" : after.toString()) + ");";
         web.evaluateJavascript(js, null);
+    }
+
+    /** Run a script in the page on the main thread (the bridges post through here). */
+    private void runJs(final String js) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (web != null) { web.evaluateJavascript(js, null); }
+            }
+        });
     }
 
     private int dp(int value) {
