@@ -484,8 +484,15 @@ public class JawnWebViewActivity extends Activity {
               panel.id='jawn_native_panel';
               panel.style.cssText='position:fixed;right:10px;bottom:10px;z-index:2147483647;width:300px;max-height:62vh;overflow:auto;background:rgba(20,20,20,0.95);color:#f2f2f2;border:1px solid #666;border-radius:8px;padding:8px 10px;font:12px/1.35 monospace;box-shadow:0 4px 18px rgba(0,0,0,0.55)';
               var heading=document.createElement('div');
-              heading.textContent=T('Studio audio');
-              heading.style.cssText='font-weight:bold;font-size:13px;margin-bottom:6px';
+              heading.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;font-size:13px;margin-bottom:6px;cursor:pointer';
+              var headingText=document.createElement('span');
+              headingText.textContent=T('Studio audio');
+              var headingToggle=document.createElement('span');
+              headingToggle.id='jawn_native_panel_toggle';
+              headingToggle.textContent='+';
+              headingToggle.style.cssText='padding:0 6px';
+              heading.appendChild(headingText);
+              heading.appendChild(headingToggle);
               panel.appendChild(heading);
               var usbTakeHeading=document.createElement('div');
               usbTakeHeading.textContent=T('USB take (direct)');
@@ -663,6 +670,43 @@ public class JawnWebViewActivity extends Activity {
               line.id='jawn_native_status';
               line.style.cssText='white-space:pre-wrap;word-break:break-word;margin:0;max-height:32vh;overflow:auto;font:11px/1.3 monospace;color:#cfcfcf';
               panel.appendChild(line);
+              // Everything after the heading is the panel's body, so the whole
+              // block folds into a bar along the bottom edge. The controls are
+              // moved, not rebuilt: every id the pollers read still exists.
+              var panelBody=document.createElement('div');
+              panelBody.id='jawn_native_panel_body';
+              while(heading.nextSibling){panelBody.appendChild(heading.nextSibling);}
+              panel.appendChild(panelBody);
+              var panelBase='z-index:2147483647;background:rgba(20,20,20,0.95);color:#f2f2f2;border:1px solid #666;border-radius:8px;font:12px/1.35 monospace;box-shadow:0 4px 18px rgba(0,0,0,0.55)';
+              var panelMinified=true;
+              try{panelMinified=window.localStorage.getItem('jawn_native_panel_min')!=='0';}catch(e){}
+              var applyPanelMode=function(){
+                if(panelMinified){
+                  // A small round dot in the corner, not a bar across the screen:
+                  // it leaves the whole width free and one tap brings the tests back.
+                  panel.style.cssText='position:fixed;right:10px;bottom:10px;width:44px;height:44px;'+panelBase+';padding:0;border-radius:50%;overflow:hidden';
+                  panelBody.style.display='none';
+                  headingText.style.display='none';
+                  heading.style.cssText='display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin:0;cursor:pointer';
+                  headingToggle.textContent='+';
+                  headingToggle.style.cssText='padding:0;font-size:20px;line-height:1';
+                  headingToggle.setAttribute('aria-label',T('Show the audio test panel'));
+                }else{
+                  panel.style.cssText='position:fixed;right:10px;bottom:10px;width:300px;max-height:62vh;overflow:auto;'+panelBase+';padding:8px 10px';
+                  panelBody.style.display='';
+                  headingText.style.display='';
+                  heading.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:bold;font-size:13px;margin-bottom:6px;cursor:pointer';
+                  headingToggle.textContent='-';
+                  headingToggle.style.cssText='padding:0 6px';
+                  headingToggle.setAttribute('aria-label',T('Collapse the audio test panel'));
+                }
+              };
+              heading.onclick=function(){
+                panelMinified=!panelMinified;
+                try{window.localStorage.setItem('jawn_native_panel_min',panelMinified?'1':'0');}catch(e){}
+                applyPanelMode();
+              };
+              applyPanelMode();
               document.body.appendChild(panel);
               var defaultOption=function(value,label){
                 var option=document.createElement('option');
