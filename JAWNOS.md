@@ -668,3 +668,24 @@
   `window.jawnSpeechState('error','permission')` at start so the page falls back
   to its recorder. `onPermissionResult` still answers the activity's ask.
   Build 1372.
+
+## Deltas round X+28 (native TTS to a file)
+
+- **The device bridge can synthesise speech to a WAV file.** `DeviceService`
+  adds `speech.synth` beside `speech.speak` (`text`, an absolute `.wav`
+  `path`, optional `language`/`rate`/`pitch`/`voice`): it shares the one
+  TextToSpeech engine through `ensureTts`, calls `synthesizeToFile` under a
+  unique utterance id and waits on an `UtteranceProgressListener` with a 15 s
+  `CountDownLatch` bound - engine error, a stop and the timeout each throw,
+  and a failed synthesis deletes its partial file. The path is accepted only
+  inside `getFilesDir()`, canonicalised, so `/data/data/...` and
+  `/data/user/0/...` agree; any other absolute path or a `..` traversal is
+  refused and parent directories are created. Success answers
+  `{ok:true, path, bytes}` for the caller to read and transcode. It is
+  deliberately not gated on Silence: it writes bytes rather than making a
+  sound, and the speech plays on the requesting device (the watch's homebase
+  phone cannot run piper). A `synthLock` serialises concurrent syntheses,
+  `ttsLock` is held only to mutate the engine and submit - never while
+  waiting, so `silenceNow()` cannot block behind a synthesis - and
+  `speech()` now takes the same lock around its mutations and `speak`, so
+  speak and synth cannot race. Build 1375.

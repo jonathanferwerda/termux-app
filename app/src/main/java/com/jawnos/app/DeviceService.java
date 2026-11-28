@@ -59,6 +59,7 @@ import android.os.Bundle;
 import android.os.PowerManager;
 import android.service.notification.StatusBarNotification;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
@@ -560,6 +561,10 @@ public class DeviceService extends Service {
             else if ("speech.speak".equals(method)) {
                 reply.put("ok", true);
                 reply.put("result", speech(request.optJSONObject("args")));
+            }
+            else if ("speech.synth".equals(method)) {
+                reply.put("ok", true);
+                reply.put("result", speechSynth(request.optJSONObject("args")));
             }
             else if ("telephony.dial".equals(method)) {
                 reply.put("ok", true);
@@ -1428,26 +1433,130 @@ public class DeviceService extends Service {
         if (text.isEmpty()) throw new IllegalArgumentException("no text");
         if (!ensureTts()) throw new IllegalStateException("tts engine unavailable");
 
-        if (args.has("rate")) tts.setSpeechRate((float) args.optDouble("rate", 1.0));
-        if (args.has("pitch")) tts.setPitch((float) args.optDouble("pitch", 1.0));
-        String language = args.optString("language", "");
-        if (!language.isEmpty()) {
-            tts.setLanguage(new Locale(language));
-        }
-        String voice = args.optString("voice", "");
-        if (!voice.isEmpty() && tts.getVoices() != null) {
-            for (Voice candidate : tts.getVoices()) {
-                if (candidate.getName().equals(voice)) { tts.setVoice(candidate); break; }
+        synchronized (ttsLock) {
+            if (args.has("rate")) tts.setSpeechRate((float) args.optDouble("rate", 1.0));
+            if (args.has("pitch")) tts.setPitch((float) args.optDouble("pitch", 1.0));
+            String language = args.optString("language", "");
+            if (!language.isEmpty()) {
+                tts.setLanguage(new Locale(language));
             }
-        }
+            String voice = args.optString("voice", "");
+            if (!voice.isEmpty() && tts.getVoices() != null) {
+                for (Voice candidate : tts.getVoices()) {
+                    if (candidate.getName().equals(voice)) { tts.setVoice(candidate); break; }
+                }
+            }
 
-        int mode = flag(args, "flush", true) ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
-        int rc = tts.speak(text, mode, null, "jawn-" + System.currentTimeMillis());
-        if (rc != TextToSpeech.SUCCESS) throw new IllegalStateException("speak failed: " + rc);
+            int mode = flag(args, "flush", true) ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+            int rc = tts.speak(text, mode, null, "jawn-" + System.currentTimeMillis());
+            if (rc != TextToSpeech.SUCCESS) throw new IllegalStateException("speak failed: " + rc);
+        }
 
         JSONObject result = new JSONObject();
         result.put("spoken", true);
         result.put("engine", tts.getDefaultEngine() == null ? "" : tts.getDefaultEngine());
+        return result;
+    }
+
+    /** Serialises file syntheses so two callers cannot fight over the engine's listener. */
+    private final Object synthLock = new Object();
+
+    /**
+     * Native TTS to a WAV file, for callers that cannot run piper - the
+     * watch's homebase is a phone, so its reply speech is synthesised here
+     * and transcoded by the caller. The path is accepted only inside
+     * getFilesDir() (canonicalised, so /data/data and /data/user/0 agree);
+     * any other absolute path or a ".." traversal is refused, and parent
+     * directories are created. Deliberately not gated on JawnSilence: it
+     * writes a file rather than making a sound. ttsLock is held only to
+     * mutate the engine and submit, never while waiting, so silenceNow()
+     * cannot block behind a synthesis.
+     */
+    private JSONObject speechSynth(JSONObject args) throws Exception {
+        String text = args == null ? "" : args.optString("text", "");
+        if (text.isEmpty()) throw new IllegalArgumentException("no text");
+        String rawPath = args == null ? "" : args.optString("path", "");
+        if (rawPath.isEmpty()) throw new IllegalArgumentException("no path");
+
+        String rootPath = getFilesDir().getCanonicalPath();
+        File target = new File(rawPath);
+        String targetPath = target.getCanonicalPath();
+        if (!targetPath.startsWith(rootPath + File.separator)) {
+            throw new SecurityException("path must be inside " + rootPath + ", got: " + rawPath);
+        }
+        if (!targetPath.toLowerCase(Locale.ROOT).endsWith(".wav")) {
+            throw new IllegalArgumentException("path must end in .wav, got: " + rawPath);
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
+            throw new IllegalStateException("cannot create directory: " + parent.getPath());
+        }
+
+        synchronized (synthLock) {
+            final CountDownLatch done = new CountDownLatch(1);
+            final String[] failure = new String[1];
+            final String utteranceId = "jawn-synth-" + System.currentTimeMillis() + "-" + System.nanoTime();
+            synchronized (ttsLock) {
+                if (!ensureTts()) throw new IllegalStateException("tts engine unavailable");
+                if (args.has("rate")) tts.setSpeechRate((float) args.optDouble("rate", 1.0));
+                if (args.has("pitch")) tts.setPitch((float) args.optDouble("pitch", 1.0));
+                String language = args.optString("language", "");
+                if (!language.isEmpty()) tts.setLanguage(new Locale(language));
+                String voice = args.optString("voice", "");
+                if (!voice.isEmpty() && tts.getVoices() != null) {
+                    for (Voice candidate : tts.getVoices()) {
+                        if (candidate.getName().equals(voice)) { tts.setVoice(candidate); break; }
+                    }
+                }
+                tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) { }
+                    @Override public void onDone(String id) {
+                        if (utteranceId.equals(id)) done.countDown();
+                    }
+                    @Override public void onError(String id) {
+                        onError(id, TextToSpeech.ERROR_SYNTHESIS);
+                    }
+                    @Override public void onError(String id, int errorCode) {
+                        if (utteranceId.equals(id)) {
+                            failure[0] = "tts synthesis failed, error " + errorCode;
+                            done.countDown();
+                        }
+                    }
+                    @Override public void onStop(String id, boolean interrupted) {
+                        if (utteranceId.equals(id)) {
+                            failure[0] = "tts stopped before the file was finished";
+                            done.countDown();
+                        }
+                    }
+                });
+                int rc = tts.synthesizeToFile(text, null, target, utteranceId);
+                if (rc != TextToSpeech.SUCCESS) {
+                    throw new IllegalStateException("synthesizeToFile refused the request: " + rc);
+                }
+            }
+
+            if (!done.await(15, TimeUnit.SECONDS)) {
+                synchronized (ttsLock) {
+                    if (tts != null) { try { tts.stop(); } catch (Throwable ignored) { } }
+                }
+                if (target.exists()) target.delete();
+                throw new IllegalStateException("tts synth timed out after 15s");
+            }
+            if (failure[0] != null) {
+                if (target.exists()) target.delete();
+                throw new IllegalStateException(failure[0]);
+            }
+        }
+
+        long bytes = target.length();
+        if (bytes <= 0) {
+            if (target.exists()) target.delete();
+            throw new IllegalStateException("tts wrote no audio to " + targetPath);
+        }
+        JSONObject result = new JSONObject();
+        result.put("ok", true);
+        result.put("path", targetPath);
+        result.put("bytes", bytes);
         return result;
     }
 
