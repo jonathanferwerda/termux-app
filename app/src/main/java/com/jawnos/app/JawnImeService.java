@@ -471,6 +471,25 @@ public class JawnImeService extends InputMethodService {
             deleteBack(1);
         }
 
+        /**
+         * Interim words from the phone's recogniser, in the composing region:
+         * each guess replaces the last, and the final phrase's commitText
+         * replaces the region, so nothing is written into the app's field
+         * until the person has finished speaking.
+         */
+        @JavascriptInterface
+        public void composing(String text) {
+            final String value = text == null ? "" : text;
+            ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    InputConnection ic = getCurrentInputConnection();
+                    if (ic != null) { ic.setComposingText(value, 1); }
+                    syncText();
+                }
+            });
+        }
+
         @JavascriptInterface
         public void deleteBack(final int count) {
             ui.post(new Runnable() {
@@ -486,11 +505,13 @@ public class JawnImeService extends InputMethodService {
                         // one UTF-16 unit from a surrogate pair (an emoji, or a
                         // letter outside the BMP) leaves half of it behind.
                         int delete = Math.max(1, count);
-                        CharSequence before = ic.getTextBeforeCursor(2, 0);
-                        if (before != null && before.length() == 2
-                                && Character.isHighSurrogate(before.charAt(0))
-                                && Character.isLowSurrogate(before.charAt(1))) {
-                            delete = 2;
+                        if (delete == 1) {
+                            CharSequence before = ic.getTextBeforeCursor(2, 0);
+                            if (before != null && before.length() == 2
+                                    && Character.isHighSurrogate(before.charAt(0))
+                                    && Character.isLowSurrogate(before.charAt(1))) {
+                                delete = 2;
+                            }
                         }
                         ic.deleteSurroundingText(delete, 0);
                     }
